@@ -69,6 +69,30 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 - Build with a simple temporary login first, and make SSO easy to switch on per company later.
 - Vendors: separate external login (e.g. emailed sign-in link), restricted to their own project and their own scores only.
 
+## Build status
+
+Legend:
+- A = real and stored in Convex with server-side checks
+- B = working on screen only
+- C = not built
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| Multi-company app model | B | Real schema and access checks exist for company membership, but app login/auth is still a temporary shell. |
+| Company admin / scorer / vendor roles | B | Roles are modelled in Convex and enforced by membership checks, but real auth provider wiring is still pending. |
+| Project separation | B | Project membership is validated server-side for access, but full project management flows are not yet connected. |
+| Requirement import | B | Import logic exists in code, but not yet wired to a protected backend flow. |
+| Requirement priority validation | B | Helper validation exists and is used in the app, but not yet fully wired across every backend mutation. |
+| Vendor scoring and score validation | C | Demo logic exists, but no real Convex mutation is in place yet. |
+| Vendor self-view restrictions | C | Not enforced on the server. |
+| Company score and scorer-view isolation | C | Not enforced on the server. |
+| Dashboard totals and weighted score math | B | Utility logic exists and is tested, but not yet connected to real backend data. |
+| Deadline and notification logic | B | Helper logic exists, but not tied to persisted data. |
+| SSO and login flows | C | Temporary demo login only. |
+| Vendor emailed-link login | C | Not built. |
+| Server-side access checks | B | Company and project access checks are now implemented and verified in Convex tests. |
+| Real data persistence in Convex | B | Core company/project membership data is persisted and queried in Convex, but the full app remains partly demo-backed. |
+
 ## Technology
 - Next.js, Convex, GitHub and Vercel (I have used these before).
 
