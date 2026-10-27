@@ -9,7 +9,11 @@
  */
 
 import type * as access from "../access.js";
+import type * as dashboard from "../dashboard.js";
+import type * as deadlines from "../deadlines.js";
+import type * as projectViews from "../projectViews.js";
 import type * as requirements from "../requirements.js";
+import type * as scores from "../scores.js";
 import type * as security from "../security.js";
 import type * as vendorAuth from "../vendorAuth.js";
 
@@ -21,7 +25,11 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   access: typeof access;
+  dashboard: typeof dashboard;
+  deadlines: typeof deadlines;
+  projectViews: typeof projectViews;
   requirements: typeof requirements;
+  scores: typeof scores;
   security: typeof security;
   vendorAuth: typeof vendorAuth;
 }>;
