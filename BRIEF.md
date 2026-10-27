@@ -1,7 +1,7 @@
 # IT Vendor Selection App – Brief
 
 ## Purpose
-A web app for project managers (PMs) and business analysts (BAs) to run IT vendor selections: load requirements, have vendors and internal scorers score them, and compare vendors on a dashboard.
+This is a multi-company app for IT vendor selection. Each company has its own users, projects, vendors, requirements, scores, and settings. Within a company, the project manager can run multiple vendor selection projects and score many vendors per project. Project managers (PMs) and business analysts (BAs) can load requirements, have vendors and internal scorers score them, and compare vendors on a dashboard.
 
 ## Roles
 - Project owner (PM or BA): creates projects; manages vendors, scorers, requirements, priorities and deadlines.

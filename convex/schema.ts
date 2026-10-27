@@ -30,6 +30,17 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("active")),
   }).index("by_company", ["companyId"]),
 
+  projectMembers: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    userId: v.string(),
+    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    displayName: v.string(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_project_user", ["projectId", "userId"])
+    .index("by_company_project", ["companyId", "projectId"]),
+
   requirements: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
@@ -41,4 +52,26 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_company_project", ["companyId", "projectId"])
     .index("by_company_requirement", ["companyId", "requirementId"]),
+
+  scores: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    vendorUserId: v.string(),
+    requirementId: v.string(),
+    score: v.union(v.literal(0), v.literal(1)),
+    comment: v.optional(v.string()),
+    enteredBy: v.string(),
+    enteredAt: v.number(),
+  }).index("by_project_vendor", ["projectId", "vendorUserId"])
+    .index("by_project_requirement", ["projectId", "requirementId"]),
+
+  projectViews: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    scorerUserId: v.string(),
+    vendorUserId: v.string(),
+    viewText: v.string(),
+    createdAt: v.number(),
+  }).index("by_project_vendor", ["projectId", "vendorUserId"])
+    .index("by_project_scorer", ["projectId", "scorerUserId"]),
 });

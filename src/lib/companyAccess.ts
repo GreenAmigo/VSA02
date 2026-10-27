@@ -1,5 +1,6 @@
 export type CompanyRole = "company-admin" | "company-scorer" | "vendor";
 export type MembershipStatus = "active" | "pending";
+export type SsoProvider = "temporary-login" | "microsoft-entra" | "google-workspace" | "saml" | "oidc";
 
 export type SessionUser = {
   userId: string;
@@ -12,7 +13,7 @@ export type Company = {
   id: string;
   name: string;
   adminUserId: string;
-  ssoProvider: string | null;
+  ssoProvider: SsoProvider | null;
   createdAt: string;
 };
 
@@ -26,22 +27,61 @@ export type CompanyMembership = {
   status: MembershipStatus;
 };
 
+export type VendorProjectAssignment = {
+  id: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  status: "invited" | "active" | "submitted";
+};
+
+export type ScorerAssignment = {
+  id: string;
+  companyId: string;
+  projectId: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  role: "individual" | "department";
+  departmentName?: string;
+  status: "not-started" | "in-progress" | "submitted";
+};
+
 export const demoCompanies: Company[] = [
   {
     id: "cmp-acme",
     name: "Acme Health",
     adminUserId: "u-company-admin",
-    ssoProvider: "temporary-login",
+    ssoProvider: "microsoft-entra",
     createdAt: "2026-10-01",
   },
   {
     id: "cmp-beta",
     name: "Beta Logistics",
     adminUserId: "u-beta-admin",
-    ssoProvider: null,
+    ssoProvider: "google-workspace",
     createdAt: "2026-10-06",
   },
 ];
+
+export const ssoProviderOptions: { value: SsoProvider; label: string; description: string }[] = [
+  { value: "temporary-login", label: "Temporary login", description: "Good for local demos and early rollout." },
+  { value: "microsoft-entra", label: "Microsoft Entra ID", description: "Best for Microsoft 365 shops and enterprise staff." },
+  { value: "google-workspace", label: "Google Workspace", description: "Good fit for Google-based company accounts." },
+  { value: "saml", label: "SAML", description: "For custom enterprise IdPs and legacy setups." },
+  { value: "oidc", label: "OIDC", description: "Flexible standard for modern identity providers." },
+];
+
+export function getSsoProviderLabel(provider: SsoProvider | null): string {
+  if (!provider) {
+    return "SSO not configured";
+  }
+
+  const match = ssoProviderOptions.find((option) => option.value === provider);
+  return match?.label ?? provider;
+}
 
 export const demoMembers: CompanyMembership[] = [
   {
@@ -137,4 +177,67 @@ export function buildCompanyMembership(
     role,
     status: "pending",
   };
+}
+
+export function buildVendorAssignment(
+  companyId: string,
+  projectId: string,
+  displayName: string,
+  email: string,
+): VendorProjectAssignment {
+  return {
+    id: `vendor-${companyId}-${projectId}-${displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    companyId,
+    projectId,
+    userId: `vendor-${displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    displayName,
+    email,
+    status: "invited",
+  };
+}
+
+export function buildScorerAssignment(
+  companyId: string,
+  projectId: string,
+  displayName: string,
+  email: string,
+  role: "individual" | "department",
+  departmentName?: string,
+): ScorerAssignment {
+  return {
+    id: `scorer-${companyId}-${projectId}-${displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    companyId,
+    projectId,
+    userId: `scorer-${displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    displayName,
+    email,
+    role,
+    departmentName,
+    status: "not-started",
+  };
+}
+
+export function assertProjectAccess(
+  user: SessionUser | null,
+  companyId: string,
+  projectId: string,
+  allowedProjectUsers: string[] = [],
+): void {
+  if (!user) {
+    throw new Error("Not signed in");
+  }
+
+  if (user.companyId !== companyId) {
+    throw new Error("Project access denied: wrong company");
+  }
+
+  if (user.role === "vendor") {
+    if (!allowedProjectUsers.includes(user.userId)) {
+      throw new Error("This vendor is not assigned to the selected project");
+    }
+  }
+
+  if (projectId.trim().length === 0) {
+    throw new Error("Project not selected");
+  }
 }
