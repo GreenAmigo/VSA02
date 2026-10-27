@@ -1,69 +1,178 @@
-import Image from "next/image";
+"use client";
+
+import { useMemo, useState } from "react";
+import {
+  assertCompanyAccess,
+  canAccessCompany,
+  demoCompanies,
+  type SessionUser,
+} from "@/lib/companyAccess";
+
+const temporaryUsers: SessionUser[] = [
+  {
+    userId: "u-company-admin",
+    companyId: "cmp-acme",
+    role: "company-admin",
+    displayName: "Priya Singh",
+  },
+  {
+    userId: "u-scorer",
+    companyId: "cmp-acme",
+    role: "company-scorer",
+    displayName: "Sam Lee",
+  },
+  {
+    userId: "u-vendor",
+    companyId: "cmp-beta",
+    role: "vendor",
+    displayName: "Northwind Labs",
+  },
+];
 
 export default function Home() {
+  const [selectedCompanyId, setSelectedCompanyId] = useState("cmp-acme");
+  const [session, setSession] = useState<SessionUser | null>(temporaryUsers[0]);
+
+  const selectedCompany = useMemo(
+    () => demoCompanies.find((company) => company.id === selectedCompanyId) ?? demoCompanies[0],
+    [selectedCompanyId],
+  );
+
+  const accessAllowed = canAccessCompany(session, selectedCompanyId);
+
+  const handleDemoLogin = (user: SessionUser) => {
+    setSession(user);
+    setSelectedCompanyId(user.companyId);
+  };
+
+  const companyCheck = (() => {
+    try {
+      assertCompanyAccess(session, selectedCompanyId);
+      return "Access granted";
+    } catch (error) {
+      return error instanceof Error ? error.message : "Access denied";
+    }
+  })();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        <header className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-slate-950/40">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-300">
+            Phase 1 • Company and access foundation
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+            Vendor Selection App foundation
+          </h1>
+          <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-300">
+            This phase creates the core separation model for multiple companies, company admins,
+            temporary login roles, and server-side access rules that prevent cross-company data
+            leakage.
+          </p>
+        </header>
+
+        <section className="grid gap-6 md:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h2 className="mb-4 text-xl font-semibold text-white">Temporary login</h2>
+            <div className="space-y-3">
+              {temporaryUsers.map((user) => (
+                <button
+                  key={user.userId}
+                  type="button"
+                  onClick={() => handleDemoLogin(user)}
+                  className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                    session?.userId === user.userId
+                      ? "border-sky-400 bg-sky-500/10 text-sky-100"
+                      : "border-slate-700 bg-slate-950/50 text-slate-200 hover:border-slate-500"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{user.displayName}</div>
+                      <div className="text-xs uppercase tracking-[0.15em] text-slate-400">
+                        {user.role}
+                      </div>
+                    </div>
+                    <span className="rounded-full border border-slate-600 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-300">
+                      {demoCompanies.find((company) => company.id === user.companyId)?.name}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h2 className="mb-4 text-xl font-semibold text-white">Company selection</h2>
+            <div className="space-y-3">
+              {demoCompanies.map((company) => (
+                <button
+                  key={company.id}
+                  type="button"
+                  onClick={() => setSelectedCompanyId(company.id)}
+                  className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                    selectedCompany.id === company.id
+                      ? "border-emerald-400 bg-emerald-500/10 text-emerald-100"
+                      : "border-slate-700 bg-slate-950/50 text-slate-200 hover:border-slate-500"
+                  }`}
+                >
+                  <div className="font-medium">{company.name}</div>
+                  <div className="text-xs uppercase tracking-[0.15em] text-slate-400">
+                    {company.id}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8 grid gap-6 md:grid-cols-3">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Current user</p>
+            <h3 className="mt-3 text-2xl font-semibold text-white">{session?.displayName ?? "Not signed in"}</h3>
+            <p className="mt-2 text-sm text-slate-300">Role: {session?.role ?? "none"}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Selected company</p>
+            <h3 className="mt-3 text-2xl font-semibold text-white">{selectedCompany.name}</h3>
+            <p className="mt-2 text-sm text-slate-300">ID: {selectedCompany.id}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Server check</p>
+            <h3 className={`mt-3 text-2xl font-semibold ${accessAllowed ? "text-emerald-300" : "text-rose-300"}`}>
+              {accessAllowed ? "Allowed" : "Blocked"}
+            </h3>
+            <p className="mt-2 text-sm text-slate-300">{companyCheck}</p>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <h2 className="mb-4 text-xl font-semibold text-white">Phase 1 architecture</h2>
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              { title: "Companies", text: "Each company has its own admin, settings, projects, and users." },
+              { title: "Members", text: "Every user belongs to a company and one role: admin, scorer, or vendor." },
+              { title: "Projects", text: "Projects are scoped to a single company and cannot be shared across organisations." },
+              { title: "Requirements", text: "Requirement records are company-scoped and protected by server-side guards." },
+            ].map((item) => (
+              <div key={item.title} className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-sky-300">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{item.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <h2 className="mb-4 text-xl font-semibold text-white">Server-side rules for this phase</h2>
+          <ul className="space-y-3 text-sm leading-6 text-slate-300">
+            <li>• A user must be a member of the selected company before they can access that company’s data.</li>
+            <li>• The server must reject attempts to read or write records outside the user’s company.</li>
+            <li>• Company admins can manage users and settings; vendors only access their own project and scores.</li>
+            <li>• Temporary login is intentionally simple so SSO can be switched in later without reworking the model.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
   );
 }
