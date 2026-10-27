@@ -65,6 +65,26 @@ export const seedScenario = mutation({
 
     await ctx.db.insert("companyMembers", {
       companyId: companyBId,
+      userId: "beta-scorer",
+      email: "scorer@beta.example",
+      displayName: "Beta Scorer",
+      role: "company-scorer",
+      isActive: true,
+      createdAt: Date.now(),
+    });
+
+    await ctx.db.insert("projectMembers", {
+      companyId: companyBId,
+      projectId: projectBId,
+      userId: "beta-scorer",
+      role: "company-scorer",
+      displayName: "Beta Scorer",
+      isActive: true,
+      createdAt: Date.now(),
+    });
+
+    await ctx.db.insert("companyMembers", {
+      companyId: companyBId,
       userId: "northwind-vendor",
       email: "vendor@northwind.example",
       displayName: "Northwind Labs",

@@ -83,7 +83,7 @@ Legend:
 | Project separation | B | Project membership is validated server-side for access, but full project management flows are not yet connected. |
 | Requirement import | B | Import logic is now protected by a preview-and-confirm Convex flow, but the screen still uses demo state around the form. |
 | Requirement priority validation | B | Helper validation exists and is enforced server-side during import, with strong priority checks on saved rows. |
-| Vendor scoring and score validation | C | Demo logic exists, but no real Convex mutation is in place yet. |
+| Vendor scoring and score validation | B | Real Convex score submission and score history are in place, with server-side validation and audit fields for who entered each score and when. |
 | Vendor self-view restrictions | C | Not enforced on the server. |
 | Company score and scorer-view isolation | C | Not enforced on the server. |
 | Dashboard totals and weighted score math | B | Utility logic exists and is tested, but not yet connected to real backend data. |
