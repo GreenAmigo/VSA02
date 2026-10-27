@@ -84,8 +84,8 @@ Legend:
 | Requirement import | B | Import logic is now protected by a preview-and-confirm Convex flow, but the screen still uses demo state around the form. |
 | Requirement priority validation | B | Helper validation exists and is enforced server-side during import, with strong priority checks on saved rows. |
 | Vendor scoring and score validation | B | Real Convex score submission and score history are in place, with server-side validation and audit fields for who entered each score and when. |
-| Vendor self-view restrictions | C | Not enforced on the server. |
-| Company score and scorer-view isolation | C | Not enforced on the server. |
+| Vendor self-view restrictions | B | Vendor project views are now filtered server-side to only their own rows, while scorer/admin rows remain writable and visible as needed. |
+| Company score and scorer-view isolation | B | Score-view writes are enforced by project membership and role checks; vendor access is isolated to their own project-view data. |
 | Dashboard totals and weighted score math | B | Utility logic exists and is tested, but not yet connected to real backend data. |
 | Deadline and notification logic | B | Helper logic exists, but not tied to persisted data. |
 | SSO and login flows | C | Temporary demo login only. |
