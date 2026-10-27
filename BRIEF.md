@@ -81,8 +81,8 @@ Legend:
 | Multi-company app model | B | Real schema and access checks exist for company membership, but app login/auth is still a temporary shell. |
 | Company admin / scorer / vendor roles | B | Roles are modelled in Convex and enforced by membership checks, but real auth provider wiring is still pending. |
 | Project separation | B | Project membership is validated server-side for access, but full project management flows are not yet connected. |
-| Requirement import | B | Import logic exists in code, but not yet wired to a protected backend flow. |
-| Requirement priority validation | B | Helper validation exists and is used in the app, but not yet fully wired across every backend mutation. |
+| Requirement import | B | Import logic is now protected by a preview-and-confirm Convex flow, but the screen still uses demo state around the form. |
+| Requirement priority validation | B | Helper validation exists and is enforced server-side during import, with strong priority checks on saved rows. |
 | Vendor scoring and score validation | C | Demo logic exists, but no real Convex mutation is in place yet. |
 | Vendor self-view restrictions | C | Not enforced on the server. |
 | Company score and scorer-view isolation | C | Not enforced on the server. |
