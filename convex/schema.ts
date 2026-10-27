@@ -41,6 +41,18 @@ export default defineSchema({
   }).index("by_project_user", ["projectId", "userId"])
     .index("by_company_project", ["companyId", "projectId"]),
 
+  vendorLoginTokens: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    userId: v.string(),
+    email: v.string(),
+    token: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+  }).index("by_token", ["token"])
+    .index("by_project_user", ["projectId", "userId"]),
+
   requirements: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),

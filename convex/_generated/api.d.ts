@@ -10,6 +10,7 @@
 
 import type * as access from "../access.js";
 import type * as security from "../security.js";
+import type * as vendorAuth from "../vendorAuth.js";
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   access: typeof access;
   security: typeof security;
+  vendorAuth: typeof vendorAuth;
 }>;
 
 /**

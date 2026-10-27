@@ -89,7 +89,7 @@ Legend:
 | Dashboard totals and weighted score math | B | Utility logic exists and is tested, but not yet connected to real backend data. |
 | Deadline and notification logic | B | Helper logic exists, but not tied to persisted data. |
 | SSO and login flows | C | Temporary demo login only. |
-| Vendor emailed-link login | C | Not built. |
+| Vendor emailed-link login | B | Project-scoped vendor magic links are now created and validated in Convex, with rejection for wrong-project or reused tokens. |
 | Server-side access checks | B | Company and project access checks are now implemented and verified in Convex tests. |
 | Real data persistence in Convex | B | Core company/project membership data is persisted and queried in Convex, but the full app remains partly demo-backed. |
 
