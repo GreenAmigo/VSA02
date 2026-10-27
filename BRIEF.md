@@ -86,7 +86,7 @@ Legend:
 | Vendor scoring and score validation | B | Real Convex score submission and score history are in place, with server-side validation and audit fields for who entered each score and when. |
 | Vendor self-view restrictions | B | Vendor project views are now filtered server-side to only their own rows, while scorer/admin rows remain writable and visible as needed. |
 | Company score and scorer-view isolation | B | Score-view writes are enforced by project membership and role checks; vendor access is isolated to their own project-view data. |
-| Dashboard totals and weighted score math | B | Utility logic exists and is tested, but not yet connected to real backend data. |
+| Dashboard totals and weighted score math | B | Real project dashboard aggregation is now in Convex and validated against a seeded project, but the screen is still not fully wired to it. |
 | Deadline and notification logic | B | Helper logic exists, but not tied to persisted data. |
 | SSO and login flows | C | Temporary demo login only. |
 | Vendor emailed-link login | B | Project-scoped vendor magic links are now created and validated in Convex, with rejection for wrong-project or reused tokens. |
