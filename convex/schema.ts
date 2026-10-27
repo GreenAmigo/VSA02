@@ -86,4 +86,18 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_scorer", ["projectId", "scorerUserId"]),
+
+  projectDeadlines: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    targetType: v.union(v.literal("vendor"), v.literal("scorer")),
+    targetUserId: v.string(),
+    dueAt: v.number(),
+    status: v.union(v.literal("not-started"), v.literal("in-progress"), v.literal("submitted")),
+    submittedAt: v.optional(v.number()),
+    lastReminderAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project_target", ["projectId", "targetType", "targetUserId"])
+    .index("by_project_user", ["projectId", "targetUserId"]),
 });
