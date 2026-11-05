@@ -914,7 +914,6 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const [scoreValue, setScoreValue] = useState<0 | 1>(1);
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const scoreDraftError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
 
   if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
@@ -949,6 +948,7 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const activeRequirements = requirements.filter((row) => row.status !== "withdrawn");
   const vendorMembers = members.filter((member) => member.role === "vendor");
   const selected = activeRequirements.find((row) => row.requirementId === selectedRequirementId) ?? activeRequirements[0];
+  const scoreDraftError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
   const selectedScore = (scoreHistory ?? []).find(
     (row) => row.requirementId === selected?.requirementId && row.vendorUserId === selectedVendorId,
   );
