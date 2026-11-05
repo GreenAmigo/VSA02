@@ -200,6 +200,14 @@ export function buildRequirementImportPlan(
   };
 }
 
+export function getRequirementImportValidationError(rows: RequirementRecord[]): string | null {
+  if (!rows.length) {
+    return "Upload a spreadsheet with at least one valid requirement row.";
+  }
+
+  return null;
+}
+
 export function buildProjectId(companyId: string, name: string): string {
   const slug = name
     .trim()

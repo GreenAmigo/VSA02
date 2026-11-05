@@ -7,7 +7,12 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
-import { parseRequirementFile, type RequirementRecord } from "@/lib/projectRequirements";
+import { getProjectDraftError, normalizeProjectName } from "@/lib/projectDraft";
+import {
+  getRequirementImportValidationError,
+  parseRequirementFile,
+  type RequirementRecord,
+} from "@/lib/projectRequirements";
 
 type CompanyRecord = {
   _id: string;
@@ -299,10 +304,6 @@ function ProjectListPage() {
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
-  if (isProtectedLoading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
-  }
-
   useEffect(() => {
     if (!companies) {
       return;
@@ -312,6 +313,10 @@ function ProjectListPage() {
       setSelectedCompanyId(companies[0]?._id ?? null);
     }
   }, [companies, selectedCompanyId]);
+
+  if (isProtectedLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
+  }
 
   const projects = useQuery(
     api.access.listProjectsForCompany,
@@ -400,13 +405,11 @@ function CreateProjectPage() {
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
-
-  if (isProtectedLoading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
-  }
   const [name, setName] = useState("Payroll Platform Evaluation");
   const router = useRouter();
   const createProject = useMutation(api.admin.createProject);
+  const draftName = normalizeProjectName(name);
+  const validationError = getProjectDraftError(selectedCompanyId, name);
 
   useEffect(() => {
     if (!companies) {
@@ -417,6 +420,10 @@ function CreateProjectPage() {
       setSelectedCompanyId(companies[0]._id);
     }
   }, [companies, selectedCompanyId]);
+
+  if (isProtectedLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
+  }
 
   if (companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading company list…</div>;
@@ -435,11 +442,12 @@ function CreateProjectPage() {
   }
 
   const handleCreateProject = async () => {
-    if (!selectedCompanyId) {
+    const error = getProjectDraftError(selectedCompanyId, name);
+    if (error) {
       return;
     }
 
-    const result = await createProject({ companyId: selectedCompanyId as any, name });
+    const result = await createProject({ companyId: selectedCompanyId as any, name: draftName });
     router.push(`/projects/${result.projectId}`);
   };
 
@@ -478,6 +486,9 @@ function CreateProjectPage() {
                   onChange={(event) => setName(event.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
                 />
+                {validationError ? (
+                  <span className="mt-2 block text-sm text-amber-300">{validationError}</span>
+                ) : null}
               </label>
             </div>
 
@@ -485,7 +496,11 @@ function CreateProjectPage() {
               <Link href="/projects" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-200 hover:border-slate-500">
                 Cancel
               </Link>
-              <button onClick={handleCreateProject} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+              <button
+                onClick={handleCreateProject}
+                disabled={Boolean(validationError)}
+                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
                 Save project
               </button>
             </div>
@@ -589,13 +604,16 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
   const previewImport = useMutation(api.requirements.previewRequirementImport);
+  const applyImport = useMutation(api.requirements.applyRequirementImport);
+  const [preview, setPreview] = useState<any>(null);
+  const [rows, setRows] = useState<RequirementRecord[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
 
   if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
-  const applyImport = useMutation(api.requirements.applyRequirementImport);
-  const [preview, setPreview] = useState<any>(null);
-  const [rows, setRows] = useState<RequirementRecord[]>([]);
+
+  const importValidationError = getRequirementImportValidationError(rows);
 
   if (!project || !requirements) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading project requirements…</div>;
@@ -608,7 +626,14 @@ function RequirementsPage({ projectId }: { projectId: string }) {
     }
 
     const parsedRows = await parseRequirementFile(file);
+    const validationError = getRequirementImportValidationError(parsedRows);
+    setImportError(validationError);
     setRows(parsedRows);
+    setPreview(null);
+
+    if (validationError) {
+      return;
+    }
 
     const previewResult = await previewImport({
       projectId: projectId as any,
@@ -619,7 +644,9 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   };
 
   const handleApply = async () => {
-    if (!rows.length) {
+    const validationError = getRequirementImportValidationError(rows);
+    if (validationError) {
+      setImportError(validationError);
       return;
     }
 
@@ -631,6 +658,7 @@ function RequirementsPage({ projectId }: { projectId: string }) {
 
     setPreview({ summary: result.summary, count: result.count });
     setRows([]);
+    setImportError(null);
   };
 
   return (
@@ -655,6 +683,12 @@ function RequirementsPage({ projectId }: { projectId: string }) {
               <p className="mt-2 text-sm text-slate-400">Supports CSV and Excel files; rows are matched by requirement ID.</p>
             </div>
 
+            {importError ? (
+              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                {importError}
+              </div>
+            ) : null}
+
             {preview ? (
               <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -664,7 +698,11 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                       {preview.summary?.added ?? 0} added • {preview.summary?.updated ?? 0} updated • {preview.summary?.withdrawn ?? 0} withdrawn
                     </p>
                   </div>
-                  <button onClick={handleApply} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400">
+                  <button
+                    onClick={handleApply}
+                    disabled={Boolean(importValidationError)}
+                    className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                  >
                     Confirm import
                   </button>
                 </div>
@@ -709,15 +747,15 @@ function PeoplePage({ projectId }: { projectId: string }) {
   const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
   const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
   const addVendor = useMutation(api.admin.addProjectVendor);
-
-  if (isProtectedLoading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
-  }
   const addScorer = useMutation(api.admin.addProjectScorer);
   const [displayName, setDisplayName] = useState("Alex Turner");
   const [email, setEmail] = useState("alex@northwind.example");
   const [personType, setPersonType] = useState<"vendor" | "scorer">("vendor");
   const [scorerRole, setScorerRole] = useState<"individual" | "department">("individual");
+
+  if (isProtectedLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
+  }
 
   if (!project || !members) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading people…</div>;
@@ -849,16 +887,16 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
   const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
   const scoreHistory = useQuery(api.scores.listScoreHistory, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ScoreHistoryRow[] | undefined;
-
-  if (isProtectedLoading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
-  }
   const submitScore = useMutation(api.scores.submitScore);
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [scoreValue, setScoreValue] = useState<0 | 1>(1);
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (isProtectedLoading) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
+  }
 
   useEffect(() => {
     if (!requirements || requirements.length === 0) {
