@@ -8,11 +8,13 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
 import { getProjectDraftError, normalizeProjectName } from "@/lib/projectDraft";
+import { getPersonInviteDraftError } from "@/lib/projectPeople";
 import {
   getRequirementImportValidationError,
   parseRequirementFile,
   type RequirementRecord,
 } from "@/lib/projectRequirements";
+import { getScoringDraftError } from "@/lib/projectScoring";
 
 type CompanyRecord = {
   _id: string;
@@ -752,6 +754,8 @@ function PeoplePage({ projectId }: { projectId: string }) {
   const [email, setEmail] = useState("alex@northwind.example");
   const [personType, setPersonType] = useState<"vendor" | "scorer">("vendor");
   const [scorerRole, setScorerRole] = useState<"individual" | "department">("individual");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const inviteValidationError = getPersonInviteDraftError(displayName, email);
 
   if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
@@ -762,23 +766,31 @@ function PeoplePage({ projectId }: { projectId: string }) {
   }
 
   const handleInvite = async () => {
+    const validationError = getPersonInviteDraftError(displayName, email);
+    if (validationError) {
+      setInviteError(validationError);
+      return;
+    }
+
     if (!project) {
       return;
     }
+
+    setInviteError(null);
 
     if (personType === "vendor") {
       await addVendor({
         companyId: project.companyId as any,
         projectId: projectId as any,
-        displayName,
-        email,
+        displayName: displayName.trim(),
+        email: email.trim(),
       });
     } else {
       await addScorer({
         companyId: project.companyId as any,
         projectId: projectId as any,
-        displayName,
-        email,
+        displayName: displayName.trim(),
+        email: email.trim(),
         role: scorerRole,
         departmentName: scorerRole === "department" ? "Operations" : undefined,
       });
@@ -866,7 +878,16 @@ function PeoplePage({ projectId }: { projectId: string }) {
                       <option value="department">Department</option>
                     </select>
                   ) : null}
-                  <button onClick={handleInvite} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                  {inviteError ? (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                      {inviteError}
+                    </div>
+                  ) : null}
+                  <button
+                    onClick={handleInvite}
+                    disabled={Boolean(inviteValidationError)}
+                    className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                  >
                     Send invite
                   </button>
                 </div>
@@ -893,6 +914,7 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const [scoreValue, setScoreValue] = useState<0 | 1>(1);
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const scoreDraftError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
 
   if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
@@ -932,6 +954,11 @@ function ScoringPage({ projectId }: { projectId: string }) {
   );
 
   const handleSubmit = async () => {
+    const validationError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
+    if (validationError) {
+      return;
+    }
+
     if (!selected || !selectedVendorId) {
       return;
     }
@@ -1035,16 +1062,19 @@ function ScoringPage({ projectId }: { projectId: string }) {
               <textarea
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
-                placeholder="Optional score comment"
+                placeholder={scoreValue === 0 ? "Add a reason for the 0 score" : "Optional score comment"}
                 className="min-h-28 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
               />
+              {scoreDraftError ? (
+                <p className="mt-2 text-sm text-amber-300">{scoreDraftError}</p>
+              ) : null}
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting || !selected || !selectedVendorId}
+                disabled={isSubmitting || Boolean(scoreDraftError)}
                 className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-violet-400"
               >
                 {isSubmitting ? "Submitting…" : "Submit score"}
