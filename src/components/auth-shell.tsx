@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { AuthKitProvider, useAccessToken, useAuth } from "@workos-inc/authkit-nextjs/components";
 import { ConvexProviderWithAuth, ConvexReactClient, useMutation } from "convex/react";
 
@@ -15,10 +15,8 @@ function useConvexAuth() {
   const { user, loading } = auth;
   const { getAccessToken, refresh } = useAccessToken();
 
-  return {
-    isLoading: loading,
-    isAuthenticated: !loading && !!user,
-    fetchAccessToken: async ({ forceRefreshToken }: { forceRefreshToken?: boolean } = {}) => {
+  const fetchAccessToken = useCallback(
+    async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
       if (!user) {
         return null;
       }
@@ -26,7 +24,17 @@ function useConvexAuth() {
       const token = forceRefreshToken ? await refresh() : await getAccessToken();
       return token ?? null;
     },
-  };
+    [user, getAccessToken, refresh],
+  );
+
+  return useMemo(
+    () => ({
+      isLoading: loading,
+      isAuthenticated: !loading && !!user,
+      fetchAccessToken,
+    }),
+    [loading, user, fetchAccessToken],
+  );
 }
 
 function PreviewUserSync() {
