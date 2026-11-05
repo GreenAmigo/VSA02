@@ -5,6 +5,7 @@ export const seedScenario = mutation({
   args: {
     companyAName: v.string(),
     companyBName: v.string(),
+    companyCName: v.optional(v.string()),
     projectAName: v.string(),
     projectBName: v.string(),
   },
@@ -21,6 +22,16 @@ export const seedScenario = mutation({
     const companyBId = await ctx.db.insert("companies", {
       name: args.companyBName,
       slug: "beta-logistics",
+      createdBy: "seed",
+      createdAt: Date.now(),
+      isActive: true,
+      ssoProvider: "temporary-login",
+    });
+
+    const companyCName = args.companyCName ?? "Maxwell Knight Ltd";
+    const companyCId = await ctx.db.insert("companies", {
+      name: companyCName,
+      slug: "maxwell-knight-ltd",
       createdBy: "seed",
       createdAt: Date.now(),
       isActive: true,
@@ -46,8 +57,8 @@ export const seedScenario = mutation({
     await ctx.db.insert("companyMembers", {
       companyId: companyAId,
       userId: "acme-admin",
-      email: "admin@acme.example",
-      displayName: "Acme Admin",
+      email: "acme-admin@acme.example",
+      displayName: "ACME Admin",
       role: "company-admin",
       isActive: true,
       createdAt: Date.now(),
@@ -58,7 +69,7 @@ export const seedScenario = mutation({
       projectId: projectAId,
       userId: "acme-admin",
       role: "company-admin",
-      displayName: "Acme Admin",
+      displayName: "ACME Admin",
       isActive: true,
       createdAt: Date.now(),
     });
@@ -103,7 +114,17 @@ export const seedScenario = mutation({
       createdAt: Date.now(),
     });
 
-    return { companyAId, companyBId, projectAId, projectBId };
+    await ctx.db.insert("companyMembers", {
+      companyId: companyCId,
+      userId: "frazer-knight-admin",
+      email: "frazerknight@hotmail.com",
+      displayName: "Frazer Knight",
+      role: "company-admin",
+      isActive: true,
+      createdAt: Date.now(),
+    });
+
+    return { companyAId, companyBId, companyCId, projectAId, projectBId };
   },
 });
 
@@ -191,5 +212,62 @@ export const getProject = query({
     }
 
     return project;
+  },
+});
+
+export const listProjectsForCompany = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const membership = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!membership) {
+      throw new Error("Company access denied");
+    }
+
+    return await ctx.db
+      .query("projects")
+      .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+      .collect();
+  },
+});
+
+export const listProjectRequirements = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const project = await ctx.db.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const membership = await ctx.db
+      .query("projectMembers")
+      .filter((q) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!membership || membership.companyId !== project.companyId) {
+      throw new Error("Project access denied");
+    }
+
+    return await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .collect();
   },
 });

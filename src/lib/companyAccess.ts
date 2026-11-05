@@ -122,6 +122,50 @@ export const demoMembers: CompanyMembership[] = [
   },
 ];
 
+export type CompanyAdminSummary = {
+  companyId: string;
+  companyName: string;
+  activeMembers: number;
+  pendingMembers: number;
+  activeProjects: number;
+  totalVendors: number;
+  totalScorers: number;
+  openRequirements: number;
+  needsAttention: number;
+};
+
+export function buildCompanyAdminSummary(
+  company: Company | null,
+  members: CompanyMembership[],
+  projects: Array<{ id: string; companyId: string; name: string; createdAt: string }>,
+  vendors: Array<{ companyId: string; projectId: string; [key: string]: unknown }>,
+  scorers: Array<{ companyId: string; projectId: string; [key: string]: unknown }>,
+  requirements: Array<{ status?: string; [key: string]: unknown }>,
+  deadlines: Array<{ status?: string; [key: string]: unknown }> = [],
+): CompanyAdminSummary {
+  const companyId = company?.id ?? "";
+
+  const activeMembers = members.filter((member) => member.companyId === companyId && member.status === "active").length;
+  const pendingMembers = members.filter((member) => member.companyId === companyId && member.status === "pending").length;
+  const activeProjects = projects.filter((project) => project.companyId === companyId).length;
+  const totalVendors = vendors.filter((vendor) => vendor.companyId === companyId).length;
+  const totalScorers = scorers.filter((scorer) => scorer.companyId === companyId).length;
+  const openRequirements = requirements.filter((requirement) => requirement.status !== "withdrawn").length;
+  const needsAttention = deadlines.filter((deadline) => deadline.status !== "submitted").length;
+
+  return {
+    companyId,
+    companyName: company?.name ?? "Unknown company",
+    activeMembers,
+    pendingMembers,
+    activeProjects,
+    totalVendors,
+    totalScorers,
+    openRequirements,
+    needsAttention,
+  };
+}
+
 export function canAccessCompany(user: SessionUser | null, companyId: string): boolean {
   if (!user) {
     return false;

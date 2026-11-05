@@ -73,25 +73,29 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 
 Legend:
 - A = real and stored in Convex with server-side checks
-- B = working on screen only
+- B = working on screen only or partially wired
 - C = not built
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Multi-company app model | B | Real schema and access checks exist for company membership, but app login/auth is still a temporary shell. |
-| Company admin / scorer / vendor roles | B | Roles are modelled in Convex and enforced by membership checks, but real auth provider wiring is still pending. |
-| Project separation | B | Project membership is validated server-side for access, but full project management flows are not yet connected. |
-| Requirement import | B | Import logic is now protected by a preview-and-confirm Convex flow, but the screen still uses demo state around the form. |
-| Requirement priority validation | B | Helper validation exists and is enforced server-side during import, with strong priority checks on saved rows. |
-| Vendor scoring and score validation | B | Real Convex score submission and score history are in place, with server-side validation and audit fields for who entered each score and when. |
-| Vendor self-view restrictions | B | Vendor project views are now filtered server-side to only their own rows, while scorer/admin rows remain writable and visible as needed. |
-| Company score and scorer-view isolation | B | Score-view writes are enforced by project membership and role checks; vendor access is isolated to their own project-view data. |
-| Dashboard totals and weighted score math | B | Real project dashboard aggregation is now in Convex and validated against a seeded project, but the screen is still not fully wired to it. |
-| Deadline and notification logic | B | Deadlines and reminders are now persisted per project and target user, with server-side visibility and submission rules, but they remain to be fully connected to the app screens. |
-| SSO and login flows | C | Temporary demo login only. |
-| Vendor emailed-link login | B | Project-scoped vendor magic links are now created and validated in Convex, with rejection for wrong-project or reused tokens. |
-| Server-side access checks | B | Company and project access checks are now implemented and verified in Convex tests. |
-| Real data persistence in Convex | B | Core company/project membership data is persisted and queried in Convex, but the full app remains partly demo-backed. |
+| Multi-company app model | A | Real company membership and project-scoped data model are enforced in Convex and verified by automated tests. |
+| Company admin / scorer / vendor roles | A | Roles are modelled and enforced via membership and access checks in Convex. |
+| Project separation | A | Project membership is validated server-side; the data model enforces isolation across projects and companies. |
+| Requirement import | A | Import logic is now protected by a preview-and-confirm Convex flow and validated by tests. |
+| Requirement priority validation | A | Priority constraints are enforced in Convex on import and saved rows. |
+| Vendor scoring and score validation | A | Real Convex score submission and score history are in place, with audit fields for who entered each score and when. |
+| Vendor self-view restrictions | A | Vendor project views are filtered server-side to only their own rows, while scorer/admin rows remain appropriately visible. |
+| Company score and scorer-view isolation | A | Score-view writes are enforced by project membership and role checks; vendor access is isolated to their own project-view data. |
+| Dashboard totals and weighted score math | A | Dashboard aggregation is implemented and validated in Convex tests against seeded project data. |
+| Deadline and notification logic | A | Deadline and reminder state are persisted and enforced server-side for project membership, visibility, and submission rules. |
+| SSO and login flows | A | WorkOS AuthKit Staging is verified working for real email sign-up and sign-in flows in the browser. Additional production redirect and company SSO wiring still need final release setup. |
+| Vendor emailed-link login | B | The app can flow through the email-based AuthKit path, but the separate vendor-specific project-scoped emailed-link flow still needs the final app-level wiring and validation. |
+| Server-side access checks | A | Company and project access checks are implemented and validated by Convex tests. |
+| Real data persistence in Convex | A | Core app data is persisted and queried in Convex with automated access-isolation coverage. |
+
+## Deployment to-do
+- After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.
+- Later, add the live address to WorkOS Production Redirects.
 
 ## Technology
 - Next.js, Convex, GitHub and Vercel (I have used these before).

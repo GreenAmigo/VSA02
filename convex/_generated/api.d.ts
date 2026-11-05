@@ -9,6 +9,7 @@
  */
 
 import type * as access from "../access.js";
+import type * as admin from "../admin.js";
 import type * as dashboard from "../dashboard.js";
 import type * as deadlines from "../deadlines.js";
 import type * as projectViews from "../projectViews.js";
@@ -25,6 +26,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   access: typeof access;
+  admin: typeof admin;
   dashboard: typeof dashboard;
   deadlines: typeof deadlines;
   projectViews: typeof projectViews;

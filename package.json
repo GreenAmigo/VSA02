@@ -9,17 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@workos-inc/authkit-nextjs": "^4.6.2",
     "convex": "^1.48.0",
     "next": "16.4.3",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "convex-test": "^0.0.65",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
