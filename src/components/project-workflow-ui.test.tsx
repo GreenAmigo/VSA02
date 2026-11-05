@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getProjectDraftError, normalizeProjectName } from "../lib/projectDraft";
 import { getPersonInviteDraftError } from "../lib/projectPeople";
 import { getRequirementImportValidationError } from "../lib/projectRequirements";
-import { getScoringDraftError } from "../lib/projectScoring";
+import { getScoringDraftError, getScoringModeMeta } from "../lib/projectScoring";
 
 describe("project creation screen", () => {
   it("normalizes the project name before it is saved", () => {
@@ -37,5 +37,16 @@ describe("project creation screen", () => {
     expect(getScoringDraftError("vendor-1", null, "Needs review", 0)).toBe("Select a requirement before submitting a score.");
     expect(getScoringDraftError("vendor-1", "REQ-1", "", 0)).toBe("Add a note when scoring a requirement as not met.");
     expect(getScoringDraftError("vendor-1", "REQ-1", "Works as expected", 1)).toBeNull();
+  });
+
+  it("describes the scorer mode separately from vendor self-scoring", () => {
+    expect(getScoringModeMeta("company-scorer")).toEqual({
+      heading: "Scorer scoring",
+      detail: "Score each vendor against the current requirement.",
+    });
+    expect(getScoringModeMeta("vendor")).toEqual({
+      heading: "Vendor self-score",
+      detail: "Submit your own evaluation for the current requirement.",
+    });
   });
 });

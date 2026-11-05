@@ -14,7 +14,7 @@ import {
   parseRequirementFile,
   type RequirementRecord,
 } from "@/lib/projectRequirements";
-import { getScoringDraftError } from "@/lib/projectScoring";
+import { getScoringDraftError, getScoringModeMeta } from "@/lib/projectScoring";
 
 type CompanyRecord = {
   _id: string;
@@ -913,6 +913,9 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
   const scoreHistory = useQuery(api.scores.listScoreHistory, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ScoreHistoryRow[] | undefined;
   const submitScore = useMutation(api.scores.submitScore);
+  const currentMember = members?.find((member) => member.userId === user?.id || member.userId === user?.email || member.displayName === user?.name) ?? null;
+  const scoringRole = currentMember?.role ?? "vendor";
+  const scoringMode = getScoringModeMeta(scoringRole as "vendor" | "company-scorer" | "company-admin");
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [scoreValue, setScoreValue] = useState<0 | 1>(1);
@@ -940,10 +943,11 @@ function ScoringPage({ projectId }: { projectId: string }) {
     }
 
     const vendors = members.filter((member) => member.role === "vendor");
-    if (!selectedVendorId && vendors[0]) {
-      setSelectedVendorId(vendors[0].userId);
+    const preferredVendor = currentMember?.role === "vendor" ? currentMember.userId : vendors[0]?.userId ?? null;
+    if (!selectedVendorId && preferredVendor) {
+      setSelectedVendorId(preferredVendor);
     }
-  }, [members, selectedVendorId]);
+  }, [members, selectedVendorId, currentMember]);
 
   if (!project || !requirements || !members || !scoreHistory) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading scoring view…</div>;
@@ -952,6 +956,7 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const activeRequirements = requirements.filter((row) => row.status !== "withdrawn");
   const vendorMembers = members.filter((member) => member.role === "vendor");
   const selected = activeRequirements.find((row) => row.requirementId === selectedRequirementId) ?? activeRequirements[0];
+  const isScorerMode = scoringRole === "company-scorer" || scoringRole === "company-admin";
   const scoreDraftError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
   const selectedScore = (scoreHistory ?? []).find(
     (row) => row.requirementId === selected?.requirementId && row.vendorUserId === selectedVendorId,
@@ -987,10 +992,18 @@ function ScoringPage({ projectId }: { projectId: string }) {
       <AppSidebar projectId={projectId} projectName={project.name} />
 
       <main className="flex-1">
-        <TopBar title="Scoring review" />
+        <TopBar title={isScorerMode ? "Scorer scorecard" : "Vendor scoring"} />
 
         <div className="grid gap-6 p-6 xl:grid-cols-[0.8fr_1.2fr]">
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Scoring mode</p>
+              <h2 className="mt-2 text-lg font-semibold text-white">{scoringMode.heading}</h2>
+              <p className="mt-1 text-sm text-slate-300">{scoringMode.detail}</p>
+              {currentMember ? (
+                <p className="mt-2 text-xs uppercase tracking-[0.16em] text-sky-300">Logged in as {currentMember.displayName}</p>
+              ) : null}
+            </div>
             <h2 className="text-lg font-semibold text-white">Requirement list</h2>
             <div className="mt-4 space-y-3">
               {activeRequirements.map((row) => (
@@ -1024,7 +1037,7 @@ function ScoringPage({ projectId }: { projectId: string }) {
 
             <div className="mt-6 grid gap-3 md:grid-cols-2">
               <label className="text-sm text-slate-300">
-                <span className="mb-2 block">Vendor</span>
+                <span className="mb-2 block">{isScorerMode ? "Vendor being scored" : "Vendor"}</span>
                 <select
                   value={selectedVendorId ?? ""}
                   onChange={(event) => setSelectedVendorId(event.target.value)}

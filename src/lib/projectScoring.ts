@@ -1,3 +1,19 @@
+export function getScoringModeMeta(
+  role: "vendor" | "company-scorer" | "company-admin" | null,
+): { heading: string; detail: string } {
+  if (role === "vendor") {
+    return {
+      heading: "Vendor self-score",
+      detail: "Submit your own evaluation for the current requirement.",
+    };
+  }
+
+  return {
+    heading: "Scorer scoring",
+    detail: "Score each vendor against the current requirement.",
+  };
+}
+
 export function getScoringDraftError(
   vendorUserId: string | null,
   requirementId: string | null,
