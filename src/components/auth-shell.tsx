@@ -1,12 +1,30 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { AuthKitProvider, useAuth } from "@workos-inc/authkit-nextjs/components";
-import { ConvexProvider, ConvexReactClient, useMutation } from "convex/react";
+import { AuthKitProvider, useAccessToken, useAuth } from "@workos-inc/authkit-nextjs/components";
+import { ConvexProviderWithAuth, ConvexReactClient, useMutation } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://dependable-jaguar-503.eu-west-1.convex.cloud");
+
+function useConvexAuth() {
+  const { user, loading } = useAuth();
+  const { getAccessToken } = useAccessToken();
+
+  return {
+    isLoading: loading,
+    isAuthenticated: !loading && !!user,
+    fetchAccessToken: async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
+      if (!user) {
+        return null;
+      }
+
+      const token = await getAccessToken();
+      return token ?? null;
+    },
+  };
+}
 
 function PreviewUserSync() {
   const { user, loading } = useAuth();
@@ -45,11 +63,11 @@ function PreviewUserSync() {
 
 export function AuthShell({ children }: { children: React.ReactNode }) {
   return (
-    <ConvexProvider client={convex}>
-      <AuthKitProvider>
+    <AuthKitProvider>
+      <ConvexProviderWithAuth client={convex} useAuth={useConvexAuth}>
         <PreviewUserSync />
         {children}
-      </AuthKitProvider>
-    </ConvexProvider>
+      </ConvexProviderWithAuth>
+    </AuthKitProvider>
   );
 }
