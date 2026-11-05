@@ -10,60 +10,20 @@ const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL ?? "http
   verbose: true,
 });
 
-function decodeAccessTokenClaims(token: string) {
-  const payload = token.split(".")[1];
-  if (!payload) {
-    return null;
-  }
-
-  try {
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.length % 4 === 0 ? normalized : normalized + "=".repeat(4 - (normalized.length % 4));
-    const decoded = atob(padded);
-    const parsed = JSON.parse(decoded) as { iss?: string; aud?: string | string[]; exp?: number };
-    return {
-      iss: parsed.iss,
-      aud: parsed.aud,
-      exp: parsed.exp,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function useConvexAuth() {
   const auth = useAuth();
-  const { user, loading, sessionId } = auth;
-  const { getAccessToken } = useAccessToken();
-
-  console.info("[AuthKit useAuth state]", {
-    isLoading: loading,
-    isAuthenticated: !loading && !!user,
-    userExists: !!user,
-    email: user?.email ?? null,
-    sessionId: sessionId ?? null,
-    userId: user?.id ?? null,
-  });
+  const { user, loading } = auth;
+  const { getAccessToken, refresh } = useAccessToken();
 
   return {
     isLoading: loading,
     isAuthenticated: !loading && !!user,
-    fetchAccessToken: async ({ forceRefreshToken }: { forceRefreshToken: boolean }) => {
+    fetchAccessToken: async ({ forceRefreshToken }: { forceRefreshToken?: boolean } = {}) => {
       if (!user) {
-        console.info("[Convex auth bridge] fetchAccessToken called: no user, returning null");
         return null;
       }
 
-      const token = await getAccessToken();
-      const claims = token ? decodeAccessTokenClaims(token) : null;
-
-      console.info("[Convex auth bridge] fetchAccessToken call", {
-        tokenReturned: !!token,
-        iss: claims?.iss,
-        aud: claims?.aud,
-        exp: claims?.exp,
-      });
-
+      const token = forceRefreshToken ? await refresh() : await getAccessToken();
       return token ?? null;
     },
   };
