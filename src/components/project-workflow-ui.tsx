@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
@@ -201,12 +201,14 @@ function CompanySetup({ onCreated }: { onCreated?: () => void }) {
 }
 
 function WorkspaceOverview() {
-  const { user, loading } = useAuth();
-  const companies = useQuery(api.access.listAccessibleCompanies, loading || !user ? "skip" : {}) as CompanyRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
   const companyId = (companies?.[0]?._id as any) ?? null;
-  const projects = useQuery(api.access.listProjectsForCompany, loading || !user || !companyId ? "skip" : { companyId: companyId as any }) as ProjectRecord[] | undefined;
+  const projects = useQuery(api.access.listProjectsForCompany, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as ProjectRecord[] | undefined;
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
 
@@ -291,11 +293,13 @@ function WorkspaceOverview() {
 }
 
 function ProjectListPage() {
-  const { user, loading } = useAuth();
-  const companies = useQuery(api.access.listAccessibleCompanies, loading || !user ? "skip" : {}) as CompanyRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
 
@@ -391,11 +395,13 @@ function ProjectListPage() {
 }
 
 function CreateProjectPage() {
-  const { user, loading } = useAuth();
-  const companies = useQuery(api.access.listAccessibleCompanies, loading || !user ? "skip" : {}) as CompanyRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
   const [name, setName] = useState("Payroll Platform Evaluation");
@@ -491,13 +497,15 @@ function CreateProjectPage() {
 }
 
 function ProjectOverviewPage({ projectId }: { projectId: string }) {
-  const { user, loading } = useAuth();
-  const project = useQuery(api.access.getProject, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
-  const requirements = useQuery(api.access.listProjectRequirements, loading || !user ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
-  const dashboard = useQuery(api.dashboard.getProjectDashboard, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectDashboard | undefined;
-  const members = useQuery(api.admin.listProjectMembers, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
+  const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
+  const dashboard = useQuery(api.dashboard.getProjectDashboard, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectDashboard | undefined;
+  const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
 
@@ -575,12 +583,14 @@ function ProjectOverviewPage({ projectId }: { projectId: string }) {
 }
 
 function RequirementsPage({ projectId }: { projectId: string }) {
-  const { user, loading } = useAuth();
-  const project = useQuery(api.access.getProject, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
-  const requirements = useQuery(api.access.listProjectRequirements, loading || !user ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
+  const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
   const previewImport = useMutation(api.requirements.previewRequirementImport);
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
   const applyImport = useMutation(api.requirements.applyRequirementImport);
@@ -693,12 +703,14 @@ function RequirementsPage({ projectId }: { projectId: string }) {
 }
 
 function PeoplePage({ projectId }: { projectId: string }) {
-  const { user, loading } = useAuth();
-  const project = useQuery(api.access.getProject, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
-  const members = useQuery(api.admin.listProjectMembers, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
+  const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
   const addVendor = useMutation(api.admin.addProjectVendor);
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
   const addScorer = useMutation(api.admin.addProjectScorer);
@@ -830,13 +842,15 @@ function PeoplePage({ projectId }: { projectId: string }) {
 }
 
 function ScoringPage({ projectId }: { projectId: string }) {
-  const { user, loading } = useAuth();
-  const project = useQuery(api.access.getProject, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
-  const requirements = useQuery(api.access.listProjectRequirements, loading || !user ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
-  const members = useQuery(api.admin.listProjectMembers, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
-  const scoreHistory = useQuery(api.scores.listScoreHistory, loading || !user ? "skip" : { projectId: projectId as any }) as ScoreHistoryRow[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
+  const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
+  const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
+  const scoreHistory = useQuery(api.scores.listScoreHistory, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ScoreHistoryRow[] | undefined;
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
   const submitScore = useMutation(api.scores.submitScore);
@@ -1006,12 +1020,14 @@ function ScoringPage({ projectId }: { projectId: string }) {
 }
 
 function DecisionPage({ projectId }: { projectId: string }) {
-  const { user, loading } = useAuth();
-  const project = useQuery(api.access.getProject, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
-  const dashboard = useQuery(api.dashboard.getProjectDashboard, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectDashboard | undefined;
-  const members = useQuery(api.admin.listProjectMembers, loading || !user ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
+  const dashboard = useQuery(api.dashboard.getProjectDashboard, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectDashboard | undefined;
+  const members = useQuery(api.admin.listProjectMembers, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectMemberRecord[] | undefined;
 
-  if (loading || !user) {
+  if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
 

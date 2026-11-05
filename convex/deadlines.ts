@@ -58,7 +58,12 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
 export const listProjectDeadlines = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const { identity, member } = await assertProjectDeadlineAccess(ctx, args.projectId);
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    const { member } = await assertProjectDeadlineAccess(ctx, args.projectId);
 
     const rows = await ctx.db
       .query("projectDeadlines")

@@ -133,7 +133,7 @@ export const listAccessibleCompanies = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new Error("Not signed in");
+      return [] as const;
     }
 
     const memberships = await ctx.db
@@ -220,7 +220,7 @@ export const listProjectsForCompany = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new Error("Not signed in");
+      return [] as const;
     }
 
     const membership = await ctx.db
@@ -246,7 +246,7 @@ export const listProjectRequirements = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new Error("Not signed in");
+      return [] as const;
     }
 
     const project = await ctx.db.get(args.projectId);

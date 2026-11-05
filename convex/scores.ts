@@ -41,6 +41,11 @@ async function assertScoringAccess(ctx: any, projectId: string) {
 export const listScoreHistory = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
     await assertScoringAccess(ctx, args.projectId);
 
     const rows = await ctx.db

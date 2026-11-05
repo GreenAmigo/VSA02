@@ -173,6 +173,11 @@ export const ensurePreviewAdminMembership = mutation({
 export const listCompanyMembers = query({
   args: { companyId: v.id("companies") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
     await assertCompanyAdmin(ctx, args.companyId);
 
     const members = await ctx.db
@@ -226,6 +231,11 @@ export const createProject = mutation({
 export const listProjectMembers = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
     const project = await ctx.db.get(args.projectId);
     if (!project) {
       throw new Error("Project not found");
