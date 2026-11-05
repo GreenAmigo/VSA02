@@ -6,9 +6,7 @@ import { ConvexProviderWithAuth, ConvexReactClient, useMutation } from "convex/r
 
 import { api } from "../../convex/_generated/api";
 
-const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://dependable-jaguar-503.eu-west-1.convex.cloud", {
-  verbose: true,
-});
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://dependable-jaguar-503.eu-west-1.convex.cloud");
 
 function useConvexAuth() {
   const auth = useAuth();

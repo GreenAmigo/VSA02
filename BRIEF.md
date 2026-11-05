@@ -88,8 +88,9 @@ Legend:
 | Company score and scorer-view isolation | A | Score-view writes are enforced by project membership and role checks; vendor access is isolated to their own project-view data. |
 | Dashboard totals and weighted score math | A | Dashboard aggregation is implemented and validated in Convex tests against seeded project data. |
 | Deadline and notification logic | A | Deadline and reminder state are persisted and enforced server-side for project membership, visibility, and submission rules. |
-| SSO and login flows | A | WorkOS AuthKit Staging is verified working for real email sign-up and sign-in flows in the browser. Additional production redirect and company SSO wiring still need final release setup. |
+| SSO and login flows | A | WorkOS AuthKit preview sign-in is verified working in the browser; local redirects are restored for dev, and production-only preview-admin guardrails are enforced server-side. |
 | Vendor emailed-link login | B | The app can flow through the email-based AuthKit path, but the separate vendor-specific project-scoped emailed-link flow still needs the final app-level wiring and validation. |
+| Preview admin membership guard | A | The preview-only admin sync guard is enforced in Convex and tested so it cannot run in production. |
 | Server-side access checks | A | Company and project access checks are implemented and validated by Convex tests. |
 | Real data persistence in Convex | A | Core app data is persisted and queried in Convex with automated access-isolation coverage. |
 
