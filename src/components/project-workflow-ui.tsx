@@ -526,6 +526,10 @@ function ProjectOverviewPage({ projectId }: { projectId: string }) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
   }
 
+  if (!projectId) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Project not found.</div>;
+  }
+
   if (!project || !dashboard || !members || !requirements) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading project…</div>;
   }

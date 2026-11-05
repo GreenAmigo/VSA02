@@ -1,14 +1,18 @@
 import { AuthGate } from "@/components/auth-gate";
 import { PeoplePage } from "@/components/project-workflow-ui";
 
-export default function ProjectPeoplePage({
+export const dynamic = "force-dynamic";
+
+export default async function ProjectPeoplePage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
+
   return (
     <AuthGate>
-      <PeoplePage projectId={params.id} />
+      <PeoplePage projectId={id} />
     </AuthGate>
   );
 }

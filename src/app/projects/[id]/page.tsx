@@ -1,14 +1,18 @@
 import { AuthGate } from "@/components/auth-gate";
 import { ProjectOverviewPage } from "@/components/project-workflow-ui";
 
-export default function ProjectDetailPage({
+export const dynamic = "force-dynamic";
+
+export default async function ProjectDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
+
   return (
     <AuthGate>
-      <ProjectOverviewPage projectId={params.id} />
+      <ProjectOverviewPage projectId={id} />
     </AuthGate>
   );
 }
