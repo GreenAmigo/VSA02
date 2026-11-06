@@ -9,7 +9,8 @@ function slugify(value: string): string {
 }
 
 function isProductionEnvironment(): boolean {
-  return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+  const environment = (process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase();
+  return environment !== "development" && environment !== "preview";
 }
 
 async function recordActivity(

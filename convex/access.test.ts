@@ -63,11 +63,11 @@ describe("Phase 2 access checks", () => {
     });
 
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
-    const previousVercelEnv = process.env.VERCEL_ENV;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
-      delete process.env.VERCEL_ENV;
+      process.env.APP_ENVIRONMENT = "development";
 
       await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",
@@ -97,10 +97,10 @@ describe("Phase 2 access checks", () => {
         process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
       }
 
-      if (previousVercelEnv === undefined) {
-        delete process.env.VERCEL_ENV;
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
       } else {
-        process.env.VERCEL_ENV = previousVercelEnv;
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
       }
     }
   });
@@ -108,11 +108,11 @@ describe("Phase 2 access checks", () => {
   test("Consultant grants cannot run in Production", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
-    const previousVercelEnv = process.env.VERCEL_ENV;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
-      process.env.VERCEL_ENV = "production";
+      process.env.APP_ENVIRONMENT = "production";
 
       await expect(
         t.mutation(internal.admin.grantConsultantRole, {
@@ -129,10 +129,42 @@ describe("Phase 2 access checks", () => {
         process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
       }
 
-      if (previousVercelEnv === undefined) {
-        delete process.env.VERCEL_ENV;
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
       } else {
-        process.env.VERCEL_ENV = previousVercelEnv;
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
+  test("missing APP_ENVIRONMENT blocks the grant guard as production", async () => {
+    const t = convexTest({ schema, modules });
+    const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      delete process.env.APP_ENVIRONMENT;
+
+      await expect(
+        t.mutation(internal.admin.grantConsultantRole, {
+          secret: "test-consultant-secret",
+          userId: "missing-env-user",
+          email: "missing-env@example.com",
+          displayName: "Missing Env User",
+        }),
+      ).rejects.toThrow("Consultant role grants are disabled in production");
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
       }
     }
   });
@@ -140,12 +172,12 @@ describe("Phase 2 access checks", () => {
   test("preview-only workspace seed data is disabled in Production and labels records as test data", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
-    const previousVercelEnv = process.env.VERCEL_ENV;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
       process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-secret";
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
-      delete process.env.VERCEL_ENV;
+      process.env.APP_ENVIRONMENT = "preview";
 
       const result = await t.mutation(internal.admin.seedPreviewWorkspaceData, {
         secret: "test-preview-secret",
@@ -176,10 +208,10 @@ describe("Phase 2 access checks", () => {
         process.env.CONVEX_PREVIEW_SEED_SECRET = previousSecret;
       }
 
-      if (previousVercelEnv === undefined) {
-        delete process.env.VERCEL_ENV;
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
       } else {
-        process.env.VERCEL_ENV = previousVercelEnv;
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
       }
 
       if (process.env.CONVEX_CONSULTANT_GRANT_SECRET === "test-consultant-secret") {
@@ -191,11 +223,11 @@ describe("Phase 2 access checks", () => {
   test("preview-only workspace seed data cannot run in Production", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
-    const previousVercelEnv = process.env.VERCEL_ENV;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
       process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-secret";
-      process.env.VERCEL_ENV = "production";
+      process.env.APP_ENVIRONMENT = "production";
 
       await expect(
         t.mutation(internal.admin.seedPreviewWorkspaceData, {
@@ -209,10 +241,10 @@ describe("Phase 2 access checks", () => {
         process.env.CONVEX_PREVIEW_SEED_SECRET = previousSecret;
       }
 
-      if (previousVercelEnv === undefined) {
-        delete process.env.VERCEL_ENV;
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
       } else {
-        process.env.VERCEL_ENV = previousVercelEnv;
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
       }
     }
   });
@@ -228,11 +260,11 @@ describe("Phase 2 access checks", () => {
     });
 
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
-    const previousVercelEnv = process.env.VERCEL_ENV;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
-      delete process.env.VERCEL_ENV;
+      process.env.APP_ENVIRONMENT = "preview";
 
       await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",
@@ -254,10 +286,10 @@ describe("Phase 2 access checks", () => {
         process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
       }
 
-      if (previousVercelEnv === undefined) {
-        delete process.env.VERCEL_ENV;
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
       } else {
-        process.env.VERCEL_ENV = previousVercelEnv;
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
       }
     }
   });
