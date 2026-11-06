@@ -3,7 +3,7 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
@@ -69,7 +69,7 @@ describe("Phase 2 access checks", () => {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
       delete process.env.VERCEL_ENV;
 
-      await t.mutation(api.admin.grantConsultantRole, {
+      await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",
         userId: "workos_user_frazer_preview",
         email: "frazerknight@hotmail.com",
@@ -115,7 +115,7 @@ describe("Phase 2 access checks", () => {
       process.env.VERCEL_ENV = "production";
 
       await expect(
-        t.mutation(api.admin.grantConsultantRole, {
+        t.mutation(internal.admin.grantConsultantRole, {
           secret: "test-consultant-secret",
           userId: "workos_user_frazer_preview",
           email: "frazerknight@hotmail.com",
@@ -147,14 +147,14 @@ describe("Phase 2 access checks", () => {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
       delete process.env.VERCEL_ENV;
 
-      const result = await t.mutation(api.admin.seedPreviewWorkspaceData, {
+      const result = await t.mutation(internal.admin.seedPreviewWorkspaceData, {
         secret: "test-preview-secret",
       });
 
       expect(result.createdCompanies).toBeGreaterThanOrEqual(3);
       expect(result.label).toBe("test-data");
 
-      await t.mutation(api.admin.grantConsultantRole, {
+      await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",
         userId: "seeded-consultant-user",
         email: "seeded-consultant@example.com",
@@ -198,7 +198,7 @@ describe("Phase 2 access checks", () => {
       process.env.VERCEL_ENV = "production";
 
       await expect(
-        t.mutation(api.admin.seedPreviewWorkspaceData, {
+        t.mutation(internal.admin.seedPreviewWorkspaceData, {
           secret: "test-preview-secret",
         }),
       ).rejects.toThrow("Preview/dev seed data is disabled in production");
@@ -207,6 +207,51 @@ describe("Phase 2 access checks", () => {
         delete process.env.CONVEX_PREVIEW_SEED_SECRET;
       } else {
         process.env.CONVEX_PREVIEW_SEED_SECRET = previousSecret;
+      }
+
+      if (previousVercelEnv === undefined) {
+        delete process.env.VERCEL_ENV;
+      } else {
+        process.env.VERCEL_ENV = previousVercelEnv;
+      }
+    }
+  });
+
+  test("granting a VS Consultant records an activity log entry", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(api.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      companyCName: "Maxwell Knight Ltd",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousVercelEnv = process.env.VERCEL_ENV;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      delete process.env.VERCEL_ENV;
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "audit-consultant-user",
+        email: "audit@consultant.example",
+        displayName: "Audit Consultant",
+        companyId: seeded.companyAId,
+      });
+
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+      const logs = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyAId });
+
+      expect(logs.some((log) => log.action === "grant_vs_consultant_role")).toBe(true);
+      expect(logs.some((log) => log.details.includes("audit-consultant-user"))).toBe(true);
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
       }
 
       if (previousVercelEnv === undefined) {

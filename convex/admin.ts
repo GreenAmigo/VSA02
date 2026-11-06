@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 const companyAdminRole = "company-admin" as const;
@@ -150,7 +150,7 @@ export const createCompany = mutation({
   },
 });
 
-export const grantConsultantRole = mutation({
+export const grantConsultantRole = internalMutation({
   args: {
     secret: v.string(),
     userId: v.string(),
@@ -234,7 +234,7 @@ export const grantConsultantRole = mutation({
   },
 });
 
-export const seedPreviewWorkspaceData = mutation({
+export const seedPreviewWorkspaceData = internalMutation({
   args: {
     secret: v.string(),
   },
@@ -393,6 +393,29 @@ export const seedPreviewWorkspaceData = mutation({
       createdCompanies: createdCompanies.length,
       label: "test-data",
     };
+  },
+});
+
+export const listActivityLogs = query({
+  args: { companyId: v.optional(v.id("companies")) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    if (args.companyId) {
+      await assertCompanyAdmin(ctx, args.companyId);
+    }
+
+    const logs = args.companyId
+      ? await ctx.db
+          .query("activityLogs")
+          .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+          .collect()
+      : await ctx.db.query("activityLogs").collect();
+
+    return logs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 50);
   },
 });
 
