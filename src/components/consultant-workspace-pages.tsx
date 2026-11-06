@@ -72,8 +72,11 @@ function WorkspaceShell({
             <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
               Back to workspace list
             </Link>
-            <Link href="/workspaces/import" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-              Import workspace JSON
+            <Link
+              href={`/workspaces/${workspace.slug}/import`}
+              className="block rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sky-100 hover:border-sky-400"
+            >
+              Bulk data import
             </Link>
             <button type="button" className="w-full rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
               Add company workspace
@@ -136,7 +139,7 @@ export function ConsultantWorkspaceDirectoryPage() {
           </div>
           <div className="flex items-center gap-3">
             <Link href="/workspaces/import" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
-              Import JSON
+              Bulk data import
             </Link>
             <button type="button" className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
               Add company workspace

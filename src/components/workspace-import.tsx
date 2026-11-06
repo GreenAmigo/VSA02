@@ -72,7 +72,7 @@ export function WorkspaceImportForm() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Seed import</p>
-            <h1 className="mt-2 text-2xl font-semibold text-white">Workspace import</h1>
+            <h1 className="mt-2 text-2xl font-semibold text-white">Bulk data import</h1>
           </div>
         </div>
       </header>
