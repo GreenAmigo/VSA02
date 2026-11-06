@@ -140,15 +140,20 @@ export const listAccessibleCompanies = query({
       .query("companyMembers")
       .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
       .filter((q) => q.eq(q.field("isActive"), true))
-      .take(50);
+      .take(200);
 
     const companyIds = memberships.map((item) => item.companyId);
     if (companyIds.length === 0) {
       return [] as const;
     }
 
+    const isConsultant = memberships.some((member) => member.role === "vs-consultant");
+    const visibleCompanyIds = isConsultant
+      ? (await ctx.db.query("companies").collect()).map((company) => company._id)
+      : companyIds;
+
     const companies = await Promise.all(
-      companyIds.map((id) => ctx.db.get(id)),
+      visibleCompanyIds.map((id) => ctx.db.get(id)),
     );
 
     return companies.filter((company): company is NonNullable<typeof company> => company !== null);
@@ -176,7 +181,17 @@ export const getCompany = query({
       .first();
 
     if (!membership) {
-      throw new Error("Company access denied");
+      const consultantMembership = await ctx.db
+        .query("companyMembers")
+        .filter((q) => q.eq(q.field("companyId"), args.companyId))
+        .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+        .filter((q) => q.eq(q.field("role"), "vs-consultant"))
+        .filter((q) => q.eq(q.field("isActive"), true))
+        .first();
+
+      if (!consultantMembership) {
+        throw new Error("Company access denied");
+      }
     }
 
     return company;
@@ -196,18 +211,29 @@ export const getProject = query({
       throw new Error("Project not found");
     }
 
-    const membership = await ctx.db
+    const projectMembership = await ctx.db
       .query("projectMembers")
       .filter((q) => q.eq(q.field("projectId"), args.projectId))
       .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!membership) {
-      throw new Error("Project access denied");
+    if (projectMembership) {
+      if (projectMembership.companyId !== project.companyId) {
+        throw new Error("Project access denied");
+      }
+      return project;
     }
 
-    if (membership.companyId !== project.companyId) {
+    const consultantMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+      .filter((q) => q.eq(q.field("role"), "vs-consultant"))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!consultantMembership) {
       throw new Error("Project access denied");
     }
 
@@ -230,7 +256,15 @@ export const listProjectsForCompany = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!membership) {
+    const isConsultant = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+      .filter((q) => q.eq(q.field("role"), "vs-consultant"))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!membership && !isConsultant) {
       throw new Error("Company access denied");
     }
 

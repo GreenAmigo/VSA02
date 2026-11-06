@@ -97,9 +97,80 @@ Legend:
 ## Deployment to-do
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.
 - Later, add the live address to WorkOS Production Redirects.
+- The custom domain vspreview.maxwellknight.co.uk is temporarily pointed at the consultant-admin branch. When consultant-admin is merged into preview, point the domain back at the preview branch in Vercel (Settings > Domains).
 
 ## Technology
 - Next.js, Convex, GitHub and Vercel (I have used these before).
+
+## Consultant workspace model and security
+
+### Persona: Vendor Selection (VS) Consultant
+A platform-level super-admin who onboards client companies and has full admin over every workspace.
+
+Definition: A workspace belongs to exactly one company, and each company has exactly one workspace (so in the database, workspace and company are the same record, matching one WorkOS organisation). There can be many workspaces. A workspace holds everything that company needs to run vendor selections: its people (admins and scorers, individuals or departments), its vendors, and one or more projects. Each project has its own requirements, NFRs, priorities, scoring, deadlines and dashboard. People and vendors belong to the workspace and are assigned to projects.
+
+Access:
+- VS Consultants: full access to every workspace.
+- Company people: their own workspace only, according to their role.
+- Vendors: only the projects they are invited to, and only their own requirement view and scores (never priorities, company scores, scorer views or other vendors).
+- No company can ever see another company's workspace.
+
+The VS Consultant can:
+- Create, archive and delete workspaces (archive = hidden/read-only and restorable; delete = permanent, only after archiving, confirmed by typing the workspace name)
+- Manage workspaces: add and manage companies, company admins, company people and vendors
+- See the full catalogue of workspaces and help each company manage its projects, people, requirements, vendors and scoring
+- Bulk import data, either as a whole workspace or separately into an existing company (e.g. just Requirements, People or Vendors):
+  - downloadable Excel template, one tab per data type
+  - dry run showing what will be added, changed or rejected before anything is saved
+  - match records by ID so re-imports update rather than duplicate
+  - test data clearly labelled as test
+- Manage dashboards, reporting and data for each workspace
+
+Security rules:
+- The Consultant role can only be granted on the server, never through sign-up or any company-facing screen.
+- A proper server-only role grant is required; the previous preview admin helper is replaced by a dedicated one-off Convex internal function or CLI command run by the developer, never a UI action.
+- Every Consultant action is recorded in an activity log (who, what, when, which workspace), not just lifecycle actions.
+- Company users must never be able to see or use Consultant features, enforced on the server.
+- Automated tests must prove both of these.
+- All test data must be clearly labelled as test data in the import and seed commands.
+
+### Phase 1 implementation requirements
+Phase 1 is approved with the following changes:
+1. Add a safe, server-only way to grant the VS Consultant role, using a one-off Convex internal function or CLI command run by me, never a screen. This replaces the previous preview-admin helper and removes it.
+2. Add a preview/development-only command to load realistic test data (several workspaces, people, vendors, projects), with an automated test proving it cannot run in Production. All test data must be labelled as test.
+3. Add workspace-level vendor management in Phase 3, including creating and managing vendors at the workspace level, with assignment to projects later.
+4. Every phase must record every Consultant action in the activity log (who, what, when, which workspace), not only workspace lifecycle actions.
+5. Phases 4 and 5 must reuse the existing project, requirement, import and scoring code and tests. Do not rebuild them. Reused items are the current project model, requirement import flow, scoring validation and persistence, and related tests. New items are the consultant workspace catalogue, server-only consultant role grant, workspace-level vendor management, activity logging, and workspace/project reporting exports.
+6. Add a phase before final hardening for Consultant reporting and data management: dashboards per workspace and project, plus export features for Excel/PDF sign-off results.
+
+### Phase plan (approved with changes)
+1. Phase 1 — Consultant role grant and preview-only data seed
+2. Phase 2 — Workspace lifecycle and admin controls
+3. Phase 3 — Workspace-level people and vendor management
+4. Phase 4 — Projects, requirements, priorities and dashboard data
+5. Phase 5 — Vendor and scorer workflows with strict data separation
+6. Phase 6 — Bulk import and dry-run validation
+7. Phase 7 — Consultant reporting and data management exports
+8. Phase 8 — Final hardening and release prep
+
+### How to grant the first VS Consultant
+The first Consultant must be granted by a developer-run server-only action, not by a user-facing screen.
+
+Exact approach to follow in Phase 1:
+- add an internal Convex mutation or script that can only run outside Production, or can be restricted to a trusted local/dev environment, and accepts my personal email or WorkOS user ID
+- validate the caller is a trusted admin environment (server-side only)
+- grant the Consultant role on the server and create the corresponding workspace access records
+- keep the action out of any company-facing route or sign-up flow
+- log the role grant in the activity log with user, action, timestamp, and workspace context
+
+This is the approved replacement for the previous preview admin helper and must remove the prior ensurePreviewAdminMembership flow entirely.
+
+### Test data and production guard
+The preview/development seed command must:
+- create realistic test workspaces, people, vendors and projects
+- label every created record as test data
+- be disabled in Production with an automated test proving it cannot run there
+- be clearly isolated from production records and excluded from any production metrics or exports until explicitly promoted
 
 ## How to work with me
 - I am not a coder. Explain things in plain English and give me exact commands one at a time.

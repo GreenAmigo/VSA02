@@ -9,6 +9,7 @@ export default defineSchema({
     createdAt: v.number(),
     isActive: v.boolean(),
     ssoProvider: v.optional(v.string()),
+    isTestData: v.optional(v.boolean()),
   }).index("by_slug", ["slug"]),
 
   companyMembers: defineTable({
@@ -16,9 +17,10 @@ export default defineSchema({
     userId: v.string(),
     email: v.optional(v.string()),
     displayName: v.string(),
-    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor"), v.literal("vs-consultant")),
     isActive: v.boolean(),
     createdAt: v.number(),
+    isTestData: v.optional(v.boolean()),
   }).index("by_company_user", ["companyId", "userId"])
     .index("by_company_role", ["companyId", "role"]),
 
@@ -28,16 +30,18 @@ export default defineSchema({
     createdBy: v.string(),
     createdAt: v.number(),
     status: v.union(v.literal("draft"), v.literal("active")),
+    isTestData: v.optional(v.boolean()),
   }).index("by_company", ["companyId"]),
 
   projectMembers: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     userId: v.string(),
-    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor"), v.literal("vs-consultant")),
     displayName: v.string(),
     isActive: v.boolean(),
     createdAt: v.number(),
+    isTestData: v.optional(v.boolean()),
   }).index("by_project_user", ["projectId", "userId"])
     .index("by_company_project", ["companyId", "projectId"]),
 
@@ -100,4 +104,15 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_project_target", ["projectId", "targetType", "targetUserId"])
     .index("by_project_user", ["projectId", "targetUserId"]),
+
+  activityLogs: defineTable({
+    actorUserId: v.string(),
+    actorEmail: v.optional(v.string()),
+    action: v.string(),
+    details: v.string(),
+    companyId: v.optional(v.id("companies")),
+    projectId: v.optional(v.id("projects")),
+    createdAt: v.number(),
+  }).index("by_company", ["companyId"])
+    .index("by_actor", ["actorUserId"]),
 });

@@ -2,9 +2,36 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
 const companyAdminRole = "company-admin" as const;
+const consultantRole = "vs-consultant" as const;
 
 function slugify(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
+}
+
+function isProductionEnvironment(): boolean {
+  return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+}
+
+async function recordActivity(
+  ctx: any,
+  payload: {
+    actorUserId: string;
+    actorEmail?: string;
+    action: string;
+    details: string;
+    companyId?: string;
+    projectId?: string;
+  },
+) {
+  await ctx.db.insert("activityLogs", {
+    actorUserId: payload.actorUserId,
+    actorEmail: payload.actorEmail,
+    action: payload.action,
+    details: payload.details,
+    companyId: payload.companyId,
+    projectId: payload.projectId,
+    createdAt: Date.now(),
+  });
 }
 
 async function assertCompanyAdmin(ctx: any, companyId: string) {
@@ -20,8 +47,8 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
-  if (!member || member.role !== companyAdminRole) {
-    throw new Error("Only company admins can manage this company");
+  if (!member || (member.role !== companyAdminRole && member.role !== consultantRole)) {
+    throw new Error("Only company admins or VS Consultants can manage this company");
   }
 
   return identity;
@@ -74,6 +101,7 @@ export const createCompany = mutation({
       createdAt: Date.now(),
       isActive: true,
       ssoProvider: args.ssoProvider,
+      isTestData: false,
     });
 
     await ctx.db.insert("companyMembers", {
@@ -84,7 +112,35 @@ export const createCompany = mutation({
       role: companyAdminRole,
       isActive: true,
       createdAt: Date.now(),
+      isTestData: false,
     });
+
+    const consultantMembers = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("role"), consultantRole))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .take(200);
+
+    for (const consultant of consultantMembers) {
+      const existingMembership = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), companyId))
+        .filter((q: any) => q.eq(q.field("userId"), consultant.userId))
+        .first();
+
+      if (!existingMembership) {
+        await ctx.db.insert("companyMembers", {
+          companyId,
+          userId: consultant.userId,
+          email: consultant.email,
+          displayName: consultant.displayName,
+          role: consultantRole,
+          isActive: true,
+          createdAt: Date.now(),
+          isTestData: false,
+        });
+      }
+    }
 
     return {
       companyId,
@@ -94,79 +150,249 @@ export const createCompany = mutation({
   },
 });
 
-export const ensurePreviewAdminMembership = mutation({
+export const grantConsultantRole = mutation({
   args: {
-    companySlug: v.optional(v.string()),
-    companyId: v.optional(v.id("companies")),
+    secret: v.string(),
+    userId: v.string(),
     email: v.optional(v.string()),
     displayName: v.optional(v.string()),
+    companyId: v.optional(v.id("companies")),
   },
   handler: async (ctx, args) => {
-    if (process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production") {
-      throw new Error("Preview admin sync is disabled in production");
+    if (isProductionEnvironment()) {
+      throw new Error("Consultant role grants are disabled in production");
     }
 
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
+    const expectedSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET before running the developer-only Consultant grant command");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid Consultant grant secret");
     }
 
-    const company = args.companyId
-      ? await ctx.db.get(args.companyId)
-      : await ctx.db
-          .query("companies")
-          .filter((q: any) => q.eq(q.field("slug"), args.companySlug ?? "maxwell-knight-ltd"))
-          .first();
+    const targetUserId = args.userId.trim();
+    const targetEmail = (args.email ?? "").trim().toLowerCase() || undefined;
+    const targetDisplayName = args.displayName?.trim() || targetEmail || "VS Consultant";
+    const companies = args.companyId
+      ? [await ctx.db.get(args.companyId)]
+      : await ctx.db.query("companies").collect();
 
-    if (!company) {
-      throw new Error("Company not found");
+    const validCompanies = companies.filter((company): company is NonNullable<typeof company> => company !== null);
+    if (validCompanies.length === 0) {
+      throw new Error("No companies available to grant Consultant access to");
     }
 
-    const email = String(args.email ?? identity.email ?? "").trim().toLowerCase();
-    const displayName = args.displayName ?? identity.name ?? "Frazer Knight";
+    let grantedCount = 0;
 
-    const byUser = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), company._id))
-      .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
-      .first();
+    for (const company of validCompanies) {
+      const existing = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .filter((q: any) => q.eq(q.field("userId"), targetUserId))
+        .first();
 
-    if (byUser) {
-      await ctx.db.patch(byUser._id, {
-        email: email || byUser.email,
-        displayName,
-        isActive: true,
-      });
-      return byUser._id;
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          email: targetEmail ?? existing.email,
+          displayName: targetDisplayName,
+          role: consultantRole,
+          isActive: true,
+          isTestData: false,
+        });
+      } else {
+        await ctx.db.insert("companyMembers", {
+          companyId: company._id,
+          userId: targetUserId,
+          email: targetEmail,
+          displayName: targetDisplayName,
+          role: consultantRole,
+          isActive: true,
+          createdAt: Date.now(),
+          isTestData: false,
+        });
+      }
+
+      grantedCount += 1;
     }
 
-    const byEmail = email
-      ? await ctx.db
-          .query("companyMembers")
-          .filter((q: any) => q.eq(q.field("companyId"), company._id))
-          .filter((q: any) => q.eq(q.field("email"), email))
-          .first()
-      : null;
-
-    if (byEmail) {
-      await ctx.db.patch(byEmail._id, {
-        userId: identity.tokenIdentifier,
-        email,
-        displayName,
-        isActive: true,
-      });
-      return byEmail._id;
-    }
-
-    return await ctx.db.insert("companyMembers", {
-      companyId: company._id,
-      userId: identity.tokenIdentifier,
-      email: email || undefined,
-      displayName,
-      role: "company-admin",
-      isActive: true,
-      createdAt: Date.now(),
+    await recordActivity(ctx, {
+      actorUserId: "system",
+      actorEmail: targetEmail,
+      action: "grant_vs_consultant_role",
+      details: `Granted the VS Consultant role to ${targetDisplayName} (${targetUserId}) across ${grantedCount} workspaces.`,
+      companyId: validCompanies[0]._id,
     });
+
+    return {
+      role: consultantRole,
+      userId: targetUserId,
+      email: targetEmail ?? null,
+      displayName: targetDisplayName,
+      grantedCount,
+    };
+  },
+});
+
+export const seedPreviewWorkspaceData = mutation({
+  args: {
+    secret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Preview/dev seed data is disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running the preview-only data seeder");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid preview seed secret");
+    }
+
+    const testCompanies = [
+      { name: "Northway Health Test", slug: "northway-health-test" },
+      { name: "Harbor Logistics Test", slug: "harbor-logistics-test" },
+      { name: "Crescent Energy Test", slug: "crescent-energy-test" },
+    ];
+
+    const createdCompanies: Array<{ _id: any; name: string }> = [];
+
+    for (const company of testCompanies) {
+      const exists = await ctx.db
+        .query("companies")
+        .filter((q: any) => q.eq(q.field("slug"), company.slug))
+        .first();
+
+      if (exists) {
+        createdCompanies.push({ _id: exists._id, name: exists.name });
+        continue;
+      }
+
+      const companyId = await ctx.db.insert("companies", {
+        name: company.name,
+        slug: company.slug,
+        createdBy: "system-seed",
+        createdAt: Date.now(),
+        isActive: true,
+        ssoProvider: "preview-test-data",
+        isTestData: true,
+      });
+
+      createdCompanies.push({ _id: companyId, name: company.name });
+
+      const adminUserId = `test-admin-${company.slug}`;
+      await ctx.db.insert("companyMembers", {
+        companyId,
+        userId: adminUserId,
+        email: `${company.slug}@example.test`,
+        displayName: `${company.name} Admin`,
+        role: "company-admin",
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      const projectOneId = await ctx.db.insert("projects", {
+        companyId,
+        name: `${company.name} Core Review`,
+        createdBy: "system-seed",
+        createdAt: Date.now(),
+        status: "active",
+        isTestData: true,
+      });
+
+      const projectTwoId = await ctx.db.insert("projects", {
+        companyId,
+        name: `${company.name} Renewal Review`,
+        createdBy: "system-seed",
+        createdAt: Date.now(),
+        status: "draft",
+        isTestData: true,
+      });
+
+      const scorerUserId = `test-scorer-${company.slug}`;
+      const vendorUserId = `test-vendor-${company.slug}`;
+
+      await ctx.db.insert("companyMembers", {
+        companyId,
+        userId: scorerUserId,
+        email: `${company.slug}-scorer@example.test`,
+        displayName: `${company.name} Scorer`,
+        role: "company-scorer",
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await ctx.db.insert("companyMembers", {
+        companyId,
+        userId: vendorUserId,
+        email: `${company.slug}-vendor@example.test`,
+        displayName: `${company.name} Vendor`,
+        role: "vendor",
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await ctx.db.insert("projectMembers", {
+        companyId,
+        projectId: projectOneId,
+        userId: adminUserId,
+        role: "company-admin",
+        displayName: `${company.name} Admin`,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await ctx.db.insert("projectMembers", {
+        companyId,
+        projectId: projectOneId,
+        userId: scorerUserId,
+        role: "company-scorer",
+        displayName: `${company.name} Scorer`,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await ctx.db.insert("projectMembers", {
+        companyId,
+        projectId: projectOneId,
+        userId: vendorUserId,
+        role: "vendor",
+        displayName: `${company.name} Vendor`,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await ctx.db.insert("projectMembers", {
+        companyId,
+        projectId: projectTwoId,
+        userId: adminUserId,
+        role: "company-admin",
+        displayName: `${company.name} Admin`,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+
+      await recordActivity(ctx, {
+        actorUserId: "system-seed",
+        action: "seed_preview_test_workspaces",
+        details: `Created preview-only test workspace data for ${company.name}.`,
+        companyId,
+      });
+    }
+
+    return {
+      createdCompanies: createdCompanies.length,
+      label: "test-data",
+    };
   },
 });
 
@@ -203,6 +429,7 @@ export const createProject = mutation({
       createdBy: (await ctx.auth.getUserIdentity())?.tokenIdentifier ?? "system",
       createdAt: Date.now(),
       status: "active",
+      isTestData: false,
     });
 
     const identity = await ctx.auth.getUserIdentity();
@@ -218,6 +445,7 @@ export const createProject = mutation({
       displayName: identity.name ?? "Admin",
       isActive: true,
       createdAt: Date.now(),
+      isTestData: false,
     });
 
     return {
