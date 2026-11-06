@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCompanyAdminSummary,
+  buildWorkspaceSummary,
   demoCompanies,
   demoMembers,
 } from "./companyAccess.ts";
@@ -38,5 +39,43 @@ describe("admin summary", () => {
     expect(summary.totalScorers).toBe(2);
     expect(summary.openRequirements).toBe(1);
     expect(summary.needsAttention).toBe(0);
+  });
+
+  it("summarises the consultant workspace dashboard by company", () => {
+    const summary = buildWorkspaceSummary(
+      [
+        { id: "cmp-acme", name: "Acme Health", domain: "acme.vs.local" },
+        { id: "cmp-beta", name: "Beta Logistics" },
+      ],
+      [
+        { id: "proj-1", companyId: "cmp-acme" },
+        { id: "proj-2", companyId: "cmp-acme" },
+        { id: "proj-3", companyId: "cmp-beta" },
+      ],
+      [
+        { id: "person-1", companyId: "cmp-acme" },
+        { id: "person-2", companyId: "cmp-acme", teamName: "Procurement" },
+        { id: "person-3", companyId: "cmp-beta" },
+      ],
+      [
+        { id: "vendor-1", companyId: "cmp-acme" },
+        { id: "vendor-2", companyId: "cmp-acme" },
+        { id: "vendor-3", companyId: "cmp-beta" },
+      ],
+    );
+
+    expect(summary.totalCompanies).toBe(2);
+    expect(summary.companiesWithDomains).toBe(1);
+    expect(summary.totalProjects).toBe(3);
+    expect(summary.totalPeople).toBe(3);
+    expect(summary.totalVendors).toBe(3);
+    expect(summary.workspaces[0]).toMatchObject({
+      companyId: "cmp-acme",
+      companyName: "Acme Health",
+      domain: "acme.vs.local",
+      projectCount: 2,
+      peopleCount: 2,
+      vendorCount: 2,
+    });
   });
 });

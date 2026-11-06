@@ -17,6 +17,7 @@ import type * as requirements from "../requirements.js";
 import type * as scores from "../scores.js";
 import type * as security from "../security.js";
 import type * as vendorAuth from "../vendorAuth.js";
+import type * as workspaceSeed from "../workspaceSeed.js";
 
 import type {
   ApiFromModules,
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   scores: typeof scores;
   security: typeof security;
   vendorAuth: typeof vendorAuth;
+  workspaceSeed: typeof workspaceSeed;
 }>;
 
 /**

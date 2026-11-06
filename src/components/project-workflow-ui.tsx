@@ -208,91 +208,498 @@ function CompanySetup({ onCreated }: { onCreated?: () => void }) {
 }
 
 function WorkspaceOverview() {
-  const { user, loading: workosLoading } = useAuth();
-  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
-  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
-  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
-  const companyId = (companies?.[0]?._id as any) ?? null;
-  const projects = useQuery(api.access.listProjectsForCompany, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as ProjectRecord[] | undefined;
+  type WorkspaceSection = "overview" | "projects" | "people" | "vendors" | "requirements" | "scoring";
+  type WorkspaceProject = {
+    id: string;
+    name: string;
+    status: "Active" | "Draft";
+    vendors: number;
+    scorers: number;
+    requirements: number;
+    leader: string;
+  };
+  type WorkspacePerson = {
+    id: string;
+    name: string;
+    role: string;
+    team: string;
+    project: string;
+  };
+  type WorkspaceVendor = {
+    id: string;
+    name: string;
+    status: "Active" | "Invited" | "Submitted";
+    project: string;
+    score: number;
+  };
+  type WorkspaceRequirement = {
+    id: string;
+    title: string;
+    type: "Functional" | "Non-Functional";
+    priority: "High" | "Medium" | "Low";
+    status: "Active" | "Draft";
+  };
+  type WorkspaceScore = {
+    scorer: string;
+    vendor: string;
+    score: number;
+    status: "Submitted" | "Pending";
+  };
 
-  if (isProtectedLoading) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
-  }
+  const initialWorkspaces = [
+    {
+      id: "acme-health",
+      name: "Acme Health",
+      domain: "acme.vs.app",
+      projects: [
+        { id: "project-1", name: "HR Platform Review", status: "Active", vendors: 3, scorers: 5, requirements: 18, leader: "Northwind Labs" },
+        { id: "project-2", name: "Payroll Platform", status: "Draft", vendors: 2, scorers: 3, requirements: 9, leader: "Pending" },
+      ] as WorkspaceProject[],
+      people: [
+        { id: "person-1", name: "Priya Singh", role: "VS Consultant", team: "Delivery", project: "Workspace" },
+        { id: "person-2", name: "Marcus Reed", role: "Project owner", team: "Operations", project: "HR Platform Review" },
+        { id: "person-3", name: "Leah Stone", role: "Scorer", team: "Procurement", project: "Payroll Platform" },
+      ] as WorkspacePerson[],
+      vendors: [
+        { id: "vendor-1", name: "Northwind Labs", status: "Active", project: "HR Platform Review", score: 89 },
+        { id: "vendor-2", name: "Summit Systems", status: "Submitted", project: "HR Platform Review", score: 84 },
+      ] as WorkspaceVendor[],
+      requirements: [
+        { id: "REQ-101", title: "Recruitment workflow reporting", type: "Functional", priority: "High", status: "Active" },
+        { id: "REQ-102", title: "Audit and logging controls", type: "Non-Functional", priority: "High", status: "Active" },
+      ] as WorkspaceRequirement[],
+      scores: [
+        { scorer: "Priya Singh", vendor: "Northwind Labs", score: 89, status: "Submitted" },
+        { scorer: "Operations Team", vendor: "Summit Systems", score: 84, status: "Submitted" },
+      ] as WorkspaceScore[],
+    },
+    {
+      id: "beta-logistics",
+      name: "Beta Logistics",
+      domain: "beta.vs.app",
+      projects: [
+        { id: "project-3", name: "Fleet Sourcing", status: "Active", vendors: 4, scorers: 4, requirements: 21, leader: "Apex Supply" },
+      ] as WorkspaceProject[],
+      people: [
+        { id: "person-4", name: "Nina Foster", role: "VS Consultant", team: "Delivery", project: "Workspace" },
+        { id: "person-5", name: "Jon Patel", role: "Procurement lead", team: "Logistics", project: "Fleet Sourcing" },
+      ] as WorkspacePerson[],
+      vendors: [
+        { id: "vendor-3", name: "Apex Supply", status: "Active", project: "Fleet Sourcing", score: 92 },
+      ] as WorkspaceVendor[],
+      requirements: [
+        { id: "REQ-201", title: "Route optimisation planning", type: "Functional", priority: "High", status: "Active" },
+      ] as WorkspaceRequirement[],
+      scores: [
+        { scorer: "Nina Foster", vendor: "Apex Supply", score: 92, status: "Submitted" },
+      ] as WorkspaceScore[],
+    },
+  ];
 
-  if (companies === undefined) {
-    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading workspace…</div>;
-  }
+  const [workspaces, setWorkspaces] = useState(initialWorkspaces);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(initialWorkspaces[0].id);
+  const [section, setSection] = useState<WorkspaceSection>("overview");
+  const [selectedProjectId, setSelectedProjectId] = useState(initialWorkspaces[0].projects[0].id);
+  const [selectedPeopleView, setSelectedPeopleView] = useState<"teams" | "manage">("teams");
+  const [selectedVendorView, setSelectedVendorView] = useState<"manage" | "list">("list");
+  const [selectedRequirementsView, setSelectedRequirementsView] = useState<"functional" | "non-functional">("functional");
+  const [selectedScoringView, setSelectedScoringView] = useState<"company" | "vendor">("company");
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newWorkspaceDomain, setNewWorkspaceDomain] = useState("");
 
-  if (!companies.length) {
-    return (
-      <div className="flex min-h-screen bg-slate-950 text-slate-100">
-        <AppSidebar />
-        <main className="flex-1 p-6">
-          <TopBar title="Workspace overview" />
-          <div className="mt-6 max-w-2xl">
-            <CompanySetup />
-          </div>
-        </main>
-      </div>
-    );
-  }
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaces[0];
+  const selectedProject = selectedWorkspace.projects.find((project) => project.id === selectedProjectId) ?? selectedWorkspace.projects[0];
+  const companiesWithDomains = workspaces.filter((workspace) => workspace.domain.trim().length > 0).length;
+  const workspaceMetrics = [
+    { label: "Companies with domains", value: String(companiesWithDomains), helper: "Connected to VS app" },
+    { label: "Projects", value: String(workspaces.reduce((total, workspace) => total + workspace.projects.length, 0)), helper: "Across all workspaces" },
+    { label: "People", value: String(workspaces.reduce((total, workspace) => total + workspace.people.length, 0)), helper: "Across all companies" },
+    { label: "Vendors", value: String(workspaces.reduce((total, workspace) => total + workspace.vendors.length, 0)), helper: "In active sourcing" },
+  ];
 
-  const projectCount = projects?.length ?? 0;
+  const addWorkspace = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!newWorkspaceName.trim()) {
+      return;
+    }
+
+    const newId = newWorkspaceName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const workspace = {
+      id: `${newId}-${Date.now()}`,
+      name: newWorkspaceName.trim(),
+      domain: newWorkspaceDomain.trim() || `${newId}.vs.app`,
+      projects: [],
+      people: [],
+      vendors: [],
+      requirements: [],
+      scores: [],
+    };
+
+    setWorkspaces((current) => [...current, workspace]);
+    setSelectedWorkspaceId(workspace.id);
+    setSection("overview");
+    setNewWorkspaceName("");
+    setNewWorkspaceDomain("");
+  };
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
-      <AppSidebar projectName={companies[0].name} />
+      <aside className="w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5">
+        <div className="mb-8">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">VS Consultant</p>
+          <h2 className="mt-3 text-xl font-semibold text-white">Workspace directory</h2>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Companies</p>
+          <div className="mt-3 space-y-2">
+            {workspaces.map((workspace) => (
+              <button
+                key={workspace.id}
+                type="button"
+                onClick={() => {
+                  setSelectedWorkspaceId(workspace.id);
+                  setSection("overview");
+                }}
+                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm ${selectedWorkspaceId === workspace.id ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+              >
+                <span>{workspace.name}</span>
+                <StatusPill label={`${workspace.projects.length}`} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <form onSubmit={addWorkspace} className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Add workspace</p>
+          <input
+            value={newWorkspaceName}
+            onChange={(event) => setNewWorkspaceName(event.target.value)}
+            placeholder="Company name"
+            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+          />
+          <input
+            value={newWorkspaceDomain}
+            onChange={(event) => setNewWorkspaceDomain(event.target.value)}
+            placeholder="company.vs.app"
+            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+          />
+          <button type="submit" className="mt-3 w-full rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+            Add company workspace
+          </button>
+        </form>
+      </aside>
 
       <main className="flex-1">
-        <TopBar title="Workspace overview" />
+        <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
+              <h1 className="mt-2 text-2xl font-semibold text-white">{selectedWorkspace.name}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs uppercase tracking-[0.14em] text-emerald-200">
+                {selectedWorkspace.domain}
+              </span>
+            </div>
+          </div>
+        </header>
 
         <div className="space-y-6 p-6">
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Active projects" value={String(projectCount)} helper="Across your current company" />
-            <StatCard label="Open requirements" value="0" helper="Loaded once a project is selected" />
-            <StatCard label="Vendors invited" value="0" helper="Invite flows are real and live" />
-            <StatCard label="Score completion" value="0%" helper="Updated from Convex dashboard data" />
+            {workspaceMetrics.map((metric) => (
+              <StatCard key={metric.label} label={metric.label} value={metric.value} helper={metric.helper} />
+            ))}
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">Recent projects</h2>
-                <Link href="/projects" className="text-sm text-sky-300 hover:text-sky-200">
-                  View all
-                </Link>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <div className="flex flex-wrap gap-2">
+              {(["overview", "projects", "people", "vendors", "requirements", "scoring"] as WorkspaceSection[]).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setSection(item)}
+                  className={`rounded-xl border px-3 py-2 text-sm capitalize ${section === item ? "border-sky-500 bg-sky-500/10 text-sky-200" : "border-slate-700 bg-slate-950 text-slate-300"}`}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {section === "overview" && (
+            <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-white">Workspace dashboard</h2>
+                  <button type="button" className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                    Manage company
+                  </button>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Projects</p>
+                    <p className="mt-3 text-3xl font-semibold text-white">{selectedWorkspace.projects.length}</p>
+                    <p className="mt-1 text-sm text-slate-400">Projects in this company workspace</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">People</p>
+                    <p className="mt-3 text-3xl font-semibold text-white">{selectedWorkspace.people.length}</p>
+                    <p className="mt-1 text-sm text-slate-400">Project owners, scorers, and teams</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Vendors</p>
+                    <p className="mt-3 text-3xl font-semibold text-white">{selectedWorkspace.vendors.length}</p>
+                    <p className="mt-1 text-sm text-slate-400">Current vendor roster</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Domain status</p>
+                    <p className="mt-3 text-3xl font-semibold text-white">{selectedWorkspace.domain ? "Live" : "Pending"}</p>
+                    <p className="mt-1 text-sm text-slate-400">{selectedWorkspace.domain}</p>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-3">
-                {(projects ?? []).slice(0, 4).map((project) => (
-                  <Link key={project._id} href={`/projects/${project._id}`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-4 hover:border-slate-700">
-                    <div className="flex items-start justify-between gap-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <h2 className="text-lg font-semibold text-white">Workspace actions</h2>
+                <div className="mt-4 space-y-3 text-sm text-slate-300">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">Add project to this company</div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">Manage people and teams</div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">Add or remove vendors</div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">Upload functional or non-functional requirements</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {section === "projects" && (
+            <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+              <nav className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-white">Projects</h2>
+                  <button type="button" className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                    Add Project
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {selectedWorkspace.projects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => setSelectedProjectId(project.id)}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${selectedProjectId === project.id ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                    >
+                      {project.name}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Project dashboard</p>
+                    <h2 className="mt-2 text-xl font-semibold text-white">{selectedProject.name}</h2>
+                  </div>
+                  <StatusPill label={selectedProject.status} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <StatCard label="Vendors" value={String(selectedProject.vendors)} helper="Active vendor count" />
+                  <StatCard label="Scorers" value={String(selectedProject.scorers)} helper="Assigned scorers" />
+                  <StatCard label="Requirements" value={String(selectedProject.requirements)} helper="Current project requirements" />
+                  <StatCard label="Leading vendor" value={selectedProject.leader} helper="Current leader" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {section === "people" && (
+            <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+              <nav className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="space-y-2">
+                  {[
+                    { key: "teams", label: "Teams" },
+                    { key: "manage", label: "Manage People" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedPeopleView(item.key as "teams" | "manage")}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${selectedPeopleView === item.key ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <h2 className="text-lg font-semibold text-white">{selectedPeopleView === "teams" ? "Teams" : "Manage People"}</h2>
+                <div className="mt-4 space-y-3">
+                  {selectedWorkspace.people.map((person) => (
+                    <div key={person.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                       <div>
-                        <p className="text-base font-medium text-white">{project.name}</p>
-                        <p className="mt-1 text-sm text-slate-400">Created {formatDate(project.createdAt)}</p>
+                        <p className="font-medium text-white">{person.name}</p>
+                        <p className="text-sm text-slate-400">{person.role} • {person.team}</p>
                       </div>
-                      <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+                      <StatusPill label={person.project} />
                     </div>
-                  </Link>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <h2 className="text-lg font-semibold text-white">Action queue</h2>
-              <div className="mt-4 space-y-3 text-sm text-slate-300">
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-                  Create a new project to start the sourcing workflow.
+          {section === "vendors" && (
+            <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+              <nav className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="space-y-2">
+                  {[
+                    { key: "list", label: "Vendors" },
+                    { key: "manage", label: "Manage Vendors" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedVendorView(item.key as "manage" | "list")}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${selectedVendorView === item.key ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-                  Import requirements once you have a draft package.
-                </div>
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-                  Add vendors and scorers from the People tab.
+              </nav>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <h2 className="text-lg font-semibold text-white">{selectedVendorView === "list" ? "Vendor dashboard" : "Manage Vendors"}</h2>
+                <div className="mt-4 space-y-3">
+                  {selectedWorkspace.vendors.map((vendor) => (
+                    <div key={vendor.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                      <div>
+                        <p className="font-medium text-white">{vendor.name}</p>
+                        <p className="text-sm text-slate-400">{vendor.project}</p>
+                      </div>
+                      <div className="text-right">
+                        <StatusPill label={vendor.status} />
+                        <p className="mt-2 text-sm text-slate-300">Score {vendor.score}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
-          </section>
+          )}
+
+          {section === "requirements" && (
+            <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+              <nav className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="space-y-2">
+                  {[
+                    { key: "functional", label: "Functional / User Stories" },
+                    { key: "non-functional", label: "Non-Functional" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedRequirementsView(item.key as "functional" | "non-functional")}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${selectedRequirementsView === item.key ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <h2 className="text-lg font-semibold text-white">Requirements dashboard</h2>
+                <div className="mt-4 rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-5">
+                  <p className="text-base font-medium text-slate-200">Upload requirement file</p>
+                  <p className="mt-2 text-sm text-slate-400">Select whether this upload is Functional or Non-Functional.</p>
+                  <div className="mt-4 flex gap-4 text-sm text-slate-200">
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="requirement-type" defaultChecked />
+                      Functional
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="requirement-type" />
+                      Non-Functional
+                    </label>
+                  </div>
+                  <button type="button" className="mt-4 rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                    Upload CSV / Excel
+                  </button>
+                </div>
+
+                <div className="mt-6 space-y-3">
+                  {selectedWorkspace.requirements.map((requirement) => (
+                    <div key={requirement.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{requirement.id}</p>
+                          <p className="mt-2 text-base font-medium text-white">{requirement.title}</p>
+                        </div>
+                        <StatusPill label={requirement.type} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {section === "scoring" && (
+            <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+              <nav className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+                <div className="space-y-2">
+                  {[
+                    { key: "company", label: "<company name> Scores" },
+                    { key: "vendor", label: "Vendor Scores" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedScoringView(item.key as "company" | "vendor")}
+                      className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${selectedScoringView === item.key ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                <h2 className="text-lg font-semibold text-white">Scoring dashboard</h2>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Vendor leaderboard</p>
+                    <div className="mt-4 space-y-3 text-sm text-slate-200">
+                      {selectedWorkspace.scores
+                        .slice()
+                        .sort((left, right) => right.score - left.score)
+                        .map((score, index) => (
+                          <div key={`${score.vendor}-${index}`} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-3">
+                            <span>{index + 1}. {score.vendor}</span>
+                            <span>{score.score}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Scores by scorer</p>
+                    <div className="mt-4 space-y-3 text-sm text-slate-200">
+                      {selectedWorkspace.scores.map((score) => (
+                        <div key={`${score.scorer}-${score.vendor}`} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                          <p className="font-medium text-white">{score.scorer}</p>
+                          <p className="mt-1 text-slate-300">{score.vendor}: {score.score}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

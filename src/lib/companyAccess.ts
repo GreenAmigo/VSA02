@@ -261,6 +261,62 @@ export function buildScorerAssignment(
   };
 }
 
+export type WorkspaceCompanySummary = {
+  companyId: string;
+  companyName: string;
+  domain: string;
+  projectCount: number;
+  peopleCount: number;
+  vendorCount: number;
+  teamCount: number;
+};
+
+export type WorkspaceSummary = {
+  totalCompanies: number;
+  companiesWithDomains: number;
+  totalProjects: number;
+  totalPeople: number;
+  totalVendors: number;
+  workspaces: WorkspaceCompanySummary[];
+};
+
+export function buildWorkspaceCompanySummary(
+  company: Pick<Company, "id" | "name"> & { domain?: string },
+  projects: Array<{ id: string; companyId: string }>,
+  people: Array<{ id: string; companyId: string }>,
+  vendors: Array<{ id: string; companyId: string }>,
+): WorkspaceCompanySummary {
+  const teamCount = people.filter((person) => person.companyId === company.id && "teamName" in person).length;
+
+  return {
+    companyId: company.id,
+    companyName: company.name,
+    domain: company.domain ?? "not-configured",
+    projectCount: projects.filter((project) => project.companyId === company.id).length,
+    peopleCount: people.filter((person) => person.companyId === company.id).length,
+    vendorCount: vendors.filter((vendor) => vendor.companyId === company.id).length,
+    teamCount,
+  };
+}
+
+export function buildWorkspaceSummary(
+  companies: Array<Pick<Company, "id" | "name"> & { domain?: string }>,
+  projects: Array<{ id: string; companyId: string }>,
+  people: Array<{ id: string; companyId: string; teamName?: string }>,
+  vendors: Array<{ id: string; companyId: string }>,
+): WorkspaceSummary {
+  const workspaces = companies.map((company) => buildWorkspaceCompanySummary(company, projects, people, vendors));
+
+  return {
+    totalCompanies: companies.length,
+    companiesWithDomains: workspaces.filter((workspace) => workspace.domain !== "not-configured").length,
+    totalProjects: workspaces.reduce((total, workspace) => total + workspace.projectCount, 0),
+    totalPeople: workspaces.reduce((total, workspace) => total + workspace.peopleCount, 0),
+    totalVendors: workspaces.reduce((total, workspace) => total + workspace.vendorCount, 0),
+    workspaces,
+  };
+}
+
 export function assertProjectAccess(
   user: SessionUser | null,
   companyId: string,
