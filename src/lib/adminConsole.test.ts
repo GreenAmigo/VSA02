@@ -44,7 +44,7 @@ describe("admin summary", () => {
   it("summarises the consultant workspace dashboard by company", () => {
     const summary = buildWorkspaceSummary(
       [
-        { id: "cmp-acme", name: "Acme Health", domain: "acme.vs.local" },
+        { id: "cmp-acme", name: "Acme Health" },
         { id: "cmp-beta", name: "Beta Logistics" },
       ],
       [
@@ -65,14 +65,12 @@ describe("admin summary", () => {
     );
 
     expect(summary.totalCompanies).toBe(2);
-    expect(summary.companiesWithDomains).toBe(1);
     expect(summary.totalProjects).toBe(3);
     expect(summary.totalPeople).toBe(3);
     expect(summary.totalVendors).toBe(3);
     expect(summary.workspaces[0]).toMatchObject({
       companyId: "cmp-acme",
       companyName: "Acme Health",
-      domain: "acme.vs.local",
       projectCount: 2,
       peopleCount: 2,
       vendorCount: 2,

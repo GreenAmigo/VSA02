@@ -250,7 +250,6 @@ function WorkspaceOverview() {
     {
       id: "acme-health",
       name: "Acme Health",
-      domain: "acme.vs.app",
       projects: [
         { id: "project-1", name: "HR Platform Review", status: "Active", vendors: 3, scorers: 5, requirements: 18, leader: "Northwind Labs" },
         { id: "project-2", name: "Payroll Platform", status: "Draft", vendors: 2, scorers: 3, requirements: 9, leader: "Pending" },
@@ -276,7 +275,6 @@ function WorkspaceOverview() {
     {
       id: "beta-logistics",
       name: "Beta Logistics",
-      domain: "beta.vs.app",
       projects: [
         { id: "project-3", name: "Fleet Sourcing", status: "Active", vendors: 4, scorers: 4, requirements: 21, leader: "Apex Supply" },
       ] as WorkspaceProject[],
@@ -305,13 +303,11 @@ function WorkspaceOverview() {
   const [selectedRequirementsView, setSelectedRequirementsView] = useState<"functional" | "non-functional">("functional");
   const [selectedScoringView, setSelectedScoringView] = useState<"company" | "vendor">("company");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [newWorkspaceDomain, setNewWorkspaceDomain] = useState("");
 
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaces[0];
   const selectedProject = selectedWorkspace.projects.find((project) => project.id === selectedProjectId) ?? selectedWorkspace.projects[0];
-  const companiesWithDomains = workspaces.filter((workspace) => workspace.domain.trim().length > 0).length;
   const workspaceMetrics = [
-    { label: "Companies with domains", value: String(companiesWithDomains), helper: "Connected to VS app" },
+    { label: "Total companies", value: String(workspaces.length), helper: "Workspace count" },
     { label: "Projects", value: String(workspaces.reduce((total, workspace) => total + workspace.projects.length, 0)), helper: "Across all workspaces" },
     { label: "People", value: String(workspaces.reduce((total, workspace) => total + workspace.people.length, 0)), helper: "Across all companies" },
     { label: "Vendors", value: String(workspaces.reduce((total, workspace) => total + workspace.vendors.length, 0)), helper: "In active sourcing" },
@@ -327,7 +323,6 @@ function WorkspaceOverview() {
     const workspace = {
       id: `${newId}-${Date.now()}`,
       name: newWorkspaceName.trim(),
-      domain: newWorkspaceDomain.trim() || `${newId}.vs.app`,
       projects: [],
       people: [],
       vendors: [],
@@ -339,7 +334,6 @@ function WorkspaceOverview() {
     setSelectedWorkspaceId(workspace.id);
     setSection("overview");
     setNewWorkspaceName("");
-    setNewWorkspaceDomain("");
   };
 
   return (
@@ -378,12 +372,6 @@ function WorkspaceOverview() {
             placeholder="Company name"
             className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
           />
-          <input
-            value={newWorkspaceDomain}
-            onChange={(event) => setNewWorkspaceDomain(event.target.value)}
-            placeholder="company.vs.app"
-            className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-          />
           <button type="submit" className="mt-3 w-full rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
             Add company workspace
           </button>
@@ -396,11 +384,6 @@ function WorkspaceOverview() {
             <div>
               <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
               <h1 className="mt-2 text-2xl font-semibold text-white">{selectedWorkspace.name}</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs uppercase tracking-[0.14em] text-emerald-200">
-                {selectedWorkspace.domain}
-              </span>
             </div>
           </div>
         </header>
@@ -453,9 +436,9 @@ function WorkspaceOverview() {
                     <p className="mt-1 text-sm text-slate-400">Current vendor roster</p>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Domain status</p>
-                    <p className="mt-3 text-3xl font-semibold text-white">{selectedWorkspace.domain ? "Live" : "Pending"}</p>
-                    <p className="mt-1 text-sm text-slate-400">{selectedWorkspace.domain}</p>
+                    <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace status</p>
+                    <p className="mt-3 text-3xl font-semibold text-white">Live</p>
+                    <p className="mt-1 text-sm text-slate-400">Company workspace is active</p>
                   </div>
                 </div>
               </div>

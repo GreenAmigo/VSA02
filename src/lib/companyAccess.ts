@@ -264,7 +264,6 @@ export function buildScorerAssignment(
 export type WorkspaceCompanySummary = {
   companyId: string;
   companyName: string;
-  domain: string;
   projectCount: number;
   peopleCount: number;
   vendorCount: number;
@@ -273,7 +272,6 @@ export type WorkspaceCompanySummary = {
 
 export type WorkspaceSummary = {
   totalCompanies: number;
-  companiesWithDomains: number;
   totalProjects: number;
   totalPeople: number;
   totalVendors: number;
@@ -281,7 +279,7 @@ export type WorkspaceSummary = {
 };
 
 export function buildWorkspaceCompanySummary(
-  company: Pick<Company, "id" | "name"> & { domain?: string },
+  company: Pick<Company, "id" | "name">,
   projects: Array<{ id: string; companyId: string }>,
   people: Array<{ id: string; companyId: string }>,
   vendors: Array<{ id: string; companyId: string }>,
@@ -291,7 +289,6 @@ export function buildWorkspaceCompanySummary(
   return {
     companyId: company.id,
     companyName: company.name,
-    domain: company.domain ?? "not-configured",
     projectCount: projects.filter((project) => project.companyId === company.id).length,
     peopleCount: people.filter((person) => person.companyId === company.id).length,
     vendorCount: vendors.filter((vendor) => vendor.companyId === company.id).length,
@@ -300,7 +297,7 @@ export function buildWorkspaceCompanySummary(
 }
 
 export function buildWorkspaceSummary(
-  companies: Array<Pick<Company, "id" | "name"> & { domain?: string }>,
+  companies: Array<Pick<Company, "id" | "name">>,
   projects: Array<{ id: string; companyId: string }>,
   people: Array<{ id: string; companyId: string; teamName?: string }>,
   vendors: Array<{ id: string; companyId: string }>,
@@ -309,7 +306,6 @@ export function buildWorkspaceSummary(
 
   return {
     totalCompanies: companies.length,
-    companiesWithDomains: workspaces.filter((workspace) => workspace.domain !== "not-configured").length,
     totalProjects: workspaces.reduce((total, workspace) => total + workspace.projectCount, 0),
     totalPeople: workspaces.reduce((total, workspace) => total + workspace.peopleCount, 0),
     totalVendors: workspaces.reduce((total, workspace) => total + workspace.vendorCount, 0),

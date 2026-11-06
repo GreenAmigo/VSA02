@@ -43,7 +43,7 @@ export type ConsultantWorkspace = {
   id: string;
   slug: string;
   name: string;
-  domain: string;
+  isTestData: boolean;
   projects: WorkspaceProject[];
   people: WorkspacePerson[];
   vendors: WorkspaceVendor[];
@@ -51,12 +51,48 @@ export type ConsultantWorkspace = {
   scores: WorkspaceScore[];
 };
 
+export type ConsultantActivityLogEntry = {
+  id: string;
+  actor: string;
+  action: string;
+  when: string;
+  workspace: string;
+  details: string;
+};
+
+export const consultantActivityLog: ConsultantActivityLogEntry[] = [
+  {
+    id: "log-1",
+    actor: "Frazer Knight",
+    action: "Granted VS Consultant access",
+    when: "2026-11-06 09:12",
+    workspace: "Acme Health",
+    details: "Granted VS Consultant role to frazerknight@hotmail.com across 2 workspaces.",
+  },
+  {
+    id: "log-2",
+    actor: "System seed",
+    action: "Seeded preview workspace",
+    when: "2026-11-06 08:30",
+    workspace: "Beta Logistics",
+    details: "Created preview-only company seed data and tagged it as test data.",
+  },
+  {
+    id: "log-3",
+    actor: "Priya Singh",
+    action: "Imported requirements",
+    when: "2026-11-06 07:45",
+    workspace: "Acme Health",
+    details: "Imported 18 requirements into the HR Platform Review project.",
+  },
+];
+
 export const consultantWorkspaces: ConsultantWorkspace[] = [
   {
     id: "ws-acme-health",
     slug: "acme-health",
     name: "Acme Health",
-    domain: "acme.vs.app",
+    isTestData: true,
     projects: [
       {
         id: "project-hr-platform",
@@ -99,7 +135,7 @@ export const consultantWorkspaces: ConsultantWorkspace[] = [
     id: "ws-beta-logistics",
     slug: "beta-logistics",
     name: "Beta Logistics",
-    domain: "beta.vs.app",
+    isTestData: true,
     projects: [
       {
         id: "project-fleet",

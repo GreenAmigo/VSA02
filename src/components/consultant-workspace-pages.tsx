@@ -1,14 +1,15 @@
 import Link from "next/link";
 
 import {
+  consultantActivityLog,
   consultantWorkspaces,
   getConsultantWorkspaceBySlug,
   type ConsultantWorkspace,
 } from "@/lib/consultantWorkspaceData";
 
-function StatusPill({ label }: { label: string }) {
+function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
-    <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-200">
+    <span className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${className}`}>
       {label}
     </span>
   );
@@ -57,10 +58,13 @@ function WorkspaceShell({
               <Link
                 key={company.slug}
                 href={`/workspaces/${company.slug}`}
-                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm ${workspace.slug === company.slug ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
+                className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm ${workspace.slug === company.slug ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-200"}`}
               >
                 <span>{company.name}</span>
-                <StatusPill label={`${company.projects.length}`} />
+                <div className="flex items-center gap-2">
+                  {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+                  <StatusPill label={`${company.projects.length}`} />
+                </div>
               </Link>
             ))}
           </div>
@@ -70,7 +74,10 @@ function WorkspaceShell({
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
           <div className="mt-3 space-y-2 text-sm text-slate-300">
             <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-              Back to workspace list
+              Consultant home
+            </Link>
+            <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+              Activity log
             </Link>
             <Link
               href={`/workspaces/${workspace.slug}/import`}
@@ -93,9 +100,7 @@ function WorkspaceShell({
               <h1 className="mt-2 text-2xl font-semibold text-white">{workspace.name}</h1>
             </div>
             <div className="flex items-center gap-3">
-              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs uppercase tracking-[0.14em] text-emerald-200">
-                {workspace.domain}
-              </span>
+              {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
             </div>
           </div>
         </header>
@@ -127,7 +132,6 @@ export function ConsultantWorkspaceDirectoryPage() {
   const totalProjects = consultantWorkspaces.reduce((total, workspace) => total + workspace.projects.length, 0);
   const totalPeople = consultantWorkspaces.reduce((total, workspace) => total + workspace.people.length, 0);
   const totalVendors = consultantWorkspaces.reduce((total, workspace) => total + workspace.vendors.length, 0);
-  const domains = consultantWorkspaces.filter((workspace) => workspace.domain.trim().length > 0).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -135,9 +139,12 @@ export function ConsultantWorkspaceDirectoryPage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">VS Consultant</p>
-            <h1 className="mt-2 text-2xl font-semibold text-white">Workspaces</h1>
+            <h1 className="mt-2 text-2xl font-semibold text-white">Consultant home</h1>
           </div>
           <div className="flex items-center gap-3">
+            <Link href="/workspaces/activity" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+              Activity log
+            </Link>
             <Link href="/workspaces/import" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
               Bulk data import
             </Link>
@@ -150,10 +157,10 @@ export function ConsultantWorkspaceDirectoryPage() {
 
       <div className="space-y-6 p-6">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Companies" value={String(totalCompanies)} helper="Workspaces managed" />
-          <StatCard label="Domains" value={String(domains)} helper="Companies with their own app domain" />
-          <StatCard label="Projects" value={String(totalProjects)} helper="Across all workspaces" />
-          <StatCard label="People & vendors" value={`${totalPeople} / ${totalVendors}`} helper="People and vendors live" />
+          <StatCard label="Total companies" value={String(totalCompanies)} helper="All visible workspaces" />
+          <StatCard label="Total projects" value={String(totalProjects)} helper="Across every workspace" />
+          <StatCard label="Total people" value={String(totalPeople)} helper="Across every workspace" />
+          <StatCard label="Total vendors" value={String(totalVendors)} helper="Across every workspace" />
         </section>
 
         <section className="grid gap-5 xl:grid-cols-2">
@@ -164,7 +171,9 @@ export function ConsultantWorkspaceDirectoryPage() {
                   <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Company workspace</p>
                   <h2 className="mt-2 text-xl font-semibold text-white">{workspace.name}</h2>
                 </div>
-                <StatusPill label={workspace.domain} />
+                <div className="flex items-center gap-2">
+                  {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+                </div>
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -189,6 +198,51 @@ export function ConsultantWorkspaceDirectoryPage() {
   );
 }
 
+export function ConsultantActivityLogPage() {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Consultant view</p>
+            <h1 className="mt-2 text-2xl font-semibold text-white">Activity log</h1>
+          </div>
+          <Link href="/workspaces" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+            Back to consultant home
+          </Link>
+        </div>
+      </header>
+
+      <div className="space-y-6 p-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">Recent actions</h2>
+            <StatusPill label={`${consultantActivityLog.length} events`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+          </div>
+
+          <div className="space-y-3">
+            {consultantActivityLog.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">{entry.actor}</p>
+                    <p className="text-sm text-slate-300">{entry.action}</p>
+                  </div>
+                  <div className="text-right text-xs text-slate-400">
+                    <p>{entry.when}</p>
+                    <p>{entry.workspace}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-slate-400">{entry.details}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: string }) {
   const workspace = getConsultantWorkspaceBySlug(companyId);
 
@@ -198,7 +252,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
         <StatCard label="Projects" value={String(workspace.projects.length)} helper="Project records in workspace" />
         <StatCard label="People" value={String(workspace.people.length)} helper="Members and teams" />
         <StatCard label="Vendors" value={String(workspace.vendors.length)} helper="Company vendor roster" />
-        <StatCard label="Domain" value={workspace.domain} helper="Workspace URL" />
+        <StatCard label="Test data" value={workspace.isTestData ? "Yes" : "No"} helper={workspace.isTestData ? "Preview/test-only workspace" : "Production workspace"} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">

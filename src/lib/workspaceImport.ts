@@ -178,22 +178,22 @@ export function parseWorkspaceCsv(csvText: string): ConsultantWorkspace[] {
     const workspaceName = row.workspace_name || row.name || row.company_name || "Workspace";
     const workspaceSlug = (row.workspace_slug || row.slug || slugify(workspaceName)).trim();
     const workspaceId = row.workspace_id || workspaceSlug;
-    const workspaceDomain = row.workspace_domain || row.domain || `${workspaceSlug}.vs.app`;
 
     let workspace = workspaceMap.get(workspaceSlug);
     if (!workspace) {
-      workspace = {
+      const nextWorkspace: ConsultantWorkspace = {
         id: workspaceId,
         slug: workspaceSlug,
         name: workspaceName,
-        domain: workspaceDomain,
+        isTestData: false,
         projects: [],
         people: [],
         vendors: [],
         requirements: [],
         scores: [],
       };
-      workspaceMap.set(workspaceSlug, workspace);
+      workspaceMap.set(workspaceSlug, nextWorkspace);
+      workspace = nextWorkspace;
     }
 
     const projectName = (row.project_name || row.project || "").trim();

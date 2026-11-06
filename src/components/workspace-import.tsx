@@ -9,9 +9,9 @@ import { consultantWorkspaces } from "@/lib/consultantWorkspaceData";
 import { parseWorkspaceCsv } from "@/lib/workspaceImport";
 
 const sampleJson = JSON.stringify(consultantWorkspaces, null, 2);
-const sampleCsv = `workspace_id,workspace_slug,workspace_name,workspace_domain,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
-ws-acme-health,acme-health,Acme Health,acme.vs.app,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted
-ws-acme-health,acme-health,Acme Health,acme.vs.app,project-2,Payroll Platform,Draft,2,3,9,Pending,person-2,Marcus Reed,Project owner,Operations,HR Platform Review,,,,,,,REQ-102,Audit and logging controls,Non-Functional,High,Active,Operations Team,Northwind Labs,84,Submitted`;
+const sampleCsv = `workspace_id,workspace_slug,workspace_name,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
+ws-acme-health,acme-health,Acme Health,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted
+ws-acme-health,acme-health,Acme Health,project-2,Payroll Platform,Draft,2,3,9,Pending,person-2,Marcus Reed,Project owner,Operations,HR Platform Review,,,,,,,REQ-102,Audit and logging controls,Non-Functional,High,Active,Operations Team,Northwind Labs,84,Submitted`;
 
 type ImportMode = "json" | "csv";
 
@@ -115,15 +115,14 @@ export function WorkspaceImportForm() {
     "id": "ws-acme-health",
     "slug": "acme-health",
     "name": "Acme Health",
-    "domain": "acme.vs.app",
     "projects": [{ "id": "project-1", "name": "HR Platform Review", "status": "Active", "vendorCount": 3, "scorerCount": 5, "requirementCount": 18, "leadingVendor": "Northwind Labs" }],
     "people": [{ "id": "person-1", "name": "Priya Singh", "role": "VS Consultant", "team": "Delivery", "project": "Workspace" }],
     "vendors": [{ "id": "vendor-1", "name": "Northwind Labs", "status": "Active", "project": "HR Platform Review", "score": 89 }],
     "requirements": [{ "id": "REQ-101", "title": "Recruitment workflow reporting", "type": "Functional", "priority": "High", "status": "Active" }],
     "scores": [{ "scorer": "Priya Singh", "vendor": "Northwind Labs", "score": 89, "status": "Submitted" }]
   }
-]` : `workspace_id,workspace_slug,workspace_name,workspace_domain,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
-ws-acme-health,acme-health,Acme Health,acme.vs.app,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted`}</pre>
+]` : `workspace_id,workspace_slug,workspace_name,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
+ws-acme-health,acme-health,Acme Health,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted`}</pre>
           </div>
         </div>
 
