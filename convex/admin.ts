@@ -235,6 +235,90 @@ export const grantConsultantRole = internalMutation({
   },
 });
 
+export const linkWorkOSUserToCompanyAdmin = internalMutation({
+  args: {
+    secret: v.string(),
+    companyId: v.id("companies"),
+    seededUserId: v.string(),
+    workosUserId: v.string(),
+    email: v.optional(v.string()),
+    displayName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Preview/dev user rebinding is disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET before running the developer-only WorkOS rebinding command");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid Consultant grant secret");
+    }
+
+    const company = await ctx.db.get(args.companyId);
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    const seededMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.seededUserId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!seededMembership) {
+      throw new Error("Seeded company admin not found for this company");
+    }
+
+    const targetEmail = (args.email ?? seededMembership.email ?? "").trim().toLowerCase() || undefined;
+    const targetDisplayName = args.displayName?.trim() || seededMembership.displayName || "Company Admin";
+
+    await ctx.db.patch(seededMembership._id, {
+      userId: args.workosUserId,
+      email: targetEmail,
+      displayName: targetDisplayName,
+      role: companyAdminRole,
+      isActive: true,
+      isTestData: false,
+    });
+
+    const projectMemberships = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.seededUserId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    for (const membership of projectMemberships) {
+      await ctx.db.patch(membership._id, {
+        userId: args.workosUserId,
+        displayName: targetDisplayName,
+        isActive: true,
+        isTestData: false,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: "system",
+      actorEmail: targetEmail,
+      action: "link_workos_company_admin",
+      details: `Rebound seeded admin ${args.seededUserId} to WorkOS user ${args.workosUserId} for ${company.name}.`,
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      seededUserId: args.seededUserId,
+      workosUserId: args.workosUserId,
+      email: targetEmail ?? null,
+      displayName: targetDisplayName,
+    };
+  },
+});
+
 export const seedPreviewWorkspaceData = internalMutation({
   args: {
     secret: v.string(),
@@ -287,7 +371,7 @@ export const seedPreviewWorkspaceData = internalMutation({
       await ctx.db.insert("companyMembers", {
         companyId,
         userId: adminUserId,
-        email: `${company.slug}@example.test`,
+        email: `${company.slug}@preview.test`,
         displayName: `${company.name} Admin`,
         role: "company-admin",
         isActive: true,
@@ -319,7 +403,7 @@ export const seedPreviewWorkspaceData = internalMutation({
       await ctx.db.insert("companyMembers", {
         companyId,
         userId: scorerUserId,
-        email: `${company.slug}-scorer@example.test`,
+        email: `${company.slug}-scorer@preview.test`,
         displayName: `${company.name} Scorer`,
         role: "company-scorer",
         isActive: true,
@@ -330,7 +414,7 @@ export const seedPreviewWorkspaceData = internalMutation({
       await ctx.db.insert("companyMembers", {
         companyId,
         userId: vendorUserId,
-        email: `${company.slug}-vendor@example.test`,
+        email: `${company.slug}-vendor@preview.test`,
         displayName: `${company.name} Vendor`,
         role: "vendor",
         isActive: true,

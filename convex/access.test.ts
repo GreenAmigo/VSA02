@@ -169,6 +169,74 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("a developer can rebind a seeded company-admin record to a real WorkOS user", async () => {
+    const t = convexTest({ schema, modules });
+    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-secret";
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "preview";
+
+      await t.mutation(internal.admin.seedPreviewWorkspaceData, {
+        secret: "test-preview-secret",
+      });
+
+      const seededAdmin = t.withIdentity({
+        tokenIdentifier: "test-admin-harbor-logistics-test",
+        email: "test-admin-harbor-logistics-test@preview.test",
+        name: "Harbor Logistics Test Admin",
+      });
+
+      const seededCompanies = await seededAdmin.query(api.access.listAccessibleCompanies, {});
+      const company = seededCompanies.find((item) => item.name === "Harbor Logistics Test");
+
+      expect(company).toBeDefined();
+      const companyId = company!._id;
+
+      await t.mutation(internal.admin.linkWorkOSUserToCompanyAdmin, {
+        secret: "test-consultant-secret",
+        companyId,
+        seededUserId: "test-admin-harbor-logistics-test",
+        workosUserId: "workos_user_frank_preview",
+        email: "frank@maxwellknight.co.uk",
+        displayName: "Frank Maxwell",
+      });
+
+      const identity = t.withIdentity({
+        tokenIdentifier: "workos_user_frank_preview",
+        email: "frank@maxwellknight.co.uk",
+        name: "Frank Maxwell",
+      });
+
+      const companyAccess = await identity.query(api.access.getCompany, { companyId });
+      const linkedMembers = await identity.query(api.admin.listCompanyMembers, { companyId });
+
+      expect(companyAccess.name).toBe("Harbor Logistics Test");
+      expect(linkedMembers.some((member) => member.userId === "workos_user_frank_preview")).toBe(true);
+    } finally {
+      if (previousPreviewSecret === undefined) {
+        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
+      } else {
+        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
+      }
+
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("preview-only workspace seed data is disabled in Production and labels records as test data", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
