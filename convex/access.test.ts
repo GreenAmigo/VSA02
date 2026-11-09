@@ -169,60 +169,65 @@ describe("Phase 2 access checks", () => {
     }
   });
 
-  test("a developer can rebind a seeded company-admin record to a real WorkOS user", async () => {
+  test("a company admin receives only their workspace and is rejected from consultant access", async () => {
     const t = convexTest({ schema, modules });
-    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
+    const seeded = await t.mutation(api.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      companyCName: "Maxwell Knight Ltd",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
     const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
 
     try {
-      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-secret";
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
-      process.env.APP_ENVIRONMENT = "preview";
+      process.env.APP_ENVIRONMENT = "development";
 
-      await t.mutation(internal.admin.seedPreviewWorkspaceData, {
-        secret: "test-preview-secret",
-      });
-
-      const seededAdmin = t.withIdentity({
-        tokenIdentifier: "test-admin-harbor-logistics-test",
-        email: "test-admin-harbor-logistics-test@preview.test",
-        name: "Harbor Logistics Test Admin",
-      });
-
-      const seededCompanies = await seededAdmin.query(api.access.listAccessibleCompanies, {});
-      const company = seededCompanies.find((item) => item.name === "Harbor Logistics Test");
-
-      expect(company).toBeDefined();
-      const companyId = company!._id;
-
-      await t.mutation(internal.admin.linkWorkOSUserToCompanyAdmin, {
+      await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",
-        companyId,
-        seededUserId: "test-admin-harbor-logistics-test",
-        workosUserId: "workos_user_frank_preview",
+        userId: "workos_user_frank_preview",
         email: "frank@maxwellknight.co.uk",
         displayName: "Frank Maxwell",
       });
 
-      const identity = t.withIdentity({
+      const consultantIdentity = t.withIdentity({
         tokenIdentifier: "workos_user_frank_preview",
         email: "frank@maxwellknight.co.uk",
         name: "Frank Maxwell",
       });
 
-      const companyAccess = await identity.query(api.access.getCompany, { companyId });
-      const linkedMembers = await identity.query(api.admin.listCompanyMembers, { companyId });
+      const consultantVisibleCompanies = await consultantIdentity.query(api.access.listAccessibleCompanies, {});
+      expect(consultantVisibleCompanies.map((company) => company._id)).toEqual(
+        expect.arrayContaining([seeded.companyAId, seeded.companyBId, seeded.companyCId]),
+      );
 
-      expect(companyAccess.name).toBe("Harbor Logistics Test");
-      expect(linkedMembers.some((member) => member.userId === "workos_user_frank_preview")).toBe(true);
+      await t.mutation(internal.admin.linkWorkOSUserToCompanyAdmin, {
+        secret: "test-consultant-secret",
+        companyId: seeded.companyAId,
+        seededUserId: "acme-admin",
+        workosUserId: "workos_user_frank_preview",
+        email: "frank@maxwellknight.co.uk",
+        displayName: "Frank Maxwell",
+      });
+
+      const companyAdminIdentity = t.withIdentity({
+        tokenIdentifier: "workos_user_frank_preview",
+        email: "frank@maxwellknight.co.uk",
+        name: "Frank Maxwell",
+      });
+
+      const access = await companyAdminIdentity.query(api.access.getCurrentUserAccess, {});
+      const visibleCompanies = await companyAdminIdentity.query(api.access.listAccessibleCompanies, {});
+
+      expect(access.role).toBe("company-admin");
+      expect(visibleCompanies.map((company) => company._id)).toEqual([seeded.companyAId]);
+      await expect(companyAdminIdentity.query(api.access.getCompany, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
+      await expect(companyAdminIdentity.query(api.admin.listCompanyMembers, { companyId: seeded.companyBId })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+      await expect(companyAdminIdentity.mutation(api.admin.createProject, { companyId: seeded.companyBId, name: "Blocked project" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     } finally {
-      if (previousPreviewSecret === undefined) {
-        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
-      } else {
-        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
-      }
-
       if (previousGrantSecret === undefined) {
         delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
       } else {

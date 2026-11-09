@@ -262,6 +262,20 @@ export const linkWorkOSUserToCompanyAdmin = internalMutation({
       throw new Error("Company not found");
     }
 
+    const staleConsultantMemberships = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("userId"), args.workosUserId))
+      .filter((q: any) => q.eq(q.field("role"), consultantRole))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    for (const stale of staleConsultantMemberships) {
+      await ctx.db.patch(stale._id, {
+        isActive: false,
+        isTestData: false,
+      });
+    }
+
     const seededMembership = await ctx.db
       .query("companyMembers")
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))

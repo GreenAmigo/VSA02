@@ -152,6 +152,13 @@ function AppSidebar({ projectId, projectName }: { projectId?: string; projectNam
 }
 
 function TopBar({ title }: { title: string }) {
+  const { user } = useAuth();
+  const access = useQuery(api.access.getCurrentUserAccess, user ? {} : "skip") as
+    | { email?: string | null; role?: string | null; isConsultant?: boolean }
+    | undefined;
+
+  const displayRole = access?.isConsultant ? "VS Consultant" : access?.role ? access.role.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "User";
+
   return (
     <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
       <div className="flex items-center justify-between gap-4">
@@ -161,6 +168,11 @@ function TopBar({ title }: { title: string }) {
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="mr-2 text-right">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+            <p className="text-sm font-medium text-white">{access?.email ?? user?.email ?? "Unknown user"}</p>
+            <p className="text-xs text-sky-300">{displayRole}</p>
+          </div>
           <Link
             href="/projects/new"
             className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"

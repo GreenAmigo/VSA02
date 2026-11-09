@@ -128,6 +128,39 @@ export const seedScenario = mutation({
   },
 });
 
+export const getCurrentUserAccess = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return {
+        email: null,
+        displayName: null,
+        role: null,
+        isConsultant: false,
+        companyIds: [] as string[],
+      };
+    }
+
+    const memberships = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .take(200);
+
+    const isConsultant = memberships.some((member) => member.role === "vs-consultant");
+    const role = isConsultant ? "vs-consultant" : memberships[0]?.role ?? null;
+
+    return {
+      email: identity.email ?? memberships[0]?.email ?? null,
+      displayName: identity.name ?? memberships[0]?.displayName ?? null,
+      role,
+      isConsultant,
+      companyIds: memberships.map((member) => member.companyId),
+    };
+  },
+});
+
 export const listAccessibleCompanies = query({
   args: {},
   handler: async (ctx) => {
@@ -147,8 +180,8 @@ export const listAccessibleCompanies = query({
       return [] as const;
     }
 
-    const isConsultant = memberships.some((member) => member.role === "vs-consultant");
-    const visibleCompanyIds = isConsultant
+    const consultantMemberships = memberships.filter((member) => member.role === "vs-consultant");
+    const visibleCompanyIds = consultantMemberships.length > 0
       ? (await ctx.db.query("companies").collect()).map((company) => company._id)
       : companyIds;
 
