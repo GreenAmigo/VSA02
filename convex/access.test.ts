@@ -169,6 +169,23 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("a brand-new user signing in for the first time has no role and sees no workspaces", async () => {
+    const t = convexTest({ schema, modules });
+    const firstLogin = t.withIdentity({
+      tokenIdentifier: "first-time-user",
+      email: "new-user@example.com",
+      name: "First Time User",
+    });
+
+    const access = await firstLogin.query(api.access.getCurrentUserAccess, {});
+    const visibleCompanies = await firstLogin.query(api.access.listAccessibleCompanies, {});
+
+    expect(access.email).toBe("new-user@example.com");
+    expect(access.role).toBeNull();
+    expect(access.isConsultant).toBe(false);
+    expect(visibleCompanies).toEqual([]);
+  });
+
   test("a company admin receives only their workspace and is rejected from consultant access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(api.access.seedScenario, {
