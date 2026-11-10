@@ -151,6 +151,35 @@ function AppSidebar({ projectId, projectName }: { projectId?: string; projectNam
   );
 }
 
+function shouldShowPreviewDebugPanel() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const environment = process.env.NEXT_PUBLIC_APP_ENVIRONMENT?.trim().toLowerCase() ?? "";
+  const hostname = window.location.hostname.toLowerCase();
+
+  return environment === "preview" || hostname.includes("preview") || hostname.includes("vspreview");
+}
+
+function PreviewDebugPanel({ access }: { access?: { email?: string | null; role?: string | null; isConsultant?: boolean; tokenIdentifier?: string | null; subject?: string | null } }) {
+  if (!shouldShowPreviewDebugPanel()) {
+    return null;
+  }
+
+  const lookupId = access?.subject ?? access?.tokenIdentifier ?? "unknown";
+  const serverRole = access?.isConsultant ? "VS Consultant" : access?.role ? access.role.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "User";
+
+  return (
+    <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-[10px] text-amber-100 shadow-sm shadow-amber-950/20">
+      <p className="font-medium uppercase tracking-[0.16em] text-amber-300">Preview access debug</p>
+      <p className="mt-1">Email: {access?.email ?? "unknown"}</p>
+      <p>Server role: {serverRole}</p>
+      <p>Lookup ID: {lookupId}</p>
+    </div>
+  );
+}
+
 function TopBar({ title }: { title: string }) {
   const { user } = useAuth();
   const access = useQuery(api.access.getCurrentUserAccess, user ? {} : "skip") as
@@ -176,6 +205,7 @@ function TopBar({ title }: { title: string }) {
             <p className="text-xs text-sky-300">{displayRole}</p>
             <p className="mt-1 text-[10px] text-slate-400">Server subject: {serverIdentity}</p>
             <p className="text-[10px] text-slate-500">Token identifier: {serverTokenIdentifier}</p>
+            <PreviewDebugPanel access={access} />
           </div>
           <Link
             href="/projects/new"
@@ -252,6 +282,7 @@ function WorkspaceOverview() {
           <p className="mt-2 text-sm text-slate-400">Server role: {access.role ?? "none"}</p>
           <p className="mt-2 text-sm text-slate-400">Server subject: {access.subject ?? "none"}</p>
           <p className="mt-1 text-sm text-slate-400">Token identifier: {access.tokenIdentifier ?? "none"}</p>
+          <PreviewDebugPanel access={access} />
           <p className="mt-4 text-sm text-slate-400">No membership was found for this account, so there is nothing to show.</p>
         </div>
       </div>
