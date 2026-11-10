@@ -171,6 +171,14 @@ describe("Phase 2 access checks", () => {
 
   test("a brand-new user signing in for the first time has no role and sees no workspaces", async () => {
     const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(api.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      companyCName: "Maxwell Knight Ltd",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
     const firstLogin = t.withIdentity({
       tokenIdentifier: "first-time-user",
       email: "new-user@example.com",
@@ -183,7 +191,45 @@ describe("Phase 2 access checks", () => {
     expect(access.email).toBe("new-user@example.com");
     expect(access.role).toBeNull();
     expect(access.isConsultant).toBe(false);
+    expect(access.companyIds).toEqual([]);
     expect(visibleCompanies).toEqual([]);
+    await expect(firstLogin.query(api.access.getCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
+    await expect(firstLogin.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
+    await expect(firstLogin.query(api.access.getProject, { projectId: seeded.projectAId })).rejects.toThrow("Project access denied");
+  });
+
+  test("an Acme company admin sees only Acme Health and is blocked from Beta Logistics", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(api.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      companyCName: "Maxwell Knight Ltd",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const acmeAdmin = t.withIdentity({
+      tokenIdentifier: "acme-admin",
+      email: "acme-admin@acme.example",
+      name: "ACME Admin",
+    });
+
+    const access = await acmeAdmin.query(api.access.getCurrentUserAccess, {});
+    const visibleCompanies = await acmeAdmin.query(api.access.listAccessibleCompanies, {});
+    const companyA = await acmeAdmin.query(api.access.getCompany, { companyId: seeded.companyAId });
+    const companyAProjects = await acmeAdmin.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId });
+    const companyAProject = await acmeAdmin.query(api.access.getProject, { projectId: seeded.projectAId });
+
+    expect(access.role).toBe("company-admin");
+    expect(access.companyIds).toEqual([seeded.companyAId]);
+    expect(visibleCompanies.map((company) => company._id)).toEqual([seeded.companyAId]);
+    expect(visibleCompanies.map((company) => company.name)).toEqual(["Acme Health"]);
+    expect(companyA.name).toBe("Acme Health");
+    expect(companyAProjects.map((project) => project._id)).toEqual([seeded.projectAId]);
+    expect(companyAProject._id).toBe(seeded.projectAId);
+    await expect(acmeAdmin.query(api.access.getCompany, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
+    await expect(acmeAdmin.query(api.access.listProjectsForCompany, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
+    await expect(acmeAdmin.query(api.access.getProject, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
   });
 
   test("a company admin receives only their workspace and is rejected from consultant access", async () => {
