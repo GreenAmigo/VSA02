@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { useConvexAuth, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";

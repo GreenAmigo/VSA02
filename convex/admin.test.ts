@@ -163,22 +163,44 @@ describe("admin console actions", () => {
       ssoProvider: "microsoft-entra",
     });
 
-    const archived = await admin.mutation(api.admin.archiveCompany, {
-      companyId: company.companyId,
-    });
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
 
-    expect(archived.isActive).toBe(false);
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-lifecycle-secret";
 
-    const visibleCompanies = await admin.query(api.access.listAccessibleCompanies, {});
-    expect(visibleCompanies.some((item) => item._id === company.companyId)).toBe(false);
+      const archived = await admin.mutation(api.admin.archiveCompany, {
+        companyId: company.companyId,
+        secret: "test-preview-lifecycle-secret",
+      });
 
-    const restored = await admin.mutation(api.admin.restoreCompany, {
-      companyId: company.companyId,
-    });
+      expect(archived.isActive).toBe(false);
 
-    expect(restored.isActive).toBe(true);
-    const visibleAfterRestore = await admin.query(api.access.listAccessibleCompanies, {});
-    expect(visibleAfterRestore.some((item) => item._id === company.companyId)).toBe(true);
+      const visibleCompanies = await admin.query(api.access.listAccessibleCompanies, {});
+      expect(visibleCompanies.some((item) => item._id === company.companyId)).toBe(false);
+
+      const restored = await admin.mutation(api.admin.restoreCompany, {
+        companyId: company.companyId,
+        secret: "test-preview-lifecycle-secret",
+      });
+
+      expect(restored.isActive).toBe(true);
+      const visibleAfterRestore = await admin.query(api.access.listAccessibleCompanies, {});
+      expect(visibleAfterRestore.some((item) => item._id === company.companyId)).toBe(true);
+    } finally {
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+
+      if (previousPreviewSecret === undefined) {
+        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
+      } else {
+        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
+      }
+    }
   });
 
   test("a company can only be permanently deleted after it is archived and the confirmation name matches", async () => {
@@ -195,27 +217,51 @@ describe("admin console actions", () => {
       name: "Procurement Review",
     });
 
-    await expect(admin.mutation(api.admin.deleteCompany, {
-      companyId: company.companyId,
-      confirmationName: "Atlas Medical",
-    })).rejects.toThrow("archive this workspace first");
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
 
-    await admin.mutation(api.admin.archiveCompany, {
-      companyId: company.companyId,
-    });
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-lifecycle-secret";
 
-    await expect(admin.mutation(api.admin.deleteCompany, {
-      companyId: company.companyId,
-      confirmationName: "Wrong Name",
-    })).rejects.toThrow("match the workspace name");
+      await expect(admin.mutation(api.admin.deleteCompany, {
+        companyId: company.companyId,
+        confirmationName: "Atlas Medical",
+        secret: "test-preview-lifecycle-secret",
+      })).rejects.toThrow("archive this workspace first");
 
-    const deleted = await admin.mutation(api.admin.deleteCompany, {
-      companyId: company.companyId,
-      confirmationName: "Atlas Medical",
-    });
+      await admin.mutation(api.admin.archiveCompany, {
+        companyId: company.companyId,
+        secret: "test-preview-lifecycle-secret",
+      });
 
-    expect(deleted.companyId).toBe(company.companyId);
-    expect(deleted.deletedProjects).toBeGreaterThanOrEqual(1);
+      await expect(admin.mutation(api.admin.deleteCompany, {
+        companyId: company.companyId,
+        confirmationName: "Wrong Name",
+        secret: "test-preview-lifecycle-secret",
+      })).rejects.toThrow("match the workspace name");
+
+      const deleted = await admin.mutation(api.admin.deleteCompany, {
+        companyId: company.companyId,
+        confirmationName: "Atlas Medical",
+        secret: "test-preview-lifecycle-secret",
+      });
+
+      expect(deleted.companyId).toBe(company.companyId);
+      expect(deleted.deletedProjects).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+
+      if (previousPreviewSecret === undefined) {
+        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
+      } else {
+        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
+      }
+    }
   });
 });
 

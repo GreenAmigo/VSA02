@@ -196,8 +196,21 @@ export const createCompany = mutation({
 export const archiveCompany = mutation({
   args: {
     companyId: v.id("companies"),
+    secret: v.string(),
   },
   handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Workspace lifecycle controls are disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid preview workspace lifecycle secret");
+    }
+
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not signed in");
@@ -234,8 +247,21 @@ export const archiveCompany = mutation({
 export const restoreCompany = mutation({
   args: {
     companyId: v.id("companies"),
+    secret: v.string(),
   },
   handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Workspace lifecycle controls are disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid preview workspace lifecycle secret");
+    }
+
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not signed in");
@@ -273,8 +299,21 @@ export const deleteCompany = mutation({
   args: {
     companyId: v.id("companies"),
     confirmationName: v.string(),
+    secret: v.string(),
   },
   handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Workspace lifecycle controls are disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid preview workspace lifecycle secret");
+    }
+
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not signed in");
