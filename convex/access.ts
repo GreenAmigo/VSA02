@@ -10,121 +10,148 @@ export const seedScenario = mutation({
     projectBName: v.string(),
   },
   handler: async (ctx, args) => {
-    const companyAId = await ctx.db.insert("companies", {
-      name: args.companyAName,
-      slug: "acme-health",
-      createdBy: "seed",
-      createdAt: Date.now(),
-      isActive: true,
-      ssoProvider: "temporary-login",
-    });
+    const matchByCompanySlug = async (name: string, slug: string) => {
+      const existing = await ctx.db
+        .query("companies")
+        .filter((q) => q.eq(q.field("slug"), slug))
+        .first();
 
-    const companyBId = await ctx.db.insert("companies", {
-      name: args.companyBName,
-      slug: "beta-logistics",
-      createdBy: "seed",
-      createdAt: Date.now(),
-      isActive: true,
-      ssoProvider: "temporary-login",
-    });
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          name,
+          slug,
+          isActive: true,
+          isTestData: true,
+        });
+        return existing;
+      }
 
+      const companyId = await ctx.db.insert("companies", {
+        name,
+        slug,
+        createdBy: "seed",
+        createdAt: Date.now(),
+        isActive: true,
+        ssoProvider: "temporary-login",
+        isTestData: true,
+      });
+
+      return await ctx.db.get(companyId);
+    };
+
+    const companyA = await matchByCompanySlug(args.companyAName, "acme-health");
+    const companyB = await matchByCompanySlug(args.companyBName, "beta-logistics");
     const companyCName = args.companyCName ?? "Maxwell Knight Ltd";
-    const companyCId = await ctx.db.insert("companies", {
-      name: companyCName,
-      slug: "maxwell-knight-ltd",
-      createdBy: "seed",
-      createdAt: Date.now(),
-      isActive: true,
-      ssoProvider: "temporary-login",
-    });
+    const companyC = await matchByCompanySlug(companyCName, "maxwell-knight-ltd");
 
-    const projectAId = await ctx.db.insert("projects", {
-      companyId: companyAId,
+    if (!companyA || !companyB || !companyC) {
+      throw new Error("Failed to create or update the seeded company records");
+    }
+
+    const projectA = await ctx.db
+      .query("projects")
+      .filter((q) => q.eq(q.field("companyId"), companyA._id))
+      .filter((q) => q.eq(q.field("name"), args.projectAName))
+      .first();
+
+    const projectB = await ctx.db
+      .query("projects")
+      .filter((q) => q.eq(q.field("companyId"), companyB._id))
+      .filter((q) => q.eq(q.field("name"), args.projectBName))
+      .first();
+
+    const companyAProjectId = projectA?._id ?? await ctx.db.insert("projects", {
+      companyId: companyA._id,
       name: args.projectAName,
       createdBy: "seed",
       createdAt: Date.now(),
       status: "active",
+      isTestData: true,
     });
 
-    const projectBId = await ctx.db.insert("projects", {
-      companyId: companyBId,
+    const companyBProjectId = projectB?._id ?? await ctx.db.insert("projects", {
+      companyId: companyB._id,
       name: args.projectBName,
       createdBy: "seed",
       createdAt: Date.now(),
       status: "active",
+      isTestData: true,
     });
 
-    await ctx.db.insert("companyMembers", {
-      companyId: companyAId,
-      userId: "acme-admin",
-      email: "acme-admin@acme.example",
-      displayName: "ACME Admin",
-      role: "company-admin",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+    const ensureCompanyMember = async (companyId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer" | "vendor") => {
+      const existing = await ctx.db
+        .query("companyMembers")
+        .filter((q) => q.eq(q.field("companyId"), companyId))
+        .filter((q) => q.eq(q.field("userId"), userId))
+        .first();
 
-    await ctx.db.insert("projectMembers", {
-      companyId: companyAId,
-      projectId: projectAId,
-      userId: "acme-admin",
-      role: "company-admin",
-      displayName: "ACME Admin",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          email,
+          displayName,
+          role,
+          isActive: true,
+          isTestData: true,
+        });
+        return existing._id;
+      }
 
-    await ctx.db.insert("companyMembers", {
-      companyId: companyBId,
-      userId: "beta-scorer",
-      email: "scorer@beta.example",
-      displayName: "Beta Scorer",
-      role: "company-scorer",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+      const memberId = await ctx.db.insert("companyMembers", {
+        companyId,
+        userId,
+        email,
+        displayName,
+        role,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+      return memberId;
+    };
 
-    await ctx.db.insert("projectMembers", {
-      companyId: companyBId,
-      projectId: projectBId,
-      userId: "beta-scorer",
-      role: "company-scorer",
-      displayName: "Beta Scorer",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+    const ensureProjectMember = async (companyId: any, projectId: any, userId: string, role: "company-admin" | "company-scorer" | "vendor", displayName: string) => {
+      const existing = await ctx.db
+        .query("projectMembers")
+        .filter((q) => q.eq(q.field("companyId"), companyId))
+        .filter((q) => q.eq(q.field("projectId"), projectId))
+        .filter((q) => q.eq(q.field("userId"), userId))
+        .first();
 
-    await ctx.db.insert("companyMembers", {
-      companyId: companyBId,
-      userId: "northwind-vendor",
-      email: "vendor@northwind.example",
-      displayName: "Northwind Labs",
-      role: "vendor",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          role,
+          displayName,
+          isActive: true,
+          isTestData: true,
+        });
+        return existing._id;
+      }
 
-    await ctx.db.insert("projectMembers", {
-      companyId: companyBId,
-      projectId: projectBId,
-      userId: "northwind-vendor",
-      role: "vendor",
-      displayName: "Northwind Labs",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+      const memberId = await ctx.db.insert("projectMembers", {
+        companyId,
+        projectId,
+        userId,
+        role,
+        displayName,
+        isActive: true,
+        createdAt: Date.now(),
+        isTestData: true,
+      });
+      return memberId;
+    };
 
-    await ctx.db.insert("companyMembers", {
-      companyId: companyCId,
-      userId: "frazer-knight-admin",
-      email: "frazerknight@hotmail.com",
-      displayName: "Frazer Knight",
-      role: "company-admin",
-      isActive: true,
-      createdAt: Date.now(),
-    });
+    await ensureCompanyMember(companyA._id, "acme-admin", "acme-admin@acme.example", "ACME Admin", "company-admin");
+    await ensureProjectMember(companyA._id, companyAProjectId, "acme-admin", "company-admin", "ACME Admin");
 
-    return { companyAId, companyBId, companyCId, projectAId, projectBId };
+    await ensureCompanyMember(companyB._id, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer");
+    await ensureProjectMember(companyB._id, companyBProjectId, "beta-scorer", "company-scorer", "Beta Scorer");
+
+    await ensureCompanyMember(companyB._id, "northwind-vendor", "vendor@northwind.example", "Northwind Labs", "vendor");
+    await ensureProjectMember(companyB._id, companyBProjectId, "northwind-vendor", "vendor", "Northwind Labs");
+
+    await ensureCompanyMember(companyC._id, "frazer-knight-admin", "frazerknight@hotmail.com", "Frazer Knight", "company-admin");
+
+    return { companyAId: companyA._id, companyBId: companyB._id, companyCId: companyC._id, projectAId: companyAProjectId, projectBId: companyBProjectId };
   },
 });
 

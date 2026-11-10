@@ -127,10 +127,18 @@ describe("admin console actions", () => {
         name: "Seed Importer",
       });
 
-      const visibleCompanies = await seededIdentity.query(api.access.listAccessibleCompanies, {});
-      const acmeCompanies = visibleCompanies.filter((company) => company.name === "Acme Health");
-
+      const companies = await seededIdentity.query(api.access.listAccessibleCompanies, {});
+      const acmeCompanies = companies.filter((company) => company.name === "Acme Health");
       expect(acmeCompanies).toHaveLength(1);
+
+      const sameUserSeed = await t.mutation(internal.admin.seedPreviewWorkspaceData, {
+        secret: "test-preview-seed-secret",
+      });
+      const reSeedList = await seededIdentity.query(api.access.listAccessibleCompanies, {});
+      const reSeedAcme = reSeedList.filter((company) => company.name === "Acme Health");
+
+      expect(sameUserSeed.createdCompanies).toBeGreaterThan(0);
+      expect(reSeedAcme).toHaveLength(1);
     } finally {
       if (previousAppEnvironment === undefined) {
         delete process.env.APP_ENVIRONMENT;
