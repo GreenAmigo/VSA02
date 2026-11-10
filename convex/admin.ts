@@ -8,6 +8,40 @@ function slugify(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "company";
 }
 
+const protectedTestDataUserEmails = new Set(["frazer@maxwellknight.co.uk"]);
+
+async function upsertTestCompanyBySlug(ctx: any, companyName: string, companySlug: string) {
+  const matches = await ctx.db
+    .query("companies")
+    .filter((q: any) => q.eq(q.field("slug"), companySlug))
+    .filter((q: any) => q.eq(q.field("isTestData"), true))
+    .collect();
+
+  const existing = matches[0];
+
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      name: companyName,
+      slug: companySlug,
+      isActive: true,
+      isTestData: true,
+    });
+    return existing;
+  }
+
+  const companyId = await ctx.db.insert("companies", {
+    name: companyName,
+    slug: companySlug,
+    createdBy: "system-seed",
+    createdAt: Date.now(),
+    isActive: true,
+    ssoProvider: "preview-test-data",
+    isTestData: true,
+  });
+
+  return await ctx.db.get(companyId);
+}
+
 function isProductionEnvironment(): boolean {
   const environment = (process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase();
   return environment !== "development" && environment !== "preview";
@@ -359,138 +393,263 @@ export const seedPreviewWorkspaceData = internalMutation({
     const createdCompanies: Array<{ _id: any; name: string }> = [];
 
     for (const company of testCompanies) {
-      const exists = await ctx.db
-        .query("companies")
-        .filter((q: any) => q.eq(q.field("slug"), company.slug))
-        .first();
-
-      if (exists) {
-        createdCompanies.push({ _id: exists._id, name: exists.name });
+      const companyRecord = await upsertTestCompanyBySlug(ctx, company.name, company.slug);
+      if (!companyRecord) {
         continue;
       }
 
-      const companyId = await ctx.db.insert("companies", {
-        name: company.name,
-        slug: company.slug,
-        createdBy: "system-seed",
-        createdAt: Date.now(),
-        isActive: true,
-        ssoProvider: "preview-test-data",
-        isTestData: true,
-      });
-
-      createdCompanies.push({ _id: companyId, name: company.name });
+      createdCompanies.push({ _id: companyRecord._id, name: companyRecord.name });
 
       const adminUserId = `test-admin-${company.slug}`;
-      await ctx.db.insert("companyMembers", {
-        companyId,
-        userId: adminUserId,
-        email: `${company.slug}@preview.test`,
-        displayName: `${company.name} Admin`,
-        role: "company-admin",
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+      const existingAdminMember = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), companyRecord._id))
+        .filter((q: any) => q.eq(q.field("userId"), adminUserId))
+        .first();
 
-      const projectOneId = await ctx.db.insert("projects", {
-        companyId,
-        name: `${company.name} Core Review`,
-        createdBy: "system-seed",
-        createdAt: Date.now(),
-        status: "active",
-        isTestData: true,
-      });
+      if (!existingAdminMember) {
+        await ctx.db.insert("companyMembers", {
+          companyId: companyRecord._id,
+          userId: adminUserId,
+          email: `${company.slug}@preview.test`,
+          displayName: `${company.name} Admin`,
+          role: "company-admin",
+          isActive: true,
+          createdAt: Date.now(),
+          isTestData: true,
+        });
+      }
 
-      const projectTwoId = await ctx.db.insert("projects", {
-        companyId,
-        name: `${company.name} Renewal Review`,
-        createdBy: "system-seed",
-        createdAt: Date.now(),
-        status: "draft",
-        isTestData: true,
-      });
+      const projectNames = [`${company.name} Core Review`, `${company.name} Renewal Review`];
+
+      for (const projectName of projectNames) {
+        const projectMatch = await ctx.db
+          .query("projects")
+          .filter((q: any) => q.eq(q.field("companyId"), companyRecord._id))
+          .filter((q: any) => q.eq(q.field("name"), projectName))
+          .first();
+
+        if (!projectMatch) {
+          await ctx.db.insert("projects", {
+            companyId: companyRecord._id,
+            name: projectName,
+            createdBy: "system-seed",
+            createdAt: Date.now(),
+            status: projectName.endsWith("Renewal Review") ? "draft" : "active",
+            isTestData: true,
+          });
+        }
+      }
+
+      const projectOne = await ctx.db
+        .query("projects")
+        .filter((q: any) => q.eq(q.field("companyId"), companyRecord._id))
+        .filter((q: any) => q.eq(q.field("name"), `${company.name} Core Review`))
+        .first();
+
+      const projectTwo = await ctx.db
+        .query("projects")
+        .filter((q: any) => q.eq(q.field("companyId"), companyRecord._id))
+        .filter((q: any) => q.eq(q.field("name"), `${company.name} Renewal Review`))
+        .first();
 
       const scorerUserId = `test-scorer-${company.slug}`;
       const vendorUserId = `test-vendor-${company.slug}`;
 
-      await ctx.db.insert("companyMembers", {
-        companyId,
-        userId: scorerUserId,
-        email: `${company.slug}-scorer@preview.test`,
-        displayName: `${company.name} Scorer`,
-        role: "company-scorer",
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+      const companyMemberRows = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), companyRecord._id))
+        .collect();
 
-      await ctx.db.insert("companyMembers", {
-        companyId,
-        userId: vendorUserId,
-        email: `${company.slug}-vendor@preview.test`,
-        displayName: `${company.name} Vendor`,
-        role: "vendor",
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+      const ensureCompanyMember = async (userId: string, email: string, displayName: string, role: "company-scorer" | "vendor") => {
+        const existing = companyMemberRows.find((member) => member.userId === userId && member.companyId === companyRecord._id);
+        if (existing) {
+          await ctx.db.patch(existing._id, {
+            email,
+            displayName,
+            role,
+            isActive: true,
+            isTestData: true,
+          });
+          return;
+        }
 
-      await ctx.db.insert("projectMembers", {
-        companyId,
-        projectId: projectOneId,
-        userId: adminUserId,
-        role: "company-admin",
-        displayName: `${company.name} Admin`,
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+        await ctx.db.insert("companyMembers", {
+          companyId: companyRecord._id,
+          userId,
+          email,
+          displayName,
+          role,
+          isActive: true,
+          createdAt: Date.now(),
+          isTestData: true,
+        });
+      };
 
-      await ctx.db.insert("projectMembers", {
-        companyId,
-        projectId: projectOneId,
-        userId: scorerUserId,
-        role: "company-scorer",
-        displayName: `${company.name} Scorer`,
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+      await ensureCompanyMember(scorerUserId, `${company.slug}-scorer@preview.test`, `${company.name} Scorer`, "company-scorer");
+      await ensureCompanyMember(vendorUserId, `${company.slug}-vendor@preview.test`, `${company.name} Vendor`, "vendor");
 
-      await ctx.db.insert("projectMembers", {
-        companyId,
-        projectId: projectOneId,
-        userId: vendorUserId,
-        role: "vendor",
-        displayName: `${company.name} Vendor`,
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+      if (projectOne) {
+        const existingProjectMembers = await ctx.db
+          .query("projectMembers")
+          .filter((q: any) => q.eq(q.field("projectId"), projectOne._id))
+          .collect();
 
-      await ctx.db.insert("projectMembers", {
-        companyId,
-        projectId: projectTwoId,
-        userId: adminUserId,
-        role: "company-admin",
-        displayName: `${company.name} Admin`,
-        isActive: true,
-        createdAt: Date.now(),
-        isTestData: true,
-      });
+        const ensureProjectMember = async (userId: string, role: "company-admin" | "company-scorer" | "vendor", displayName: string) => {
+          const matches = existingProjectMembers.filter((member) => member.userId === userId && member.projectId === projectOne._id);
+          if (matches[0]) {
+            await ctx.db.patch(matches[0]._id, {
+              displayName,
+              role,
+              isActive: true,
+              isTestData: true,
+            });
+            return;
+          }
+
+          await ctx.db.insert("projectMembers", {
+            companyId: companyRecord._id,
+            projectId: projectOne._id,
+            userId,
+            role,
+            displayName,
+            isActive: true,
+            createdAt: Date.now(),
+            isTestData: true,
+          });
+        };
+
+        await ensureProjectMember(adminUserId, "company-admin", `${company.name} Admin`);
+        await ensureProjectMember(scorerUserId, "company-scorer", `${company.name} Scorer`);
+        await ensureProjectMember(vendorUserId, "vendor", `${company.name} Vendor`);
+      }
+
+      if (projectTwo) {
+        const existingProjectMembers = await ctx.db
+          .query("projectMembers")
+          .filter((q: any) => q.eq(q.field("projectId"), projectTwo._id))
+          .collect();
+
+        const adminMember = existingProjectMembers.find((member) => member.userId === adminUserId && member.projectId === projectTwo._id);
+        if (!adminMember) {
+          await ctx.db.insert("projectMembers", {
+            companyId: companyRecord._id,
+            projectId: projectTwo._id,
+            userId: adminUserId,
+            role: "company-admin",
+            displayName: `${company.name} Admin`,
+            isActive: true,
+            createdAt: Date.now(),
+            isTestData: true,
+          });
+        }
+      }
 
       await recordActivity(ctx, {
         actorUserId: "system-seed",
         action: "seed_preview_test_workspaces",
         details: `Created preview-only test workspace data for ${company.name}.`,
-        companyId,
+        companyId: companyRecord._id,
       });
     }
 
     return {
       createdCompanies: createdCompanies.length,
       label: "test-data",
+    };
+  },
+});
+
+export const deleteAllTestData = internalMutation({
+  args: {
+    secret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Test-data cleanup is disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET ?? process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set a preview/dev secret before running test-data cleanup");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid preview seed secret");
+    }
+
+    const testCompanies = await ctx.db
+      .query("companies")
+      .filter((q: any) => q.eq(q.field("isTestData"), true))
+      .collect();
+
+    const testCompanyIds = new Set(testCompanies.map((company) => company._id));
+    const protectedUserIds = new Set(["frazer@maxwellknight.co.uk"]);
+
+    const companyMembers = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("isTestData"), true))
+      .collect();
+
+    for (const member of companyMembers) {
+      if (protectedUserIds.has((member.email ?? member.userId).toLowerCase())) {
+        continue;
+      }
+      await ctx.db.delete(member._id);
+    }
+
+    const projectMembers = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("isTestData"), true))
+      .collect();
+
+    for (const member of projectMembers) {
+      const memberEmail = await ctx.db.get(member.companyId).then((company) => company?.name ?? "");
+      if (memberEmail && memberEmail.toLowerCase().includes("maxwell")) {
+        continue;
+      }
+      await ctx.db.delete(member._id);
+    }
+
+    const testProjects = await ctx.db
+      .query("projects")
+      .filter((q: any) => q.eq(q.field("isTestData"), true))
+      .collect();
+
+    for (const project of testProjects) {
+      await ctx.db.delete(project._id);
+    }
+
+    const requirements = await ctx.db.query("requirements").collect();
+    for (const requirement of requirements) {
+      if (testCompanyIds.has(requirement.companyId) || testProjects.some((project) => project._id === requirement.projectId)) {
+        await ctx.db.delete(requirement._id);
+      }
+    }
+
+    const scores = await ctx.db.query("scores").collect();
+    for (const score of scores) {
+      if (testCompanyIds.has(score.companyId) || testProjects.some((project) => project._id === score.projectId)) {
+        await ctx.db.delete(score._id);
+      }
+    }
+
+    const activityLogs = await ctx.db.query("activityLogs").collect();
+    for (const log of activityLogs) {
+      if (log.actorUserId === "system-seed" || (log.companyId && testCompanyIds.has(log.companyId))) {
+        await ctx.db.delete(log._id);
+      }
+    }
+
+    for (const company of testCompanies) {
+      await ctx.db.delete(company._id);
+    }
+
+    return {
+      deletedCompanies: testCompanies.length,
+      deletedCompanyMembers: companyMembers.filter((member) => !protectedUserIds.has((member.email ?? member.userId).toLowerCase())).length,
+      deletedProjects: testProjects.length,
+      deletedRequirements: requirements.filter((requirement) => testCompanyIds.has(requirement.companyId) || testProjects.some((project) => project._id === requirement.projectId)).length,
+      deletedScores: scores.filter((score) => testCompanyIds.has(score.companyId) || testProjects.some((project) => project._id === score.projectId)).length,
     };
   },
 });

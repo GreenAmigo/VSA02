@@ -85,9 +85,14 @@ export const importWorkspaceBundle = mutation({
     const results: Array<{ workspaceName: string; companyId: string; projectIds: string[] }> = [];
 
     for (const workspace of workspaces) {
-      let company = await ctx.db
+      const matchingCompanies = await ctx.db
         .query("companies")
         .filter((q) => q.eq(q.field("slug"), workspace.slug))
+        .collect();
+
+      let company = matchingCompanies[0] ?? await ctx.db
+        .query("companies")
+        .filter((q) => q.eq(q.field("name"), workspace.name))
         .first();
 
       if (!company) {
@@ -100,10 +105,24 @@ export const importWorkspaceBundle = mutation({
           ssoProvider: "json-import",
         });
         company = await ctx.db.get(companyId);
+      } else {
+        await ctx.db.patch(company._id, {
+          name: workspace.name,
+          slug: workspace.slug,
+          createdBy: actorUserId,
+          isActive: true,
+          ssoProvider: "json-import",
+        });
       }
 
       if (!company) {
         throw new Error(`Failed to create company for ${workspace.name}`);
+      }
+
+      if (matchingCompanies.length > 1) {
+        for (const duplicate of matchingCompanies.slice(1)) {
+          await ctx.db.patch(duplicate._id, { isActive: false });
+        }
       }
 
       const companyMember = await ctx.db
@@ -142,6 +161,11 @@ export const importWorkspaceBundle = mutation({
             status: toProjectStatus(project.status),
           });
           projectDoc = await ctx.db.get(projectId);
+        } else {
+          await ctx.db.patch(projectDoc._id, {
+            name: project.name,
+            status: toProjectStatus(project.status),
+          });
         }
 
         if (!projectDoc) {

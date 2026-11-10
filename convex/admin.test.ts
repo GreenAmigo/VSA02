@@ -3,7 +3,7 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
@@ -64,5 +64,85 @@ describe("admin console actions", () => {
     expect(scorer.displayName).toBe("Sam Lee");
     expect(vendor.role).toBe("vendor");
     expect(scorer.role).toBe("company-scorer");
+  });
+
+  test("re-importing a workspace by the same stable id does not create duplicate companies", async () => {
+    const t = convexTest({ schema, modules });
+    const workspace = {
+      id: "acme-health-seed",
+      slug: "acme-health",
+      name: "Acme Health",
+      domain: "acme.example",
+      projects: [{
+        id: "proj-acme-hr",
+        name: "HR Platform",
+        status: "Active" as const,
+        vendorCount: 1,
+        scorerCount: 1,
+        requirementCount: 1,
+        leadingVendor: "Northwind Labs",
+      }],
+      people: [{
+        id: "person-acme-admin",
+        name: "Frank Maxwell",
+        role: "company-admin",
+        team: "Operations",
+        project: "HR Platform",
+      }],
+      vendors: [{
+        id: "vendor-northwind",
+        name: "Northwind Labs",
+        status: "Active" as const,
+        project: "HR Platform",
+        score: 88,
+      }],
+      requirements: [{
+        id: "REQ-101",
+        title: "Recruitment workflow reporting",
+        type: "Functional" as const,
+        priority: "High" as const,
+        status: "Active" as const,
+      }],
+      scores: [{
+        scorer: "Frank Maxwell",
+        vendor: "Northwind Labs",
+        score: 88,
+        status: "Submitted" as const,
+      }],
+    };
+
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    const previousSeedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
+
+    try {
+      process.env.APP_ENVIRONMENT = "development";
+      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-seed-secret";
+
+      await t.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspace] });
+      await t.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [{ ...workspace, slug: "acme-health-v2" }] });
+
+      const seededIdentity = t.withIdentity({
+        tokenIdentifier: "seed-import",
+        email: "seed-import@example.com",
+        name: "Seed Importer",
+      });
+
+      const visibleCompanies = await seededIdentity.query(api.access.listAccessibleCompanies, {});
+      const acmeCompanies = visibleCompanies.filter((company) => company.name === "Acme Health");
+
+      expect(acmeCompanies).toHaveLength(1);
+    } finally {
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+
+      if (previousSeedSecret === undefined) {
+        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
+      } else {
+        process.env.CONVEX_PREVIEW_SEED_SECRET = previousSeedSecret;
+      }
+    }
   });
 });
