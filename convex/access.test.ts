@@ -169,6 +169,58 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("the server resolves WorkOS subject IDs for company-admin and consultant memberships", async () => {
+    const t = convexTest({ schema, modules });
+    const companyAdmin = t.withIdentity({
+      subject: "user_123",
+      tokenIdentifier: "https://auth.workos.com|user_123",
+      email: "user123@example.com",
+      name: "User 123",
+    });
+
+    const created = await companyAdmin.mutation(api.admin.createCompany, { name: "User 123 Company" });
+
+    const companyAccess = await companyAdmin.query(api.access.getCurrentUserAccess, {});
+    const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+
+    expect(companyAccess.subject).toBe("user_123");
+    expect(companyAccess.tokenIdentifier).toBe("https://auth.workos.com|user_123");
+    expect(companyAccess.role).toBe("company-admin");
+    expect(visibleCompanies.map((company) => company._id)).toEqual([created.companyId]);
+
+    const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "user_123",
+        email: "user123@example.com",
+        displayName: "User 123",
+      });
+
+      const consultantAccess = await companyAdmin.query(api.access.getCurrentUserAccess, {});
+      expect(consultantAccess.isConsultant).toBe(true);
+      expect(consultantAccess.role).toBe("vs-consultant");
+      expect(consultantAccess.companyIds.length).toBeGreaterThan(0);
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("a brand-new user signing in for the first time has no role and sees no workspaces", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

@@ -154,10 +154,12 @@ function AppSidebar({ projectId, projectName }: { projectId?: string; projectNam
 function TopBar({ title }: { title: string }) {
   const { user } = useAuth();
   const access = useQuery(api.access.getCurrentUserAccess, user ? {} : "skip") as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean }
+    | { email?: string | null; role?: string | null; isConsultant?: boolean; tokenIdentifier?: string | null; subject?: string | null }
     | undefined;
 
   const displayRole = access?.isConsultant ? "VS Consultant" : access?.role ? access.role.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "User";
+  const serverIdentity = access?.subject ?? access?.tokenIdentifier ?? "unknown";
+  const serverTokenIdentifier = access?.tokenIdentifier ?? "unknown";
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
@@ -172,6 +174,8 @@ function TopBar({ title }: { title: string }) {
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
             <p className="text-sm font-medium text-white">{access?.email ?? user?.email ?? "Unknown user"}</p>
             <p className="text-xs text-sky-300">{displayRole}</p>
+            <p className="mt-1 text-[10px] text-slate-400">Server subject: {serverIdentity}</p>
+            <p className="text-[10px] text-slate-500">Token identifier: {serverTokenIdentifier}</p>
           </div>
           <Link
             href="/projects/new"
@@ -225,7 +229,7 @@ function WorkspaceOverview() {
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
 
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
+    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[]; tokenIdentifier?: string | null; subject?: string | null }
     | undefined;
 
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as CompanyRecord[] | undefined;
@@ -246,6 +250,8 @@ function WorkspaceOverview() {
           <h1 className="mt-3 text-2xl font-semibold text-white">No workspace access</h1>
           <p className="mt-3 text-slate-300">Signed in as {access.email ?? user?.email ?? "unknown user"}</p>
           <p className="mt-2 text-sm text-slate-400">Server role: {access.role ?? "none"}</p>
+          <p className="mt-2 text-sm text-slate-400">Server subject: {access.subject ?? "none"}</p>
+          <p className="mt-1 text-sm text-slate-400">Token identifier: {access.tokenIdentifier ?? "none"}</p>
           <p className="mt-4 text-sm text-slate-400">No membership was found for this account, so there is nothing to show.</p>
         </div>
       </div>

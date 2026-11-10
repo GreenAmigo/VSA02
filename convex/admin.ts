@@ -69,12 +69,26 @@ async function recordActivity(
   });
 }
 
-async function getActiveConsultantRow(ctx: any, userId: string) {
-  return await ctx.db
-    .query("consultants")
-    .filter((q: any) => q.eq(q.field("userId"), userId))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .first();
+function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
+  return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
+}
+
+async function getActiveConsultantRow(ctx: any, userIds: string | string[]) {
+  const candidateIds = Array.isArray(userIds) ? userIds : [userIds];
+
+  for (const userId of candidateIds) {
+    const row = await ctx.db
+      .query("consultants")
+      .filter((q: any) => q.eq(q.field("userId"), userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (row) {
+      return row;
+    }
+  }
+
+  return null;
 }
 
 async function assertCompanyAdmin(ctx: any, companyId: string) {
@@ -83,14 +97,15 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
     throw new Error("Not signed in");
   }
 
+  const userIds = getIdentityUserIds(identity);
   const member = await ctx.db
     .query("companyMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
-    .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
+    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
-  const consultantRow = await getActiveConsultantRow(ctx, identity.tokenIdentifier);
+  const consultantRow = await getActiveConsultantRow(ctx, userIds);
   const hasConsultantAccess = Boolean(consultantRow) || (member && member.role === consultantRole);
 
   if (!member && !hasConsultantAccess) {
@@ -119,15 +134,16 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
     throw new Error("Project does not belong to this company");
   }
 
+  const userIds = getIdentityUserIds(identity);
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
+    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
   if (!member) {
-    const consultantRow = await getActiveConsultantRow(ctx, identity.tokenIdentifier);
+    const consultantRow = await getActiveConsultantRow(ctx, userIds);
     if (!consultantRow) {
       throw new Error("Project access denied");
     }
@@ -147,10 +163,11 @@ export const createCompany = mutation({
       throw new Error("Not signed in");
     }
 
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
     const companyId = await ctx.db.insert("companies", {
       name: args.name.trim(),
       slug: slugify(args.name),
-      createdBy: identity.tokenIdentifier,
+      createdBy: canonicalUserId,
       createdAt: Date.now(),
       isActive: true,
       ssoProvider: args.ssoProvider,
@@ -159,7 +176,7 @@ export const createCompany = mutation({
 
     await ctx.db.insert("companyMembers", {
       companyId,
-      userId: identity.tokenIdentifier,
+      userId: canonicalUserId,
       email: identity.email ?? undefined,
       displayName: identity.name ?? "Admin",
       role: companyAdminRole,
@@ -707,24 +724,25 @@ export const createProject = mutation({
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
 
-    const projectId = await ctx.db.insert("projects", {
-      companyId: args.companyId,
-      name: args.name.trim(),
-      createdBy: (await ctx.auth.getUserIdentity())?.tokenIdentifier ?? "system",
-      createdAt: Date.now(),
-      status: "active",
-      isTestData: false,
-    });
-
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not signed in");
     }
 
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    const projectId = await ctx.db.insert("projects", {
+      companyId: args.companyId,
+      name: args.name.trim(),
+      createdBy: canonicalUserId,
+      createdAt: Date.now(),
+      status: "active",
+      isTestData: false,
+    });
+
     await ctx.db.insert("projectMembers", {
       companyId: args.companyId,
       projectId,
-      userId: identity.tokenIdentifier,
+      userId: canonicalUserId,
       role: companyAdminRole,
       displayName: identity.name ?? "Admin",
       isActive: true,
