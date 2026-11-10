@@ -133,7 +133,7 @@ export function ConsultantWorkspaceDirectoryPage() {
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
 
-  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string; isTestData?: boolean }> | undefined;
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -190,6 +190,7 @@ export function ConsultantWorkspaceDirectoryPage() {
                   <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Company workspace</p>
                   <h2 className="mt-2 text-xl font-semibold text-white">{company.name}</h2>
                 </div>
+                {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
               </div>
             </div>
           ))}

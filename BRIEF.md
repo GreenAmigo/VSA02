@@ -153,6 +153,13 @@ Phase 1 is approved with the following changes:
 7. Phase 7 — Consultant reporting and data management exports
 8. Phase 8 — Final hardening and release prep
 
+### Phase 1 status update
+- Consultant access and preview-only workspace visibility are in place and enforced on the server.
+- The consultant home, workspace directory and activity-log route are all wired to Convex-backed access queries.
+- Test-workspace records are clearly labelled in the UI with a TEST badge wherever they appear in the consultant directory.
+- The signed-in email and server-provided role remain visible in the preview environment only, without exposing assumptions in production.
+- Remaining work is the next phase: workspace lifecycle and admin controls.
+
 ### How to grant the first VS Consultant
 The first Consultant must be granted by a developer-run server-only action, not by a user-facing screen.
 
