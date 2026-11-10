@@ -171,22 +171,13 @@ describe("Phase 2 access checks", () => {
 
   test("the server resolves WorkOS subject IDs for company-admin and consultant memberships", async () => {
     const t = convexTest({ schema, modules });
-    const companyAdmin = t.withIdentity({
-      subject: "user_123",
-      tokenIdentifier: "https://auth.workos.com|user_123",
-      email: "user123@example.com",
-      name: "User 123",
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      companyCName: "Maxwell Knight Ltd",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
     });
-
-    const created = await companyAdmin.mutation(api.admin.createCompany, { name: "User 123 Company" });
-
-    const companyAccess = await companyAdmin.query(api.access.getCurrentUserAccess, {});
-    const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
-
-    expect(companyAccess.subject).toBe("user_123");
-    expect(companyAccess.tokenIdentifier).toBe("https://auth.workos.com|user_123");
-    expect(companyAccess.role).toBe("company-admin");
-    expect(visibleCompanies.map((company) => company._id)).toEqual([created.companyId]);
 
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
@@ -194,6 +185,30 @@ describe("Phase 2 access checks", () => {
     try {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
       process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.linkWorkOSUserToCompanyAdmin, {
+        secret: "test-consultant-secret",
+        companyId: seeded.companyAId,
+        seededUserId: "acme-admin",
+        workosUserId: "user_123",
+        email: "user123@example.com",
+        displayName: "User 123",
+      });
+
+      const companyAdmin = t.withIdentity({
+        subject: "user_123",
+        tokenIdentifier: "https://auth.workos.com|user_123",
+        email: "user123@example.com",
+        name: "User 123",
+      });
+
+      const companyAccess = await companyAdmin.query(api.access.getCurrentUserAccess, {});
+      const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+
+      expect(companyAccess.subject).toBe("user_123");
+      expect(companyAccess.tokenIdentifier).toBe("https://auth.workos.com|user_123");
+      expect(companyAccess.role).toBe("company-admin");
+      expect(visibleCompanies.map((company) => company._id)).toEqual([seeded.companyAId]);
 
       await t.mutation(internal.admin.grantConsultantRole, {
         secret: "test-consultant-secret",

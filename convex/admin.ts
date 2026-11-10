@@ -91,6 +91,36 @@ async function getActiveConsultantRow(ctx: any, userIds: string | string[]) {
   return null;
 }
 
+async function assertConsultantAccess(ctx: any) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    throw new Error("Not signed in");
+  }
+
+  const userIds = getIdentityUserIds(identity);
+  if (userIds.length === 0) {
+    throw new Error("Only VS Consultants can manage workspaces");
+  }
+
+  const consultantRecord = await getActiveConsultantRow(ctx, userIds);
+  if (consultantRecord) {
+    return identity;
+  }
+
+  const legacyConsultantMembership = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+    .filter((q: any) => q.eq(q.field("role"), consultantRole))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+
+  if (!legacyConsultantMembership) {
+    throw new Error("Only VS Consultants can manage workspaces");
+  }
+
+  return identity;
+}
+
 async function assertCompanyAdmin(ctx: any, companyId: string) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
@@ -158,10 +188,7 @@ export const createCompany = mutation({
     ssoProvider: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
+    const identity = await assertConsultantAccess(ctx);
 
     const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
     const companyId = await ctx.db.insert("companies", {
@@ -196,27 +223,9 @@ export const createCompany = mutation({
 export const archiveCompany = mutation({
   args: {
     companyId: v.id("companies"),
-    secret: v.string(),
   },
   handler: async (ctx, args) => {
-    if (isProductionEnvironment()) {
-      throw new Error("Workspace lifecycle controls are disabled in production");
-    }
-
-    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
-    if (!expectedSecret) {
-      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
-    }
-    if (args.secret !== expectedSecret) {
-      throw new Error("Invalid preview workspace lifecycle secret");
-    }
-
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
-
-    await assertCompanyAdmin(ctx, args.companyId);
+    const identity = await assertConsultantAccess(ctx);
 
     const company = await ctx.db.get(args.companyId);
     if (!company) {
@@ -247,27 +256,9 @@ export const archiveCompany = mutation({
 export const restoreCompany = mutation({
   args: {
     companyId: v.id("companies"),
-    secret: v.string(),
   },
   handler: async (ctx, args) => {
-    if (isProductionEnvironment()) {
-      throw new Error("Workspace lifecycle controls are disabled in production");
-    }
-
-    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
-    if (!expectedSecret) {
-      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
-    }
-    if (args.secret !== expectedSecret) {
-      throw new Error("Invalid preview workspace lifecycle secret");
-    }
-
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
-
-    await assertCompanyAdmin(ctx, args.companyId);
+    const identity = await assertConsultantAccess(ctx);
 
     const company = await ctx.db.get(args.companyId);
     if (!company) {
@@ -299,27 +290,9 @@ export const deleteCompany = mutation({
   args: {
     companyId: v.id("companies"),
     confirmationName: v.string(),
-    secret: v.string(),
   },
   handler: async (ctx, args) => {
-    if (isProductionEnvironment()) {
-      throw new Error("Workspace lifecycle controls are disabled in production");
-    }
-
-    const expectedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET ?? process.env.DEV_CONSULTANT_SEED_SECRET;
-    if (!expectedSecret) {
-      throw new Error("Set CONVEX_PREVIEW_SEED_SECRET before running preview-only workspace lifecycle commands");
-    }
-    if (args.secret !== expectedSecret) {
-      throw new Error("Invalid preview workspace lifecycle secret");
-    }
-
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
-
-    await assertCompanyAdmin(ctx, args.companyId);
+    const identity = await assertConsultantAccess(ctx);
 
     const company = await ctx.db.get(args.companyId);
     if (!company) {
@@ -930,6 +903,16 @@ export const listActivityLogs = query({
       : await ctx.db.query("activityLogs").collect();
 
     return logs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 50);
+  },
+});
+
+export const listWorkspacesForConsultant = query({
+  args: {},
+  handler: async (ctx) => {
+    await assertConsultantAccess(ctx);
+
+    const companies = await ctx.db.query("companies").collect();
+    return companies.sort((a, b) => a.name.localeCompare(b.name));
   },
 });
 

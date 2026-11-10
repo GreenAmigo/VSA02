@@ -7,63 +7,103 @@ import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
+async function withConsultantGrantEnvironment<T>(run: () => Promise<T>) {
+  const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+  const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+  try {
+    process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+    process.env.APP_ENVIRONMENT = "development";
+    return await run();
+  } finally {
+    if (previousGrantSecret === undefined) {
+      delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    } else {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+    }
+
+    if (previousAppEnvironment === undefined) {
+      delete process.env.APP_ENVIRONMENT;
+    } else {
+      process.env.APP_ENVIRONMENT = previousAppEnvironment;
+    }
+  }
+}
+
+async function grantConsultant(t: ReturnType<typeof convexTest>, userId: string, email: string, displayName: string) {
+  await t.mutation(internal.admin.grantConsultantRole, {
+    secret: "test-consultant-secret",
+    userId,
+    email,
+    displayName,
+  });
+}
+
 describe("admin console actions", () => {
   test("company and project creation creates the expected company and project membership records", async () => {
-    const t = convexTest({ schema, modules });
-    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "acme-admin", "acme-admin@example.com", "ACME Admin");
 
-    const company = await admin.mutation(api.admin.createCompany, {
-      name: "Acme Health",
-      ssoProvider: "microsoft-entra",
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Acme Health",
+        ssoProvider: "microsoft-entra",
+      });
+
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "HR Platform Vendor Selection",
+      });
+
+      const members = await admin.query(api.admin.listCompanyMembers, { companyId: company.companyId });
+      const projectMembers = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
+
+      expect(company.name).toBe("Acme Health");
+      expect(project.companyId).toBe(company.companyId);
+      expect(members.some((member) => member.role === "company-admin")).toBe(true);
+      expect(projectMembers.some((member) => member.role === "company-admin")).toBe(true);
     });
-
-    const project = await admin.mutation(api.admin.createProject, {
-      companyId: company.companyId,
-      name: "HR Platform Vendor Selection",
-    });
-
-    const members = await admin.query(api.admin.listCompanyMembers, { companyId: company.companyId });
-    const projectMembers = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
-
-    expect(company.name).toBe("Acme Health");
-    expect(project.companyId).toBe(company.companyId);
-    expect(members.some((member) => member.role === "company-admin")).toBe(true);
-    expect(projectMembers.some((member) => member.role === "company-admin")).toBe(true);
   });
 
   test("project vendor and scorer assignment creates project-scoped rows", async () => {
-    const t = convexTest({ schema, modules });
-    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "acme-admin", "acme-admin@example.com", "ACME Admin");
 
-    const company = await admin.mutation(api.admin.createCompany, {
-      name: "Acme Health",
-      ssoProvider: "microsoft-entra",
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Acme Health",
+        ssoProvider: "microsoft-entra",
+      });
+
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "HR Platform",
+      });
+
+      const vendor = await admin.mutation(api.admin.addProjectVendor, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Northwind Labs",
+        email: "vendor@northwind.example",
+      });
+
+      const scorer = await admin.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Sam Lee",
+        email: "sam@acme.example",
+        role: "individual",
+      });
+
+      expect(vendor.displayName).toBe("Northwind Labs");
+      expect(scorer.displayName).toBe("Sam Lee");
+      expect(vendor.role).toBe("vendor");
+      expect(scorer.role).toBe("company-scorer");
     });
-
-    const project = await admin.mutation(api.admin.createProject, {
-      companyId: company.companyId,
-      name: "HR Platform",
-    });
-
-    const vendor = await admin.mutation(api.admin.addProjectVendor, {
-      companyId: company.companyId,
-      projectId: project.projectId,
-      displayName: "Northwind Labs",
-      email: "vendor@northwind.example",
-    });
-
-    const scorer = await admin.mutation(api.admin.addProjectScorer, {
-      companyId: company.companyId,
-      projectId: project.projectId,
-      displayName: "Sam Lee",
-      email: "sam@acme.example",
-      role: "individual",
-    });
-
-    expect(vendor.displayName).toBe("Northwind Labs");
-    expect(scorer.displayName).toBe("Sam Lee");
-    expect(vendor.role).toBe("vendor");
-    expect(scorer.role).toBe("company-scorer");
   });
 
   test("re-importing a workspace by the same stable id does not create duplicate companies", async () => {
@@ -154,114 +194,113 @@ describe("admin console actions", () => {
     }
   });
 
-  test("a company admin can archive and restore a workspace, and the archived one is hidden from accessible workspaces", async () => {
-    const t = convexTest({ schema, modules });
-    const admin = t.withIdentity({ tokenIdentifier: "workspace-admin" });
+  test("a VS Consultant can archive and restore a workspace, and archive hides it from company users", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      const seeded = await t.mutation(internal.access.seedScenario, {
+        companyAName: "Acme Health",
+        companyBName: "Beta Logistics",
+        companyCName: "Maxwell Knight Ltd",
+        projectAName: "HR Platform",
+        projectBName: "Supply Chain",
+      });
+      await grantConsultant(t, "workspace-consultant", "consultant@example.com", "Workspace Consultant");
 
-    const company = await admin.mutation(api.admin.createCompany, {
-      name: "Northwind Health",
-      ssoProvider: "microsoft-entra",
-    });
+      const consultant = t.withIdentity({ tokenIdentifier: "workspace-consultant" });
+      const companyAdmin = t.withIdentity({ tokenIdentifier: "acme-admin" });
 
-    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
-    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
-
-    try {
-      process.env.APP_ENVIRONMENT = "preview";
-      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-lifecycle-secret";
-
-      const archived = await admin.mutation(api.admin.archiveCompany, {
-        companyId: company.companyId,
-        secret: "test-preview-lifecycle-secret",
+      const archived = await consultant.mutation(api.admin.archiveCompany, {
+        companyId: seeded.companyAId,
       });
 
       expect(archived.isActive).toBe(false);
 
-      const visibleCompanies = await admin.query(api.access.listAccessibleCompanies, {});
-      expect(visibleCompanies.some((item) => item._id === company.companyId)).toBe(false);
+      const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+      expect(visibleCompanies.some((item) => item._id === seeded.companyAId)).toBe(false);
+      await expect(companyAdmin.query(api.access.getCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
 
-      const restored = await admin.mutation(api.admin.restoreCompany, {
-        companyId: company.companyId,
-        secret: "test-preview-lifecycle-secret",
+      const restored = await consultant.mutation(api.admin.restoreCompany, {
+        companyId: seeded.companyAId,
       });
 
       expect(restored.isActive).toBe(true);
-      const visibleAfterRestore = await admin.query(api.access.listAccessibleCompanies, {});
-      expect(visibleAfterRestore.some((item) => item._id === company.companyId)).toBe(true);
-    } finally {
-      if (previousAppEnvironment === undefined) {
-        delete process.env.APP_ENVIRONMENT;
-      } else {
-        process.env.APP_ENVIRONMENT = previousAppEnvironment;
-      }
-
-      if (previousPreviewSecret === undefined) {
-        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
-      } else {
-        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
-      }
-    }
+      const visibleAfterRestore = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+      expect(visibleAfterRestore.some((item) => item._id === seeded.companyAId)).toBe(true);
+    });
   });
 
-  test("a company can only be permanently deleted after it is archived and the confirmation name matches", async () => {
-    const t = convexTest({ schema, modules });
-    const admin = t.withIdentity({ tokenIdentifier: "workspace-delete-admin" });
+  test("only VS Consultants can create, archive, restore, and delete workspaces", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
 
-    const company = await admin.mutation(api.admin.createCompany, {
-      name: "Atlas Medical",
-      ssoProvider: "google-workspace",
-    });
+      await grantConsultant(t, "workspace-consultant", "consultant@example.com", "Workspace Consultant");
+      const consultant = t.withIdentity({ tokenIdentifier: "workspace-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Atlas Medical",
+        ssoProvider: "google-workspace",
+      });
 
-    const project = await admin.mutation(api.admin.createProject, {
-      companyId: company.companyId,
-      name: "Procurement Review",
-    });
+      const companyAdmin = t.withIdentity({ tokenIdentifier: "regular-company-admin" });
 
-    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
-    const previousPreviewSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
+      await expect(companyAdmin.mutation(api.admin.createCompany, {
+        name: "Blocked Workspace",
+      })).rejects.toThrow("Only VS Consultants can manage workspaces");
 
-    try {
-      process.env.APP_ENVIRONMENT = "preview";
-      process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-lifecycle-secret";
+      await expect(companyAdmin.mutation(api.admin.archiveCompany, {
+        companyId: company.companyId,
+      })).rejects.toThrow("Only VS Consultants can manage workspaces");
 
-      await expect(admin.mutation(api.admin.deleteCompany, {
+      await expect(companyAdmin.mutation(api.admin.restoreCompany, {
+        companyId: company.companyId,
+      })).rejects.toThrow("Only VS Consultants can manage workspaces");
+
+      await expect(companyAdmin.mutation(api.admin.deleteCompany, {
         companyId: company.companyId,
         confirmationName: "Atlas Medical",
-        secret: "test-preview-lifecycle-secret",
+      })).rejects.toThrow("Only VS Consultants can manage workspaces");
+    });
+  });
+
+  test("workspace delete requires archive first and exact name match", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "workspace-delete-consultant", "delete-consultant@example.com", "Delete Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "workspace-delete-consultant" });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Atlas Medical",
+        ssoProvider: "google-workspace",
+      });
+
+      const project = await consultant.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Procurement Review",
+      });
+
+      await expect(consultant.mutation(api.admin.deleteCompany, {
+        companyId: company.companyId,
+        confirmationName: "Atlas Medical",
       })).rejects.toThrow("archive this workspace first");
 
-      await admin.mutation(api.admin.archiveCompany, {
+      await consultant.mutation(api.admin.archiveCompany, {
         companyId: company.companyId,
-        secret: "test-preview-lifecycle-secret",
       });
 
-      await expect(admin.mutation(api.admin.deleteCompany, {
+      await expect(consultant.mutation(api.admin.deleteCompany, {
         companyId: company.companyId,
         confirmationName: "Wrong Name",
-        secret: "test-preview-lifecycle-secret",
       })).rejects.toThrow("match the workspace name");
 
-      const deleted = await admin.mutation(api.admin.deleteCompany, {
+      const deleted = await consultant.mutation(api.admin.deleteCompany, {
         companyId: company.companyId,
         confirmationName: "Atlas Medical",
-        secret: "test-preview-lifecycle-secret",
       });
 
+      expect(project.projectId).toBeTruthy();
       expect(deleted.companyId).toBe(company.companyId);
       expect(deleted.deletedProjects).toBeGreaterThanOrEqual(1);
-    } finally {
-      if (previousAppEnvironment === undefined) {
-        delete process.env.APP_ENVIRONMENT;
-      } else {
-        process.env.APP_ENVIRONMENT = previousAppEnvironment;
-      }
-
-      if (previousPreviewSecret === undefined) {
-        delete process.env.CONVEX_PREVIEW_SEED_SECRET;
-      } else {
-        process.env.CONVEX_PREVIEW_SEED_SECRET = previousPreviewSecret;
-      }
-    }
+    });
   });
 });
 

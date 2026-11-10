@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useState } from "react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -17,6 +19,8 @@ type WorkspaceShellWorkspace = {
   requirements: Array<{ id: string; title: string }>;
   scores: Array<{ scorer: string; vendor: string; score: number; status: string }>;
 };
+
+type CompanyId = Id<"companies">;
 
 function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
@@ -129,13 +133,29 @@ function WorkspaceShell({
 export function ConsultantWorkspaceDirectoryPage() {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [workingWorkspaceId, setWorkingWorkspaceId] = useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+
+  const createCompany = useMutation(api.admin.createCompany);
+  const archiveCompany = useMutation(api.admin.archiveCompany);
+  const restoreCompany = useMutation(api.admin.restoreCompany);
+  const deleteCompany = useMutation(api.admin.deleteCompany);
+
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
 
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
 
-  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string; isTestData?: boolean }> | undefined;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as
+    | Array<{ _id: CompanyId; name: string; isTestData?: boolean; isActive?: boolean }>
+    | undefined;
+
+  const consultantWorkspaces = useQuery(
+    api.admin.listWorkspacesForConsultant,
+    isProtectedLoading || !access?.isConsultant ? "skip" : {},
+  ) as Array<{ _id: CompanyId; name: string; isTestData?: boolean; isActive?: boolean }> | undefined;
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -158,6 +178,73 @@ export function ConsultantWorkspaceDirectoryPage() {
 
   const totalCompanies = companies.length;
   const displayRole = access.isConsultant ? "VS Consultant" : access.role ?? "User";
+  const visibleWorkspaces = access.isConsultant ? consultantWorkspaces ?? [] : companies;
+
+  const handleCreateWorkspace = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!newWorkspaceName.trim()) {
+      return;
+    }
+
+    setWorkspaceError(null);
+    setWorkingWorkspaceId("create");
+    try {
+      await createCompany({ name: newWorkspaceName.trim() });
+      setNewWorkspaceName("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to create workspace";
+      setWorkspaceError(message);
+    } finally {
+      setWorkingWorkspaceId(null);
+    }
+  };
+
+  const handleArchiveWorkspace = async (companyId: CompanyId) => {
+    setWorkspaceError(null);
+    setWorkingWorkspaceId(companyId);
+    try {
+      await archiveCompany({ companyId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to archive workspace";
+      setWorkspaceError(message);
+    } finally {
+      setWorkingWorkspaceId(null);
+    }
+  };
+
+  const handleRestoreWorkspace = async (companyId: CompanyId) => {
+    setWorkspaceError(null);
+    setWorkingWorkspaceId(companyId);
+    try {
+      await restoreCompany({ companyId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to restore workspace";
+      setWorkspaceError(message);
+    } finally {
+      setWorkingWorkspaceId(null);
+    }
+  };
+
+  const handleDeleteWorkspace = async (companyId: CompanyId, companyName: string) => {
+    const typedName = window.prompt(`Type the exact workspace name to delete: ${companyName}`)?.trim();
+    if (!typedName) {
+      return;
+    }
+
+    setWorkspaceError(null);
+    setWorkingWorkspaceId(companyId);
+    try {
+      await deleteCompany({
+        companyId,
+        confirmationName: typedName,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete workspace";
+      setWorkspaceError(message);
+    } finally {
+      setWorkingWorkspaceId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -185,18 +272,80 @@ export function ConsultantWorkspaceDirectoryPage() {
         </section>
 
         <section className="grid gap-5 xl:grid-cols-2">
-          {companies.map((company) => (
+          {visibleWorkspaces.map((company) => (
             <div key={company._id} className="block rounded-2xl border border-slate-800 bg-slate-900 p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Company workspace</p>
                   <h2 className="mt-2 text-xl font-semibold text-white">{company.name}</h2>
                 </div>
-                {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+                <div className="flex gap-2">
+                  {company.isActive === false ? <StatusPill label="ARCHIVED" className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
+                  {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+                </div>
               </div>
+
+              {access.isConsultant ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {company.isActive === false ? (
+                    <button
+                      type="button"
+                      onClick={() => handleRestoreWorkspace(company._id)}
+                      disabled={workingWorkspaceId === company._id}
+                      className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 disabled:opacity-60"
+                    >
+                      Restore
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleArchiveWorkspace(company._id)}
+                      disabled={workingWorkspaceId === company._id}
+                      className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100 disabled:opacity-60"
+                    >
+                      Archive
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteWorkspace(company._id, company.name)}
+                    disabled={workingWorkspaceId === company._id}
+                    className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 disabled:opacity-60"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-slate-400">Read-only workspace view for company users.</p>
+              )}
             </div>
           ))}
         </section>
+
+        {access.isConsultant ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Create workspace</h2>
+            <p className="mt-2 text-sm text-slate-400">Workspace lifecycle actions are server-checked for VS Consultants.</p>
+            <form onSubmit={handleCreateWorkspace} className="mt-4 flex flex-col gap-3 md:flex-row">
+              <input
+                value={newWorkspaceName}
+                onChange={(event) => setNewWorkspaceName(event.target.value)}
+                className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                placeholder="Workspace name"
+              />
+              <button
+                type="submit"
+                disabled={workingWorkspaceId === "create"}
+                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Create workspace
+              </button>
+            </form>
+
+            {workspaceError ? <p className="mt-3 text-sm text-rose-300">{workspaceError}</p> : null}
+          </section>
+        ) : null}
       </div>
     </div>
   );
