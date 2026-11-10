@@ -1,7 +1,7 @@
-import { query, mutation } from "./_generated/server";
+import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
-export const seedScenario = mutation({
+export const seedScenario = internalMutation({
   args: {
     companyAName: v.string(),
     companyBName: v.string(),
@@ -365,3 +365,4 @@ export const listProjectRequirements = query({
       .collect();
   },
 });
+

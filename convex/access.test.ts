@@ -10,7 +10,7 @@ const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*
 describe("Phase 2 access checks", () => {
   test("a user can only see companies and projects they belong to", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -33,7 +33,7 @@ describe("Phase 2 access checks", () => {
 
   test("Maxwell Knight admin can access their company and is rejected from other projects", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -54,7 +54,7 @@ describe("Phase 2 access checks", () => {
 
   test("a trusted developer can grant the VS Consultant role across all workspaces", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -171,7 +171,7 @@ describe("Phase 2 access checks", () => {
 
   test("a brand-new user signing in for the first time has no role and sees no workspaces", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -200,7 +200,7 @@ describe("Phase 2 access checks", () => {
 
   test("an Acme company admin sees only Acme Health and is blocked from Beta Logistics", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -234,7 +234,7 @@ describe("Phase 2 access checks", () => {
 
   test("a company admin receives only their workspace and is rejected from consultant access", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -387,7 +387,7 @@ describe("Phase 2 access checks", () => {
 
   test("granting a VS Consultant records an activity log entry", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       companyCName: "Maxwell Knight Ltd",
@@ -430,3 +430,4 @@ describe("Phase 2 access checks", () => {
     }
   });
 });
+

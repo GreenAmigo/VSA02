@@ -3,7 +3,7 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
@@ -11,7 +11,7 @@ describe("Phase 3 vendor emailed-link login", () => {
   test("a valid vendor can request and complete a project-scoped magic link", async () => {
     const t = convexTest({ schema, modules });
 
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       projectAName: "HR Platform",
@@ -36,7 +36,7 @@ describe("Phase 3 vendor emailed-link login", () => {
   test("a vendor cannot request or use a magic link for the wrong project", async () => {
     const t = convexTest({ schema, modules });
 
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       projectAName: "HR Platform",
@@ -71,3 +71,4 @@ describe("Phase 3 vendor emailed-link login", () => {
     expect(completed.email).toBe("vendor@northwind.example");
   });
 });
+

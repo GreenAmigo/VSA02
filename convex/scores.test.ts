@@ -3,14 +3,14 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 5 score audit trail", () => {
   test("a scorer can submit a score and the audit trail records who entered it and when", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       projectAName: "HR Platform",
@@ -55,7 +55,7 @@ describe("Phase 5 score audit trail", () => {
 
   test("vendors can only score their own project row and cannot reach another vendor's submission", async () => {
     const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(api.access.seedScenario, {
+    const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
       companyBName: "Beta Logistics",
       projectAName: "HR Platform",
@@ -108,3 +108,4 @@ describe("Phase 5 score audit trail", () => {
     ).rejects.toThrow("Project access denied");
   });
 });
+
