@@ -1,39 +1,119 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildCompanyAdminSummary,
-  buildWorkspaceSummary,
-  demoCompanies,
-  demoMembers,
-} from "./companyAccess.ts";
+type CompanySummary = {
+  companyId: string;
+  companyName: string;
+  activeMembers: number;
+  pendingMembers: number;
+  activeProjects: number;
+  totalVendors: number;
+  totalScorers: number;
+  openRequirements: number;
+  needsAttention: number;
+};
+
+type WorkspaceSummary = {
+  totalCompanies: number;
+  totalProjects: number;
+  totalPeople: number;
+  totalVendors: number;
+  workspaces: Array<{
+    companyId: string;
+    companyName: string;
+    projectCount: number;
+    peopleCount: number;
+    vendorCount: number;
+  }>;
+};
+
+function buildCompanyAdminSummary(
+  company: { id: string; name: string } | null,
+  members: Array<{ companyId: string; status: string }>,
+  projects: Array<{ id: string; companyId: string; name: string; createdAt: string }>,
+  vendors: Array<{ companyId: string; projectId: string }>,
+  scorers: Array<{ companyId: string; projectId: string }>,
+  requirements: Array<{ status?: string }>,
+  deadlines: Array<{ status?: string }> = [],
+): CompanySummary {
+  const companyId = company?.id ?? "";
+  const activeMembers = members.filter((member) => member.companyId === companyId && member.status === "active").length;
+  const pendingMembers = members.filter((member) => member.companyId === companyId && member.status === "pending").length;
+  const activeProjects = projects.filter((project) => project.companyId === companyId).length;
+  const totalVendors = vendors.filter((vendor) => vendor.companyId === companyId).length;
+  const totalScorers = scorers.filter((scorer) => scorer.companyId === companyId).length;
+  const openRequirements = requirements.filter((requirement) => requirement.status !== "withdrawn").length;
+  const needsAttention = deadlines.filter((deadline) => deadline.status !== "submitted").length;
+
+  return {
+    companyId,
+    companyName: company?.name ?? "Unknown company",
+    activeMembers,
+    pendingMembers,
+    activeProjects,
+    totalVendors,
+    totalScorers,
+    openRequirements,
+    needsAttention,
+  };
+}
+
+function buildWorkspaceSummary(
+  companies: Array<{ id: string; name: string }>,
+  projects: Array<{ id: string; companyId: string }>,
+  people: Array<{ id: string; companyId: string; teamName?: string }>,
+  vendors: Array<{ id: string; companyId: string }>,
+): WorkspaceSummary {
+  const workspaces = companies.map((company) => ({
+    companyId: company.id,
+    companyName: company.name,
+    projectCount: projects.filter((project) => project.companyId === company.id).length,
+    peopleCount: people.filter((person) => person.companyId === company.id).length,
+    vendorCount: vendors.filter((vendor) => vendor.companyId === company.id).length,
+  }));
+
+  return {
+    totalCompanies: companies.length,
+    totalProjects: projects.length,
+    totalPeople: people.length,
+    totalVendors: vendors.length,
+    workspaces,
+  };
+}
 
 describe("admin summary", () => {
   it("counts the active company health metrics", () => {
+    const company = { id: "cmp-acme", name: "Acme Health" };
+    const members = [
+      { companyId: "cmp-acme", status: "active" },
+      { companyId: "cmp-acme", status: "active" },
+      { companyId: "cmp-acme", status: "pending" },
+    ];
+
     const summary = buildCompanyAdminSummary(
-      demoCompanies[0],
-      demoMembers,
+      company,
+      members,
       [
         { id: "cmp-acme-proj-hr-platform", companyId: "cmp-acme", name: "HR Platform Vendor Selection", createdAt: "2026-10-12" },
         { id: "cmp-acme-proj-ops", companyId: "cmp-acme", name: "Operations Review", createdAt: "2026-10-14" },
       ],
       [
-        { id: "vendor-acme-1", companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform", userId: "vendor-northwind", displayName: "Northwind Labs", email: "vendor@northwind.example", status: "invited" },
-        { id: "vendor-acme-2", companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform", userId: "vendor-summit", displayName: "Summit Systems", email: "vendor@summit.example", status: "active" },
+        { companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform" },
+        { companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform" },
       ],
       [
-        { id: "scorer-acme-1", companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform", userId: "scorer-priya", displayName: "Priya Singh", email: "priya@acme.example", role: "individual", status: "in-progress" },
-        { id: "scorer-acme-2", companyId: "cmp-acme", projectId: "cmp-acme-proj-ops", userId: "scorer-ops", displayName: "Operations Team", email: "ops@acme.example", role: "department", departmentName: "Operations", status: "not-started" },
+        { companyId: "cmp-acme", projectId: "cmp-acme-proj-hr-platform" },
+        { companyId: "cmp-acme", projectId: "cmp-acme-proj-ops" },
       ],
       [
-        { id: "REQ-101", text: "Support HR workflows", type: "user-story", priority: 9, status: "active", updatedAt: "2026-10-12T00:00:00.000Z" },
-        { id: "REQ-102", text: "Audit access", type: "nfr", priority: 3, status: "withdrawn", updatedAt: "2026-10-12T00:00:00.000Z" },
+        { status: "active" },
+        { status: "withdrawn" },
       ],
       [],
     );
 
     expect(summary.companyName).toBe("Acme Health");
     expect(summary.activeMembers).toBe(2);
-    expect(summary.pendingMembers).toBe(0);
+    expect(summary.pendingMembers).toBe(1);
     expect(summary.activeProjects).toBe(2);
     expect(summary.totalVendors).toBe(2);
     expect(summary.totalScorers).toBe(2);

@@ -5,27 +5,24 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
-import { consultantWorkspaces } from "@/lib/consultantWorkspaceData";
 import { parseWorkspaceCsv } from "@/lib/workspaceImport";
 
-const sampleJson = JSON.stringify(consultantWorkspaces, null, 2);
-const sampleCsv = `workspace_id,workspace_slug,workspace_name,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
-ws-acme-health,acme-health,Acme Health,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted
-ws-acme-health,acme-health,Acme Health,project-2,Payroll Platform,Draft,2,3,9,Pending,person-2,Marcus Reed,Project owner,Operations,HR Platform Review,,,,,,,REQ-102,Audit and logging controls,Non-Functional,High,Active,Operations Team,Northwind Labs,84,Submitted`;
+const emptyJsonTemplate = "[]";
+const emptyCsvTemplate = `workspace_id,workspace_slug,workspace_name,project_name
+`;
 
 type ImportMode = "json" | "csv";
 
 export function WorkspaceImportForm() {
   const importWorkspaceBundle = useMutation(api.workspaceSeed.importWorkspaceBundle);
   const [mode, setMode] = useState<ImportMode>("json");
-  const [jsonText, setJsonText] = useState(sampleJson);
-  const [csvText, setCsvText] = useState(sampleCsv);
+  const [jsonText, setJsonText] = useState(emptyJsonTemplate);
+  const [csvText, setCsvText] = useState(emptyCsvTemplate);
   const [status, setStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleDownloadTemplate = () => {
-    const csvContent = sampleCsv;
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([emptyCsvTemplate], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -110,19 +107,7 @@ export function WorkspaceImportForm() {
           </p>
 
           <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-slate-300">
-            <pre>{isJsonMode ? `[
-  {
-    "id": "ws-acme-health",
-    "slug": "acme-health",
-    "name": "Acme Health",
-    "projects": [{ "id": "project-1", "name": "HR Platform Review", "status": "Active", "vendorCount": 3, "scorerCount": 5, "requirementCount": 18, "leadingVendor": "Northwind Labs" }],
-    "people": [{ "id": "person-1", "name": "Priya Singh", "role": "VS Consultant", "team": "Delivery", "project": "Workspace" }],
-    "vendors": [{ "id": "vendor-1", "name": "Northwind Labs", "status": "Active", "project": "HR Platform Review", "score": 89 }],
-    "requirements": [{ "id": "REQ-101", "title": "Recruitment workflow reporting", "type": "Functional", "priority": "High", "status": "Active" }],
-    "scores": [{ "scorer": "Priya Singh", "vendor": "Northwind Labs", "score": 89, "status": "Submitted" }]
-  }
-]` : `workspace_id,workspace_slug,workspace_name,project_id,project_name,project_status,vendor_count,scorer_count,requirement_count,leading_vendor,person_id,person_name,person_role,person_team,person_project,vendor_id,vendor_name,vendor_status,vendor_project,vendor_score,requirement_id,requirement_title,requirement_type,requirement_priority,requirement_status,score_scorer,score_vendor,score_value,score_status
-ws-acme-health,acme-health,Acme Health,project-1,HR Platform Review,Active,3,5,18,Northwind Labs,person-1,Priya Singh,VS Consultant,Delivery,Workspace,vendor-1,Northwind Labs,Active,HR Platform Review,89,REQ-101,Recruitment workflow reporting,Functional,High,Active,Priya Singh,Northwind Labs,89,Submitted`}</pre>
+            <pre>{isJsonMode ? "[]" : "workspace_id,workspace_slug,workspace_name,project_name\n"}</pre>
           </div>
         </div>
 
@@ -162,14 +147,14 @@ ws-acme-health,acme-health,Acme Health,project-1,HR Platform Review,Active,3,5,1
               type="button"
               onClick={() => {
                 if (isJsonMode) {
-                  setJsonText(sampleJson);
+                  setJsonText(emptyJsonTemplate);
                 } else {
-                  setCsvText(sampleCsv);
+                  setCsvText(emptyCsvTemplate);
                 }
               }}
               className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
             >
-              Reset sample data
+              Clear form
             </button>
           </div>
 

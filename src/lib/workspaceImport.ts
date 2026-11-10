@@ -1,11 +1,55 @@
-import type {
-  ConsultantWorkspace,
-  WorkspacePerson,
-  WorkspaceProject,
-  WorkspaceRequirement,
-  WorkspaceScore,
-  WorkspaceVendor,
-} from "./consultantWorkspaceData";
+export type WorkspaceProject = {
+  id: string;
+  name: string;
+  status: "Active" | "Draft";
+  vendorCount: number;
+  scorerCount: number;
+  requirementCount: number;
+  leadingVendor: string;
+};
+
+export type WorkspacePerson = {
+  id: string;
+  name: string;
+  role: string;
+  team: string;
+  project: string;
+};
+
+export type WorkspaceVendor = {
+  id: string;
+  name: string;
+  status: "Active" | "Invited" | "Submitted";
+  project: string;
+  score: number;
+};
+
+export type WorkspaceRequirement = {
+  id: string;
+  title: string;
+  type: "Functional" | "Non-Functional";
+  priority: "High" | "Medium" | "Low";
+  status: "Active" | "Draft";
+};
+
+export type WorkspaceScore = {
+  scorer: string;
+  vendor: string;
+  score: number;
+  status: "Submitted" | "Pending";
+};
+
+export type ConsultantWorkspace = {
+  id: string;
+  slug: string;
+  name: string;
+  isTestData: boolean;
+  projects: WorkspaceProject[];
+  people: WorkspacePerson[];
+  vendors: WorkspaceVendor[];
+  requirements: WorkspaceRequirement[];
+  scores: WorkspaceScore[];
+};
 
 function slugify(value: string): string {
   return value

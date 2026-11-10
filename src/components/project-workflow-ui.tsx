@@ -186,7 +186,7 @@ function TopBar({ title }: { title: string }) {
 }
 
 function CompanySetup({ onCreated }: { onCreated?: () => void }) {
-  const [name, setName] = useState("Acme Health");
+  const [name, setName] = useState("");
   const createCompany = useMutation(api.admin.createCompany);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

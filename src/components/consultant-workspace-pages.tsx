@@ -4,7 +4,17 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
 
-import type { ConsultantWorkspace } from "@/lib/consultantWorkspaceData";
+type WorkspaceShellWorkspace = {
+  id: string;
+  slug: string;
+  name: string;
+  isTestData: boolean;
+  projects: Array<{ id: string; name: string }>;
+  people: Array<{ id: string; name: string }>;
+  vendors: Array<{ id: string; name: string }>;
+  requirements: Array<{ id: string; title: string }>;
+  scores: Array<{ scorer: string; vendor: string; score: number; status: string }>;
+};
 
 function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
@@ -29,7 +39,7 @@ function WorkspaceShell({
   activeTab,
   children,
 }: {
-  workspace: ConsultantWorkspace;
+  workspace: WorkspaceShellWorkspace;
   activeTab: "overview" | "projects" | "people" | "vendors" | "requirements" | "scoring";
   children: React.ReactNode;
 }) {
@@ -276,7 +286,20 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
   const workspace = companies.find((company) => company._id === companyId) ?? companies[0] ?? { _id: companyId, name: companyId };
 
   return (
-    <WorkspaceShell workspace={{ id: workspace._id, slug: workspace._id, name: workspace.name, isTestData: false, projects: [], people: [], vendors: [], requirements: [], scores: [] } as ConsultantWorkspace} activeTab="overview">
+    <WorkspaceShell
+      workspace={{
+        id: workspace._id,
+        slug: workspace._id,
+        name: workspace.name,
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="overview"
+    >
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Company" value={workspace.name} helper="Visible via Convex access" />
         <StatCard label="Role" value={access.isConsultant ? "VS Consultant" : access.role ?? "User"} helper="Server role" />
