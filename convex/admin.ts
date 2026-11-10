@@ -69,6 +69,14 @@ async function recordActivity(
   });
 }
 
+async function getActiveConsultantRow(ctx: any, userId: string) {
+  return await ctx.db
+    .query("consultants")
+    .filter((q: any) => q.eq(q.field("userId"), userId))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+}
+
 async function assertCompanyAdmin(ctx: any, companyId: string) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
@@ -82,7 +90,14 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
-  if (!member || (member.role !== companyAdminRole && member.role !== consultantRole)) {
+  const consultantRow = await getActiveConsultantRow(ctx, identity.tokenIdentifier);
+  const hasConsultantAccess = Boolean(consultantRow) || (member && member.role === consultantRole);
+
+  if (!member && !hasConsultantAccess) {
+    throw new Error("Only company admins or VS Consultants can manage this company");
+  }
+
+  if (member && member.role !== companyAdminRole && member.role !== consultantRole) {
     throw new Error("Only company admins or VS Consultants can manage this company");
   }
 
@@ -112,7 +127,10 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
     .first();
 
   if (!member) {
-    throw new Error("Project access denied");
+    const consultantRow = await getActiveConsultantRow(ctx, identity.tokenIdentifier);
+    if (!consultantRow) {
+      throw new Error("Project access denied");
+    }
   }
 
   return project;
@@ -150,33 +168,6 @@ export const createCompany = mutation({
       isTestData: false,
     });
 
-    const consultantMembers = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("role"), consultantRole))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .take(200);
-
-    for (const consultant of consultantMembers) {
-      const existingMembership = await ctx.db
-        .query("companyMembers")
-        .filter((q: any) => q.eq(q.field("companyId"), companyId))
-        .filter((q: any) => q.eq(q.field("userId"), consultant.userId))
-        .first();
-
-      if (!existingMembership) {
-        await ctx.db.insert("companyMembers", {
-          companyId,
-          userId: consultant.userId,
-          email: consultant.email,
-          displayName: consultant.displayName,
-          role: consultantRole,
-          isActive: true,
-          createdAt: Date.now(),
-          isTestData: false,
-        });
-      }
-    }
-
     return {
       companyId,
       name: args.name.trim(),
@@ -209,54 +200,49 @@ export const grantConsultantRole = internalMutation({
     const targetUserId = args.userId.trim();
     const targetEmail = (args.email ?? "").trim().toLowerCase() || undefined;
     const targetDisplayName = args.displayName?.trim() || targetEmail || "VS Consultant";
-    const companies = args.companyId
-      ? [await ctx.db.get(args.companyId)]
-      : await ctx.db.query("companies").collect();
 
-    const validCompanies = companies.filter((company): company is NonNullable<typeof company> => company !== null);
-    if (validCompanies.length === 0) {
-      throw new Error("No companies available to grant Consultant access to");
+    const existingConsultant = await getActiveConsultantRow(ctx, targetUserId);
+    if (existingConsultant) {
+      await ctx.db.patch(existingConsultant._id, {
+        email: targetEmail ?? existingConsultant.email,
+        displayName: targetDisplayName,
+        isActive: true,
+        grantedAt: Date.now(),
+        grantedBy: "system",
+        isTestData: false,
+      });
+    } else {
+      await ctx.db.insert("consultants", {
+        userId: targetUserId,
+        email: targetEmail,
+        displayName: targetDisplayName,
+        isActive: true,
+        grantedAt: Date.now(),
+        grantedBy: "system",
+        isTestData: false,
+      });
     }
 
-    let grantedCount = 0;
+    const legacyConsultantRows = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("userId"), targetUserId))
+      .filter((q: any) => q.eq(q.field("role"), consultantRole))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
 
-    for (const company of validCompanies) {
-      const existing = await ctx.db
-        .query("companyMembers")
-        .filter((q: any) => q.eq(q.field("companyId"), company._id))
-        .filter((q: any) => q.eq(q.field("userId"), targetUserId))
-        .first();
-
-      if (existing) {
-        await ctx.db.patch(existing._id, {
-          email: targetEmail ?? existing.email,
-          displayName: targetDisplayName,
-          role: consultantRole,
-          isActive: true,
-          isTestData: false,
-        });
-      } else {
-        await ctx.db.insert("companyMembers", {
-          companyId: company._id,
-          userId: targetUserId,
-          email: targetEmail,
-          displayName: targetDisplayName,
-          role: consultantRole,
-          isActive: true,
-          createdAt: Date.now(),
-          isTestData: false,
-        });
-      }
-
-      grantedCount += 1;
+    for (const legacyRow of legacyConsultantRows) {
+      await ctx.db.patch(legacyRow._id, {
+        isActive: false,
+        isTestData: false,
+      });
     }
 
     await recordActivity(ctx, {
       actorUserId: "system",
       actorEmail: targetEmail,
       action: "grant_vs_consultant_role",
-      details: `Granted the VS Consultant role to ${targetDisplayName} (${targetUserId}) across ${grantedCount} workspaces.`,
-      companyId: validCompanies[0]._id,
+      details: `Granted the platform-level VS Consultant role to ${targetDisplayName} (${targetUserId}).`,
+      companyId: args.companyId,
     });
 
     return {
@@ -264,7 +250,7 @@ export const grantConsultantRole = internalMutation({
       userId: targetUserId,
       email: targetEmail ?? null,
       displayName: targetDisplayName,
-      grantedCount,
+      grantedCount: 1,
     };
   },
 });
@@ -305,6 +291,14 @@ export const linkWorkOSUserToCompanyAdmin = internalMutation({
 
     for (const stale of staleConsultantMemberships) {
       await ctx.db.patch(stale._id, {
+        isActive: false,
+        isTestData: false,
+      });
+    }
+
+    const consultantRecord = await getActiveConsultantRow(ctx, args.workosUserId);
+    if (consultantRecord) {
+      await ctx.db.patch(consultantRecord._id, {
         isActive: false,
         isTestData: false,
       });
@@ -595,6 +589,15 @@ export const deleteAllTestData = internalMutation({
         continue;
       }
       await ctx.db.delete(member._id);
+    }
+
+    const consultants = await ctx.db
+      .query("consultants")
+      .filter((q: any) => q.eq(q.field("isTestData"), true))
+      .collect();
+
+    for (const consultant of consultants) {
+      await ctx.db.delete(consultant._id);
     }
 
     const projectMembers = await ctx.db

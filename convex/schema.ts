@@ -12,6 +12,16 @@ export default defineSchema({
     isTestData: v.optional(v.boolean()),
   }).index("by_slug", ["slug"]),
 
+  consultants: defineTable({
+    userId: v.string(),
+    email: v.optional(v.string()),
+    displayName: v.string(),
+    isActive: v.boolean(),
+    grantedAt: v.number(),
+    grantedBy: v.optional(v.string()),
+    isTestData: v.optional(v.boolean()),
+  }).index("by_user", ["userId"]),
+
   companyMembers: defineTable({
     companyId: v.id("companies"),
     userId: v.string(),

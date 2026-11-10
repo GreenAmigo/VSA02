@@ -1,6 +1,25 @@
 import { query, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
+async function getActiveConsultantRecord(ctx: any, userId: string) {
+  const activeConsultant = await ctx.db
+    .query("consultants")
+    .filter((q: any) => q.eq(q.field("userId"), userId))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+
+  if (activeConsultant) {
+    return activeConsultant;
+  }
+
+  return await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("userId"), userId))
+    .filter((q: any) => q.eq(q.field("role"), "vs-consultant"))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+}
+
 export const seedScenario = internalMutation({
   args: {
     companyAName: v.string(),
@@ -175,15 +194,22 @@ export const getCurrentUserAccess = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
 
-    const isConsultant = memberships.some((member) => member.role === "vs-consultant");
+    const consultantRecord = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
+    const isConsultant = Boolean(consultantRecord);
     const role = isConsultant ? "vs-consultant" : memberships[0]?.role ?? null;
 
+    let companyIds = memberships.map((member) => member.companyId);
+    if (isConsultant) {
+      const allCompanies = await ctx.db.query("companies").collect();
+      companyIds = allCompanies.map((company) => company._id);
+    }
+
     return {
-      email: identity.email ?? memberships[0]?.email ?? null,
-      displayName: identity.name ?? memberships[0]?.displayName ?? null,
+      email: identity.email ?? memberships[0]?.email ?? consultantRecord?.email ?? null,
+      displayName: identity.name ?? memberships[0]?.displayName ?? consultantRecord?.displayName ?? null,
       role,
       isConsultant,
-      companyIds: memberships.map((member) => member.companyId),
+      companyIds,
     };
   },
 });
@@ -202,15 +228,18 @@ export const listAccessibleCompanies = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
 
+    const consultantRecord = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
     const companyIds = memberships.map((item) => item.companyId);
+    if (consultantRecord) {
+      const companies = await ctx.db.query("companies").collect();
+      return companies.filter((company) => company.isActive !== false);
+    }
+
     if (companyIds.length === 0) {
       return [] as const;
     }
 
-    const consultantMemberships = memberships.filter((member) => member.role === "vs-consultant");
-    const visibleCompanyIds = consultantMemberships.length > 0
-      ? (await ctx.db.query("companies").collect()).map((company) => company._id)
-      : companyIds;
+    const visibleCompanyIds = companyIds;
 
     const companies = await Promise.all(
       visibleCompanyIds.map((id) => ctx.db.get(id)),
@@ -241,15 +270,12 @@ export const getCompany = query({
       .first();
 
     if (!membership) {
-      const consultantMembership = await ctx.db
-        .query("companyMembers")
-        .filter((q) => q.eq(q.field("companyId"), args.companyId))
-        .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
-        .filter((q) => q.eq(q.field("role"), "vs-consultant"))
-        .filter((q) => q.eq(q.field("isActive"), true))
-        .first();
+      const consultantMembership = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
+      const hasLegacyConsultantMembership = consultantMembership && "companyId" in consultantMembership
+        ? consultantMembership.companyId === args.companyId
+        : false;
 
-      if (!consultantMembership) {
+      if (!consultantMembership && !hasLegacyConsultantMembership) {
         throw new Error("Company access denied");
       }
     }
@@ -285,14 +311,7 @@ export const getProject = query({
       return project;
     }
 
-    const consultantMembership = await ctx.db
-      .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
-      .filter((q) => q.eq(q.field("role"), "vs-consultant"))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
-
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
     if (!consultantMembership) {
       throw new Error("Project access denied");
     }
@@ -316,15 +335,9 @@ export const listProjectsForCompany = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    const isConsultant = await ctx.db
-      .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q) => q.eq(q.field("userId"), identity.tokenIdentifier))
-      .filter((q) => q.eq(q.field("role"), "vs-consultant"))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
 
-    if (!membership && !isConsultant) {
+    if (!membership && !consultantMembership) {
       throw new Error("Company access denied");
     }
 
@@ -356,7 +369,10 @@ export const listProjectRequirements = query({
       .first();
 
     if (!membership || membership.companyId !== project.companyId) {
-      throw new Error("Project access denied");
+      const consultantMembership = await getActiveConsultantRecord(ctx, identity.tokenIdentifier);
+      if (!consultantMembership) {
+        throw new Error("Project access denied");
+      }
     }
 
     return await ctx.db
