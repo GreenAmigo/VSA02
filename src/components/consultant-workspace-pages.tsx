@@ -7,6 +7,7 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { ConsultantHomeHeader } from "./consultant-home-header";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -270,37 +271,23 @@ export function ConsultantWorkspaceDirectoryPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">{displayRole}</p>
-            <h1 className="mt-2 text-2xl font-semibold text-white">{access.isConsultant ? "Consultant home" : "Workspace directory"}</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            {access.isConsultant ? (
-              <>
-                <Link href="/workspaces/activity" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
-                  Activity log
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateForm((value) => !value);
-                    setWorkspaceNotice(null);
-                  }}
-                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
-                >
-                  New workspace
-                </button>
-              </>
-            ) : null}
-            <div className="text-right text-sm text-slate-300">
-              <div>{access.email ?? user?.email ?? "Unknown user"}</div>
-              <div className="text-xs text-sky-300">{displayRole}</div>
-            </div>
-          </div>
+      <ConsultantHomeHeader
+        isConsultant={Boolean(access.isConsultant)}
+        displayRole={displayRole}
+        email={access.email ?? user?.email ?? "Unknown user"}
+        onToggleCreate={() => {
+          setShowCreateForm((value) => !value);
+          setWorkspaceNotice(null);
+        }}
+      />
+
+      {access.isConsultant ? (
+        <div className="border-b border-slate-800 bg-slate-950/40 px-6 py-3">
+          <Link href="/workspaces/activity" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+            Activity log
+          </Link>
         </div>
-      </header>
+      ) : null}
 
       <div className="space-y-6 p-6">
         {workspaceNotice ? (
