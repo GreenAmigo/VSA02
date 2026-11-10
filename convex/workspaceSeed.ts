@@ -104,7 +104,13 @@ export const importWorkspaceBundle = mutation({
           isActive: true,
           ssoProvider: "json-import",
         });
-        company = await ctx.db.get(companyId);
+
+        const createdCompany = await ctx.db.get(companyId);
+        if (!createdCompany) {
+          throw new Error(`Failed to create company for ${workspace.name}`);
+        }
+
+        company = createdCompany;
       } else {
         await ctx.db.patch(company._id, {
           name: workspace.name,
@@ -116,7 +122,7 @@ export const importWorkspaceBundle = mutation({
       }
 
       if (!company) {
-        throw new Error(`Failed to create company for ${workspace.name}`);
+        throw new Error(`Failed to resolve company for ${workspace.name}`);
       }
 
       if (matchingCompanies.length > 1) {
@@ -160,7 +166,13 @@ export const importWorkspaceBundle = mutation({
             createdAt: Date.now(),
             status: toProjectStatus(project.status),
           });
-          projectDoc = await ctx.db.get(projectId);
+
+          const createdProject = await ctx.db.get(projectId);
+          if (!createdProject) {
+            throw new Error(`Failed to create project ${project.name}`);
+          }
+
+          projectDoc = createdProject;
         } else {
           await ctx.db.patch(projectDoc._id, {
             name: project.name,
@@ -169,7 +181,7 @@ export const importWorkspaceBundle = mutation({
         }
 
         if (!projectDoc) {
-          throw new Error(`Failed to create project ${project.name}`);
+          throw new Error(`Failed to resolve project ${project.name}`);
         }
 
         const projectMember = await ctx.db

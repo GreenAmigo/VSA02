@@ -9,7 +9,7 @@ type WorkspaceShellWorkspace = {
   slug: string;
   name: string;
   isTestData: boolean;
-  projects: Array<{ id: string; name: string }>;
+  projects: Array<{ id: string; name: string; vendorCount: number; scorerCount: number; status: string }>;
   people: Array<{ id: string; name: string }>;
   vendors: Array<{ id: string; name: string }>;
   requirements: Array<{ id: string; title: string }>;
@@ -283,28 +283,28 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     );
   }
 
-  const workspace = companies.find((company) => company._id === companyId) ?? companies[0] ?? { _id: companyId, name: companyId };
+  const workspace: WorkspaceShellWorkspace = {
+    id: companyId,
+    slug: companyId,
+    name: companies.find((company) => company._id === companyId)?.name ?? companies[0]?.name ?? "Workspace",
+    isTestData: false,
+    projects: [],
+    people: [],
+    vendors: [],
+    requirements: [],
+    scores: [],
+  };
 
   return (
     <WorkspaceShell
-      workspace={{
-        id: workspace._id,
-        slug: workspace._id,
-        name: workspace.name,
-        isTestData: false,
-        projects: [],
-        people: [],
-        vendors: [],
-        requirements: [],
-        scores: [],
-      }}
+      workspace={workspace}
       activeTab="overview"
     >
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Company" value={workspace.name} helper="Visible via Convex access" />
         <StatCard label="Role" value={access.isConsultant ? "VS Consultant" : access.role ?? "User"} helper="Server role" />
         <StatCard label="Email" value={access.email ?? user?.email ?? "Unknown"} helper="Signed-in user" />
-        <StatCard label="Company ID" value={workspace._id} helper="Authorized workspace" />
+        <StatCard label="Company ID" value={workspace.id} helper="Authorized workspace" />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
