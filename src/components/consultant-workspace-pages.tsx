@@ -133,9 +133,15 @@ function WorkspaceShell({
 export function ConsultantWorkspaceDirectoryPage() {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [workspaceFilter, setWorkspaceFilter] = useState<"active" | "archived">("active");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workingWorkspaceId, setWorkingWorkspaceId] = useState<string | null>(null);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [openActionsWorkspaceId, setOpenActionsWorkspaceId] = useState<CompanyId | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<{ id: CompanyId; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: CompanyId; name: string } | null>(null);
+  const [deleteConfirmationName, setDeleteConfirmationName] = useState("");
 
   const createCompany = useMutation(api.admin.createCompany);
   const archiveCompany = useMutation(api.admin.archiveCompany);
@@ -176,9 +182,14 @@ export function ConsultantWorkspaceDirectoryPage() {
     );
   }
 
-  const totalCompanies = companies.length;
+  const totalCompanies = access.isConsultant ? (consultantWorkspaces?.length ?? 0) : companies.length;
   const displayRole = access.isConsultant ? "VS Consultant" : access.role ?? "User";
-  const visibleWorkspaces = access.isConsultant ? consultantWorkspaces ?? [] : companies;
+  const allConsultantWorkspaces = consultantWorkspaces ?? [];
+  const activeConsultantWorkspaces = allConsultantWorkspaces.filter((workspace) => workspace.isActive !== false);
+  const archivedConsultantWorkspaces = allConsultantWorkspaces.filter((workspace) => workspace.isActive === false);
+  const visibleWorkspaces = access.isConsultant
+    ? (workspaceFilter === "archived" ? archivedConsultantWorkspaces : activeConsultantWorkspaces)
+    : companies;
 
   const handleCreateWorkspace = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -186,61 +197,72 @@ export function ConsultantWorkspaceDirectoryPage() {
       return;
     }
 
-    setWorkspaceError(null);
+    setWorkspaceNotice(null);
     setWorkingWorkspaceId("create");
     try {
       await createCompany({ name: newWorkspaceName.trim() });
       setNewWorkspaceName("");
+      setShowCreateForm(false);
+      setWorkspaceFilter("active");
+      setWorkspaceNotice({ kind: "success", message: "Workspace created successfully." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create workspace";
-      setWorkspaceError(message);
+      setWorkspaceNotice({ kind: "error", message });
     } finally {
       setWorkingWorkspaceId(null);
     }
   };
 
   const handleArchiveWorkspace = async (companyId: CompanyId) => {
-    setWorkspaceError(null);
+    setWorkspaceNotice(null);
     setWorkingWorkspaceId(companyId);
     try {
       await archiveCompany({ companyId });
+      setArchiveTarget(null);
+      setOpenActionsWorkspaceId(null);
+      setWorkspaceNotice({ kind: "success", message: "Workspace archived." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to archive workspace";
-      setWorkspaceError(message);
+      setWorkspaceNotice({ kind: "error", message });
     } finally {
       setWorkingWorkspaceId(null);
     }
   };
 
   const handleRestoreWorkspace = async (companyId: CompanyId) => {
-    setWorkspaceError(null);
+    setWorkspaceNotice(null);
     setWorkingWorkspaceId(companyId);
     try {
       await restoreCompany({ companyId });
+      setOpenActionsWorkspaceId(null);
+      setWorkspaceNotice({ kind: "success", message: "Workspace restored." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to restore workspace";
-      setWorkspaceError(message);
+      setWorkspaceNotice({ kind: "error", message });
     } finally {
       setWorkingWorkspaceId(null);
     }
   };
 
-  const handleDeleteWorkspace = async (companyId: CompanyId, companyName: string) => {
-    const typedName = window.prompt(`Type the exact workspace name to delete: ${companyName}`)?.trim();
-    if (!typedName) {
+  const handleDeleteWorkspace = async (companyId: CompanyId, typedName: string) => {
+    if (!typedName.trim()) {
       return;
     }
 
-    setWorkspaceError(null);
+    setWorkspaceNotice(null);
     setWorkingWorkspaceId(companyId);
     try {
       await deleteCompany({
         companyId,
-        confirmationName: typedName,
+        confirmationName: typedName.trim(),
       });
+      setDeleteTarget(null);
+      setDeleteConfirmationName("");
+      setOpenActionsWorkspaceId(null);
+      setWorkspaceNotice({ kind: "success", message: "Workspace deleted permanently." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to delete workspace";
-      setWorkspaceError(message);
+      setWorkspaceNotice({ kind: "error", message });
     } finally {
       setWorkingWorkspaceId(null);
     }
@@ -255,6 +277,23 @@ export function ConsultantWorkspaceDirectoryPage() {
             <h1 className="mt-2 text-2xl font-semibold text-white">{access.isConsultant ? "Consultant home" : "Workspace directory"}</h1>
           </div>
           <div className="flex items-center gap-3">
+            {access.isConsultant ? (
+              <>
+                <Link href="/workspaces/activity" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+                  Activity log
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateForm((value) => !value);
+                    setWorkspaceNotice(null);
+                  }}
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
+                >
+                  New workspace
+                </button>
+              </>
+            ) : null}
             <div className="text-right text-sm text-slate-300">
               <div>{access.email ?? user?.email ?? "Unknown user"}</div>
               <div className="text-xs text-sky-300">{displayRole}</div>
@@ -264,12 +303,61 @@ export function ConsultantWorkspaceDirectoryPage() {
       </header>
 
       <div className="space-y-6 p-6">
+        {workspaceNotice ? (
+          <section className={`rounded-2xl border p-4 text-sm ${workspaceNotice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {workspaceNotice.message}
+          </section>
+        ) : null}
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Total companies" value={String(totalCompanies)} helper="Visible workspaces from Convex" />
           <StatCard label="Role" value={displayRole} helper="Current access from server" />
           <StatCard label="Signed in" value={access.email ?? user?.email ?? "Unknown"} helper="WorkOS session" />
           <StatCard label="Company IDs" value={String(access.companyIds?.length ?? companies.length)} helper="Server-authorized memberships" />
         </section>
+
+        {access.isConsultant && showCreateForm ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Create workspace</h2>
+            <p className="mt-2 text-sm text-slate-400">Create a company workspace using the real server mutation.</p>
+            <form onSubmit={handleCreateWorkspace} className="mt-4 flex flex-col gap-3 md:flex-row">
+              <input
+                value={newWorkspaceName}
+                onChange={(event) => setNewWorkspaceName(event.target.value)}
+                className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                placeholder="Company name"
+              />
+              <button
+                type="submit"
+                disabled={workingWorkspaceId === "create" || !newWorkspaceName.trim()}
+                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Create
+              </button>
+            </form>
+          </section>
+        ) : null}
+
+        {access.isConsultant ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setWorkspaceFilter("active")}
+                className={`rounded-xl border px-3 py-2 text-sm ${workspaceFilter === "active" ? "border-sky-500 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-950 text-slate-300"}`}
+              >
+                Active ({activeConsultantWorkspaces.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspaceFilter("archived")}
+                className={`rounded-xl border px-3 py-2 text-sm ${workspaceFilter === "archived" ? "border-amber-500/60 bg-amber-500/10 text-amber-100" : "border-slate-700 bg-slate-950 text-slate-300"}`}
+              >
+                Archived ({archivedConsultantWorkspaces.length})
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <section className="grid gap-5 xl:grid-cols-2">
           {visibleWorkspaces.map((company) => (
@@ -286,64 +374,121 @@ export function ConsultantWorkspaceDirectoryPage() {
               </div>
 
               {access.isConsultant ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {company.isActive === false ? (
-                    <button
-                      type="button"
-                      onClick={() => handleRestoreWorkspace(company._id)}
-                      disabled={workingWorkspaceId === company._id}
-                      className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 disabled:opacity-60"
-                    >
-                      Restore
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleArchiveWorkspace(company._id)}
-                      disabled={workingWorkspaceId === company._id}
-                      className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100 disabled:opacity-60"
-                    >
-                      Archive
-                    </button>
-                  )}
-
+                <div className="relative mt-4 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => handleDeleteWorkspace(company._id, company.name)}
-                    disabled={workingWorkspaceId === company._id}
-                    className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 disabled:opacity-60"
+                    onClick={() => setOpenActionsWorkspaceId((current) => (current === company._id ? null : company._id))}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
                   >
-                    Delete
+                    Actions
                   </button>
+
+                  {openActionsWorkspaceId === company._id ? (
+                    <div className="absolute right-0 top-11 z-20 w-52 rounded-xl border border-slate-700 bg-slate-950 p-2 shadow-xl shadow-black/40">
+                      {company.isActive === false ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreWorkspace(company._id)}
+                            disabled={workingWorkspaceId === company._id}
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-sky-200 hover:bg-slate-900 disabled:opacity-60"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteTarget({ id: company._id, name: company.name });
+                              setDeleteConfirmationName("");
+                            }}
+                            disabled={workingWorkspaceId === company._id}
+                            className="w-full rounded-lg px-3 py-2 text-left text-sm text-rose-300 hover:bg-slate-900 disabled:opacity-60"
+                          >
+                            Delete permanently
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setArchiveTarget({ id: company._id, name: company.name })}
+                          disabled={workingWorkspaceId === company._id}
+                          className="w-full rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-900 disabled:opacity-60"
+                        >
+                          Archive
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <p className="mt-4 text-sm text-slate-400">Read-only workspace view for company users.</p>
               )}
             </div>
           ))}
+
+          {visibleWorkspaces.length === 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-slate-300">
+              {access.isConsultant && workspaceFilter === "archived"
+                ? "No archived workspaces."
+                : "No workspaces to show."}
+            </div>
+          ) : null}
         </section>
 
-        {access.isConsultant ? (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <h2 className="text-lg font-semibold text-white">Create workspace</h2>
-            <p className="mt-2 text-sm text-slate-400">Workspace lifecycle actions are server-checked for VS Consultants.</p>
-            <form onSubmit={handleCreateWorkspace} className="mt-4 flex flex-col gap-3 md:flex-row">
-              <input
-                value={newWorkspaceName}
-                onChange={(event) => setNewWorkspaceName(event.target.value)}
-                className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                placeholder="Workspace name"
-              />
+        {archiveTarget ? (
+          <section className="rounded-2xl border border-amber-500/50 bg-amber-500/10 p-5 text-amber-100">
+            <h2 className="text-lg font-semibold">Archive workspace</h2>
+            <p className="mt-2 text-sm">Archive {archiveTarget.name}? This hides it from company users until restored.</p>
+            <div className="mt-4 flex gap-3">
               <button
-                type="submit"
-                disabled={workingWorkspaceId === "create"}
-                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                type="button"
+                onClick={() => handleArchiveWorkspace(archiveTarget.id)}
+                disabled={workingWorkspaceId === archiveTarget.id}
+                className="rounded-xl bg-amber-300 px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-60"
               >
-                Create workspace
+                Confirm archive
               </button>
-            </form>
+              <button
+                type="button"
+                onClick={() => setArchiveTarget(null)}
+                className="rounded-xl border border-amber-300/50 px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        ) : null}
 
-            {workspaceError ? <p className="mt-3 text-sm text-rose-300">{workspaceError}</p> : null}
+        {deleteTarget ? (
+          <section className="rounded-2xl border border-rose-500/50 bg-rose-500/10 p-5 text-rose-100">
+            <h2 className="text-lg font-semibold">Delete workspace permanently</h2>
+            <p className="mt-2 text-sm">Type the exact workspace name to enable delete: {deleteTarget.name}</p>
+            <input
+              value={deleteConfirmationName}
+              onChange={(event) => setDeleteConfirmationName(event.target.value)}
+              className="mt-4 w-full rounded-xl border border-rose-300/40 bg-slate-950 px-3 py-2 text-white outline-none focus:border-rose-300"
+              placeholder="Type workspace name exactly"
+            />
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => handleDeleteWorkspace(deleteTarget.id, deleteConfirmationName)}
+                disabled={workingWorkspaceId === deleteTarget.id || deleteConfirmationName.trim() !== deleteTarget.name.trim()}
+                className="rounded-xl bg-rose-300 px-4 py-2 text-sm font-medium text-slate-950 disabled:opacity-60"
+              >
+                Delete permanently
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteConfirmationName("");
+                }}
+                className="rounded-xl border border-rose-300/50 px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
           </section>
         ) : null}
       </div>
