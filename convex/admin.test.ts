@@ -153,5 +153,69 @@ describe("admin console actions", () => {
       }
     }
   });
+
+  test("a company admin can archive and restore a workspace, and the archived one is hidden from accessible workspaces", async () => {
+    const t = convexTest({ schema, modules });
+    const admin = t.withIdentity({ tokenIdentifier: "workspace-admin" });
+
+    const company = await admin.mutation(api.admin.createCompany, {
+      name: "Northwind Health",
+      ssoProvider: "microsoft-entra",
+    });
+
+    const archived = await admin.mutation(api.admin.archiveCompany, {
+      companyId: company.companyId,
+    });
+
+    expect(archived.isActive).toBe(false);
+
+    const visibleCompanies = await admin.query(api.access.listAccessibleCompanies, {});
+    expect(visibleCompanies.some((item) => item._id === company.companyId)).toBe(false);
+
+    const restored = await admin.mutation(api.admin.restoreCompany, {
+      companyId: company.companyId,
+    });
+
+    expect(restored.isActive).toBe(true);
+    const visibleAfterRestore = await admin.query(api.access.listAccessibleCompanies, {});
+    expect(visibleAfterRestore.some((item) => item._id === company.companyId)).toBe(true);
+  });
+
+  test("a company can only be permanently deleted after it is archived and the confirmation name matches", async () => {
+    const t = convexTest({ schema, modules });
+    const admin = t.withIdentity({ tokenIdentifier: "workspace-delete-admin" });
+
+    const company = await admin.mutation(api.admin.createCompany, {
+      name: "Atlas Medical",
+      ssoProvider: "google-workspace",
+    });
+
+    const project = await admin.mutation(api.admin.createProject, {
+      companyId: company.companyId,
+      name: "Procurement Review",
+    });
+
+    await expect(admin.mutation(api.admin.deleteCompany, {
+      companyId: company.companyId,
+      confirmationName: "Atlas Medical",
+    })).rejects.toThrow("archive this workspace first");
+
+    await admin.mutation(api.admin.archiveCompany, {
+      companyId: company.companyId,
+    });
+
+    await expect(admin.mutation(api.admin.deleteCompany, {
+      companyId: company.companyId,
+      confirmationName: "Wrong Name",
+    })).rejects.toThrow("match the workspace name");
+
+    const deleted = await admin.mutation(api.admin.deleteCompany, {
+      companyId: company.companyId,
+      confirmationName: "Atlas Medical",
+    });
+
+    expect(deleted.companyId).toBe(company.companyId);
+    expect(deleted.deletedProjects).toBeGreaterThanOrEqual(1);
+  });
 });
 

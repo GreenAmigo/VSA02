@@ -1,4 +1,5 @@
 import { query, internalMutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
@@ -215,10 +216,19 @@ export const getCurrentUserAccess = query({
     const isConsultant = Boolean(consultantRecord);
     const role = isConsultant ? "vs-consultant" : memberships[0]?.role ?? null;
 
-    let companyIds = memberships.map((member) => member.companyId);
+    let companyIds: Id<"companies">[] = memberships.map((member) => member.companyId);
     if (isConsultant) {
       const allCompanies = await ctx.db.query("companies").collect();
-      companyIds = allCompanies.map((company) => company._id);
+      companyIds = allCompanies.filter((company) => company.isActive !== false).map((company) => company._id);
+    } else {
+      const visibleCompanyIds = new Set<Id<"companies">>();
+      for (const companyId of companyIds) {
+        const company = await ctx.db.get(companyId);
+        if (company && company.isActive !== false) {
+          visibleCompanyIds.add(companyId);
+        }
+      }
+      companyIds = Array.from(visibleCompanyIds);
     }
 
     return {
@@ -259,13 +269,11 @@ export const listAccessibleCompanies = query({
       return [] as const;
     }
 
-    const visibleCompanyIds = companyIds;
-
     const companies = await Promise.all(
-      visibleCompanyIds.map((id) => ctx.db.get(id)),
+      companyIds.map((id) => ctx.db.get(id)),
     );
 
-    return companies.filter((company): company is NonNullable<typeof company> => company !== null);
+    return companies.filter((company): company is NonNullable<typeof company> => company !== null && company.isActive !== false);
   },
 });
 
@@ -280,6 +288,9 @@ export const getCompany = query({
     const company = await ctx.db.get(args.companyId);
     if (!company) {
       throw new Error("Company not found");
+    }
+    if (company.isActive === false) {
+      throw new Error("Company access denied");
     }
 
     const userIds = getIdentityUserIds(identity);

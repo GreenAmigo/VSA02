@@ -193,6 +193,203 @@ export const createCompany = mutation({
   },
 });
 
+export const archiveCompany = mutation({
+  args: {
+    companyId: v.id("companies"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const company = await ctx.db.get(args.companyId);
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    await ctx.db.patch(args.companyId, {
+      isActive: false,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: canonicalUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "archive_workspace",
+      details: `Archived workspace ${company.name}.`,
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      name: company.name,
+      isActive: false,
+    };
+  },
+});
+
+export const restoreCompany = mutation({
+  args: {
+    companyId: v.id("companies"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const company = await ctx.db.get(args.companyId);
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    await ctx.db.patch(args.companyId, {
+      isActive: true,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: canonicalUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "restore_workspace",
+      details: `Restored workspace ${company.name}.`,
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      name: company.name,
+      isActive: true,
+    };
+  },
+});
+
+export const deleteCompany = mutation({
+  args: {
+    companyId: v.id("companies"),
+    confirmationName: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const company = await ctx.db.get(args.companyId);
+    if (!company) {
+      throw new Error("Company not found");
+    }
+
+    if (company.isActive !== false) {
+      throw new Error("archive this workspace first");
+    }
+
+    if (args.confirmationName.trim() !== company.name.trim()) {
+      throw new Error("Enter the workspace name to match the workspace name and confirm deletion");
+    }
+
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+
+    const companyMembers = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const member of companyMembers) {
+      await ctx.db.delete(member._id);
+    }
+
+    const projectMembers = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const member of projectMembers) {
+      await ctx.db.delete(member._id);
+    }
+
+    const projects = await ctx.db
+      .query("projects")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const project of projects) {
+      const requirements = await ctx.db
+        .query("requirements")
+        .filter((q: any) => q.eq(q.field("projectId"), project._id))
+        .collect();
+
+      for (const requirement of requirements) {
+        await ctx.db.delete(requirement._id);
+      }
+
+      const scores = await ctx.db
+        .query("scores")
+        .filter((q: any) => q.eq(q.field("projectId"), project._id))
+        .collect();
+
+      for (const score of scores) {
+        await ctx.db.delete(score._id);
+      }
+
+      await ctx.db.delete(project._id);
+    }
+
+    const requirements = await ctx.db
+      .query("requirements")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const requirement of requirements) {
+      await ctx.db.delete(requirement._id);
+    }
+
+    const scores = await ctx.db
+      .query("scores")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const score of scores) {
+      await ctx.db.delete(score._id);
+    }
+
+    const activityLogs = await ctx.db
+      .query("activityLogs")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    for (const log of activityLogs) {
+      await ctx.db.delete(log._id);
+    }
+
+    await ctx.db.delete(args.companyId);
+
+    await recordActivity(ctx, {
+      actorUserId: canonicalUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "delete_workspace",
+      details: `Permanently deleted workspace ${company.name}.`,
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      name: company.name,
+      deletedProjects: projects.length,
+      deletedMembers: companyMembers.length,
+      deletedRequirements: requirements.length,
+      deletedScores: scores.length,
+    };
+  },
+});
+
 export const grantConsultantRole = internalMutation({
   args: {
     secret: v.string(),
