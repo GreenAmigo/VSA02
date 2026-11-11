@@ -6,6 +6,41 @@ function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: stri
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
 }
 
+async function migrateLegacyConsultantMemberships(ctx: any, userIds?: string[]) {
+  const targetUserIds = userIds && userIds.length > 0 ? userIds : undefined;
+  const legacyMemberships = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("role"), "vs-consultant"))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+
+  for (const membership of legacyMemberships) {
+    if (targetUserIds && !targetUserIds.includes(membership.userId)) {
+      continue;
+    }
+
+    const existingConsultant = await ctx.db
+      .query("consultants")
+      .filter((q: any) => q.eq(q.field("userId"), membership.userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!existingConsultant) {
+      await ctx.db.insert("consultants", {
+        userId: membership.userId,
+        email: membership.email,
+        displayName: membership.displayName,
+        isActive: true,
+        grantedAt: Date.now(),
+        grantedBy: "legacy-migration",
+        isTestData: membership.isTestData ?? false,
+      });
+    }
+
+    await ctx.db.delete(membership._id);
+  }
+}
+
 async function getActiveConsultantRecord(ctx: any, identity: { subject?: string; tokenIdentifier?: string }) {
   const userIds = getIdentityUserIds(identity);
 
@@ -19,16 +54,19 @@ async function getActiveConsultantRecord(ctx: any, identity: { subject?: string;
     if (activeConsultant) {
       return activeConsultant;
     }
+  }
 
-    const legacyConsultantMembership = await ctx.db
-      .query("companyMembers")
+  await migrateLegacyConsultantMemberships(ctx, userIds);
+
+  for (const userId of userIds) {
+    const migratedConsultant = await ctx.db
+      .query("consultants")
       .filter((q: any) => q.eq(q.field("userId"), userId))
-      .filter((q: any) => q.eq(q.field("role"), "vs-consultant"))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (legacyConsultantMembership) {
-      return legacyConsultantMembership;
+    if (migratedConsultant) {
+      return migratedConsultant;
     }
   }
 

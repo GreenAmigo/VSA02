@@ -52,7 +52,7 @@ describe("Phase 2 access checks", () => {
     await expect(vendor.query(api.access.getCompany, { companyId: seeded.companyCId })).rejects.toThrow("Company access denied");
   });
 
-  test("a trusted developer can grant the VS Consultant role across all workspaces", async () => {
+  test("a granted VS Consultant sees every workspace, including a newly created one, and legacy company consultant rows are migrated away", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
@@ -76,20 +76,29 @@ describe("Phase 2 access checks", () => {
         displayName: "Frazer Knight",
       });
 
-      const identity = t.withIdentity({
+      const consultant = t.withIdentity({
         tokenIdentifier: "workos_user_frazer_preview",
         email: "frazerknight@hotmail.com",
         name: "Frazer Knight",
       });
 
-      const company = await identity.query(api.access.getCompany, { companyId: seeded.companyAId });
-      const companies = await identity.query(api.access.listAccessibleCompanies, {});
-      const project = await identity.query(api.access.getProject, { projectId: seeded.projectBId });
+      const company = await consultant.query(api.access.getCompany, { companyId: seeded.companyAId });
+      const companies = await consultant.query(api.access.listAccessibleCompanies, {});
+      const project = await consultant.query(api.access.getProject, { projectId: seeded.projectBId });
 
       expect(company.name).toBe("Acme Health");
       expect(companies.some((item) => item._id === seeded.companyAId)).toBe(true);
       expect(companies.some((item) => item._id === seeded.companyBId)).toBe(true);
+      expect(companies.some((item) => item._id === seeded.companyCId)).toBe(true);
       expect(project._id).toBe(seeded.projectBId);
+
+      const created = await consultant.mutation(api.admin.createCompany, { name: "New Client Workspace" });
+      const updatedCompanies = await consultant.query(api.access.listAccessibleCompanies, {});
+      expect(updatedCompanies.some((item) => item._id === created.companyId)).toBe(true);
+
+      const access = await consultant.query(api.access.getCurrentUserAccess, {});
+      expect(access.isConsultant).toBe(true);
+      expect(access.role).toBe("vs-consultant");
     } finally {
       if (previousSecret === undefined) {
         delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
@@ -154,6 +163,48 @@ describe("Phase 2 access checks", () => {
           displayName: "Missing Env User",
         }),
       ).rejects.toThrow("Consultant role grants are disabled in production");
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
+  test("a user cannot become a consultant without the developer grant secret", async () => {
+    const t = convexTest({ schema, modules });
+    const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await expect(
+        t.mutation(internal.admin.grantConsultantRole, {
+          secret: "wrong-secret",
+          userId: "attempted-consultant",
+          email: "forge@example.com",
+          displayName: "Attempted Consultant",
+        }),
+      ).rejects.toThrow("Invalid Consultant grant secret");
+
+      const identity = t.withIdentity({
+        tokenIdentifier: "attempted-consultant",
+        email: "forge@example.com",
+        name: "Attempted Consultant",
+      });
+
+      const access = await identity.query(api.access.getCurrentUserAccess, {});
+      expect(access.isConsultant).toBe(false);
+      expect(access.role).toBeNull();
     } finally {
       if (previousSecret === undefined) {
         delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;

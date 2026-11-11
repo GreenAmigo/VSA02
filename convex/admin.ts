@@ -90,6 +90,51 @@ async function getActiveConsultantRow(ctx: any, userIds: string | string[]) {
     }
   }
 
+  for (const userId of candidateIds) {
+    const legacyConsultantRows = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("userId"), userId))
+      .filter((q: any) => q.eq(q.field("role"), consultantRole))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    if (legacyConsultantRows.length > 0) {
+      const [legacyRow] = legacyConsultantRows;
+      const existingConsultant = await ctx.db
+        .query("consultants")
+        .filter((q: any) => q.eq(q.field("userId"), userId))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .first();
+
+      if (!existingConsultant) {
+        const rowId = await ctx.db.insert("consultants", {
+          userId,
+          email: legacyRow.email,
+          displayName: legacyRow.displayName,
+          isActive: true,
+          grantedAt: Date.now(),
+          grantedBy: "legacy-migration",
+          isTestData: legacyRow.isTestData ?? false,
+        });
+
+        const migratedRow = await ctx.db.get(rowId);
+        if (migratedRow) {
+          return migratedRow;
+        }
+      }
+
+      for (const row of legacyConsultantRows) {
+        await ctx.db.delete(row._id);
+      }
+
+      return await ctx.db
+        .query("consultants")
+        .filter((q: any) => q.eq(q.field("userId"), userId))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .first();
+    }
+  }
+
   return null;
 }
 
@@ -116,11 +161,12 @@ async function assertConsultantAccess(ctx: any) {
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
-  if (!legacyConsultantMembership) {
-    throw new Error("Only VS Consultants can manage workspaces");
+  if (legacyConsultantMembership) {
+    await getActiveConsultantRow(ctx, userIds);
+    return identity;
   }
 
-  return identity;
+  throw new Error("Only VS Consultants can manage workspaces");
 }
 
 async function assertCompanyAdmin(ctx: any, companyId: string) {
@@ -463,10 +509,7 @@ export const grantConsultantRole = internalMutation({
       .collect();
 
     for (const legacyRow of legacyConsultantRows) {
-      await ctx.db.patch(legacyRow._id, {
-        isActive: false,
-        isTestData: false,
-      });
+      await ctx.db.delete(legacyRow._id);
     }
 
     await recordActivity(ctx, {
@@ -522,10 +565,7 @@ export const linkWorkOSUserToCompanyAdmin = internalMutation({
       .collect();
 
     for (const stale of staleConsultantMemberships) {
-      await ctx.db.patch(stale._id, {
-        isActive: false,
-        isTestData: false,
-      });
+      await ctx.db.delete(stale._id);
     }
 
     const consultantRecord = await getActiveConsultantRow(ctx, args.workosUserId);
