@@ -25,9 +25,9 @@ describe("Isolation boundaries", () => {
     await expect(vendor.query(api.access.getProject, { projectId: seeded.projectAId })).rejects.toThrow("Project access denied");
     await expect(admin.query(api.access.getCompany, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
 
-    const vendorVisibleCompanies = await vendor.query(api.access.listAccessibleCompanies, {});
-    expect(vendorVisibleCompanies.map((company) => company._id)).toEqual([seeded.companyBId]);
-    expect(vendorVisibleCompanies.map((company) => company.name)).not.toContain("Acme Health");
+    const vendorVisibleCompanies: ReadonlyArray<{ _id: string; name: string }> = await vendor.query(api.access.listAccessibleCompanies, {});
+    expect(vendorVisibleCompanies.map((company: { _id: string; name: string }) => company._id)).toEqual([seeded.companyBId]);
+    expect(vendorVisibleCompanies.map((company: { _id: string; name: string }) => company.name)).not.toContain("Acme Health");
   });
 });
 

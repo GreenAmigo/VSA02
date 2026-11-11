@@ -57,8 +57,8 @@ describe("admin console actions", () => {
         name: "HR Platform Vendor Selection",
       });
 
-      const members = await admin.query(api.admin.listCompanyMembers, { companyId: company.companyId });
-      const projectMembers = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
+      const members: ReadonlyArray<{ role: string }> = await admin.query(api.admin.listCompanyMembers, { companyId: company.companyId });
+      const projectMembers: ReadonlyArray<{ role: string }> = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
 
       expect(company.name).toBe("Acme Health");
       expect(project.companyId).toBe(company.companyId);
@@ -167,15 +167,15 @@ describe("admin console actions", () => {
         name: "Seed Importer",
       });
 
-      const companies = await seededIdentity.query(api.access.listAccessibleCompanies, {});
-      const acmeCompanies = companies.filter((company) => company.name === "Acme Health");
+      const companies: ReadonlyArray<{ name: string; _id: string }> = await seededIdentity.query(api.access.listAccessibleCompanies, {});
+      const acmeCompanies = companies.filter((company: { name: string; _id: string }) => company.name === "Acme Health");
       expect(acmeCompanies).toHaveLength(1);
 
       const sameUserSeed = await t.mutation(internal.admin.seedPreviewWorkspaceData, {
         secret: "test-preview-seed-secret",
       });
-      const reSeedList = await seededIdentity.query(api.access.listAccessibleCompanies, {});
-      const reSeedAcme = reSeedList.filter((company) => company.name === "Acme Health");
+      const reSeedList: ReadonlyArray<{ name: string; _id: string }> = await seededIdentity.query(api.access.listAccessibleCompanies, {});
+      const reSeedAcme = reSeedList.filter((company: { name: string; _id: string }) => company.name === "Acme Health");
 
       expect(sameUserSeed.createdCompanies).toBeGreaterThan(0);
       expect(reSeedAcme).toHaveLength(1);
@@ -215,7 +215,7 @@ describe("admin console actions", () => {
 
       expect(archived.isActive).toBe(false);
 
-      const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+      const visibleCompanies: ReadonlyArray<{ _id: string }> = await companyAdmin.query(api.access.listAccessibleCompanies, {});
       expect(visibleCompanies.some((item) => item._id === seeded.companyAId)).toBe(false);
       await expect(companyAdmin.query(api.access.getCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
 
@@ -332,9 +332,9 @@ describe("admin console actions", () => {
         confirmationName: "Delete Me Test",
       });
 
-      const logs = await consultant.query(api.admin.listActivityLogs, {});
-      const companyLogs = logs.filter((log) => log.companyId === created.companyId);
-      const actions = companyLogs.map((log) => log.action);
+      const logs: ReadonlyArray<{ action: string; companyId?: string; workspaceName?: string }> = await consultant.query(api.admin.listActivityLogs, {});
+      const companyLogs = logs.filter((log: { action: string; companyId?: string; workspaceName?: string }) => log.companyId === created.companyId);
+      const actions = companyLogs.map((log: { action: string; companyId?: string; workspaceName?: string }) => log.action);
 
       expect(actions).toEqual(expect.arrayContaining([
         "create_workspace",
@@ -371,8 +371,8 @@ describe("admin console actions", () => {
         confirmationName: "Delete Me Test",
       });
 
-      const consultantLogs = await consultant.query(api.admin.listActivityLogs, {});
-      const companyRows = consultantLogs.filter((log) => log.companyId === company.companyId);
+      const consultantLogs: ReadonlyArray<{ action: string; companyId?: string; workspaceName?: string }> = await consultant.query(api.admin.listActivityLogs, {});
+      const companyRows = consultantLogs.filter((log: { action: string; companyId?: string; workspaceName?: string }) => log.companyId === company.companyId);
 
       expect(companyRows.length).toBeGreaterThanOrEqual(3);
       expect(companyRows.some((log) => log.action === "delete_workspace" && log.workspaceName === "Delete Me Test")).toBe(true);
@@ -408,10 +408,10 @@ describe("admin console actions", () => {
         name: "Aisha Ali",
       });
 
-      await invitedUser.mutation(api.access.acceptPendingInvites, {});
+      await invitedUser.action(api.access.acceptPendingInvites, {});
 
       const access = await invitedUser.query(api.access.getCurrentUserAccess, {});
-      const companyAccess = await invitedUser.query(api.access.listAccessibleCompanies, {});
+      const companyAccess: ReadonlyArray<{ _id: string }> = await invitedUser.query(api.access.listAccessibleCompanies, {});
 
       expect(access.isConsultant).toBe(false);
       expect(access.role).toBe("company-scorer");

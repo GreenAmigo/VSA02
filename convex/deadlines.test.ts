@@ -47,11 +47,11 @@ describe("Phase 8 deadline and reminder logic", () => {
     expect(updated.status).toBe("submitted");
     expect(updated.submittedAt).toBeTypeOf("number");
 
-    const allRows = await scorer.query(api.deadlines.listProjectDeadlines, {
+    const allRows: ReadonlyArray<{ targetUserId: string; status: string }> = await scorer.query(api.deadlines.listProjectDeadlines, {
       projectId: seeded.projectBId,
     });
 
-    expect(allRows.some((row) => row.targetUserId === "northwind-vendor" && row.status === "submitted")).toBe(true);
+    expect(allRows.some((row: { targetUserId: string; status: string }) => row.targetUserId === "northwind-vendor" && row.status === "submitted")).toBe(true);
 
     await expect(
       vendor.mutation(api.deadlines.markDeadlineSubmitted, {

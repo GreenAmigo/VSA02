@@ -1,4 +1,5 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, action, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
@@ -228,24 +229,85 @@ export const seedScenario = internalMutation({
   },
 });
 
-export const acceptPendingInvites = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
+async function resolveWorkOSUserEmail(identity: { subject?: string; tokenIdentifier?: string; email?: string; emailVerified?: boolean; name?: string }) {
+  const workosUserId = identity.subject ?? identity.tokenIdentifier;
+  if (!workosUserId) {
+    return {
+      email: identity.email?.trim().toLowerCase() || null,
+      emailVerified: identity.email ? true : false,
+      displayName: identity.name ?? null,
+      source: "identity" as const,
+    };
+  }
+
+  const apiKey = process.env.WORKOS_API_KEY;
+  if (!apiKey) {
+    return {
+      email: identity.email?.trim().toLowerCase() || null,
+      emailVerified: identity.emailVerified === true,
+      displayName: identity.name ?? null,
+      source: "identity" as const,
+    };
+  }
+
+  try {
+    const response = await fetch(`https://api.workos.com/user_management/users/${encodeURIComponent(workosUserId)}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        email: identity.email?.trim().toLowerCase() || null,
+        emailVerified: identity.emailVerified === true,
+        displayName: identity.name ?? null,
+        source: "identity" as const,
+      };
     }
 
-    const targetEmail = identity.email?.trim().toLowerCase();
-    if (!targetEmail || identity.emailVerified !== true) {
-      return { accepted: 0, email: targetEmail ?? null, verified: false };
-    }
+    const data = (await response.json()) as {
+      email?: string | null;
+      email_address?: string | null;
+      emailAddress?: string | null;
+      email_verified?: boolean | null;
+      emailVerified?: boolean | null;
+      name?: string | null;
+      full_name?: string | null;
+    };
 
-    const userId = identity.subject ?? identity.tokenIdentifier;
-    if (!userId) {
-      return { accepted: 0, email: targetEmail, verified: true };
-    }
+    const resolvedEmail = (data.email ?? data.email_address ?? data.emailAddress ?? identity.email ?? null)?.trim().toLowerCase() || null;
+    const emailVerified = typeof data.email_verified === "boolean"
+      ? data.email_verified
+      : typeof data.emailVerified === "boolean"
+        ? data.emailVerified
+        : identity.emailVerified === true;
 
+    return {
+      email: resolvedEmail,
+      emailVerified,
+      displayName: data.name ?? data.full_name ?? identity.name ?? resolvedEmail,
+      source: "workos" as const,
+    };
+  } catch {
+    return {
+      email: identity.email?.trim().toLowerCase() || null,
+      emailVerified: identity.emailVerified === true,
+      displayName: identity.name ?? null,
+      source: "identity" as const,
+    };
+  }
+}
+
+export const acceptPendingInvitesForUser = internalMutation({
+  args: {
+    userId: v.string(),
+    email: v.string(),
+    displayName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const targetEmail = args.email.trim().toLowerCase();
     const pendingInvites = await ctx.db
       .query("workspaceInvites")
       .filter((q: any) => q.eq(q.field("email"), targetEmail))
@@ -268,7 +330,7 @@ export const acceptPendingInvites = mutation({
       const existingMember = await ctx.db
         .query("companyMembers")
         .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
-        .filter((q: any) => q.eq(q.field("userId"), userId))
+        .filter((q: any) => q.eq(q.field("userId"), args.userId))
         .filter((q: any) => q.eq(q.field("isActive"), true))
         .first();
 
@@ -282,7 +344,7 @@ export const acceptPendingInvites = mutation({
       } else {
         await ctx.db.insert("companyMembers", {
           companyId: invite.companyId,
-          userId,
+          userId: args.userId,
           email: targetEmail,
           displayName: invite.displayName,
           role: invite.role,
@@ -301,7 +363,7 @@ export const acceptPendingInvites = mutation({
       });
 
       await ctx.db.insert("activityLogs", {
-        actorUserId: userId,
+        actorUserId: args.userId,
         actorEmail: targetEmail,
         action: "accept_workspace_invite",
         details: `Accepted invite to ${invite.displayName} for ${invite.role} access in this workspace.`,
@@ -314,6 +376,36 @@ export const acceptPendingInvites = mutation({
     }
 
     return { accepted, email: targetEmail, verified: true };
+  },
+});
+
+export const acceptPendingInvites = action({
+  args: {},
+  handler: async (ctx): Promise<{ accepted: number; email: string | null; verified: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const workosUserId = identity.subject ?? identity.tokenIdentifier;
+    if (!workosUserId) {
+      return { accepted: 0, email: null, verified: false };
+    }
+
+    const workosUser = await resolveWorkOSUserEmail(identity);
+    const targetEmail = workosUser.email?.trim().toLowerCase() || null;
+    const verified = Boolean(workosUser.emailVerified === true && targetEmail);
+
+    if (!targetEmail || !verified) {
+      return { accepted: 0, email: targetEmail, verified: false };
+    }
+
+    const userId = workosUserId;
+    return await ctx.runMutation(internal.access.acceptPendingInvitesForUser, {
+      userId,
+      email: targetEmail,
+      displayName: workosUser.displayName ?? identity.name ?? targetEmail,
+    });
   },
 });
 

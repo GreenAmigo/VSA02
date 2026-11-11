@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -21,9 +21,9 @@ describe("Phase 2 access checks", () => {
     const admin = t.withIdentity({ tokenIdentifier: "frazer-knight-admin" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
 
-    const adminCompanies = await admin.query(api.access.listAccessibleCompanies, {});
-    const vendorCompanies = await vendor.query(api.access.listAccessibleCompanies, {});
-    const vendorProject = await vendor.query(api.access.getProject, { projectId: seeded.projectBId });
+    const adminCompanies: ReadonlyArray<{ _id: string }> = await admin.query(api.access.listAccessibleCompanies, {});
+    const vendorCompanies: ReadonlyArray<{ _id: string }> = await vendor.query(api.access.listAccessibleCompanies, {});
+    const vendorProject: { _id: string } = await vendor.query(api.access.getProject, { projectId: seeded.projectBId });
 
     expect(adminCompanies.map((company) => company._id)).toContain(seeded.companyCId);
     expect(vendorCompanies.map((company) => company._id)).not.toContain(seeded.companyAId);
@@ -44,8 +44,8 @@ describe("Phase 2 access checks", () => {
     const admin = t.withIdentity({ tokenIdentifier: "frazer-knight-admin" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
 
-    const accessibleCompanies = await admin.query(api.access.listAccessibleCompanies, {});
-    const myCompany = await admin.query(api.access.getCompany, { companyId: seeded.companyCId });
+    const accessibleCompanies: ReadonlyArray<{ _id: string }> = await admin.query(api.access.listAccessibleCompanies, {});
+    const myCompany: { name: string } = await admin.query(api.access.getCompany, { companyId: seeded.companyCId });
 
     expect(accessibleCompanies.map((company) => company._id)).toContain(seeded.companyCId);
     expect(myCompany.name).toBe("Maxwell Knight Ltd");
@@ -82,9 +82,9 @@ describe("Phase 2 access checks", () => {
         name: "Frazer Knight",
       });
 
-      const company = await consultant.query(api.access.getCompany, { companyId: seeded.companyAId });
-      const companies = await consultant.query(api.access.listAccessibleCompanies, {});
-      const project = await consultant.query(api.access.getProject, { projectId: seeded.projectBId });
+      const company: { name: string } = await consultant.query(api.access.getCompany, { companyId: seeded.companyAId });
+      const companies: ReadonlyArray<{ _id: string }> = await consultant.query(api.access.listAccessibleCompanies, {});
+      const project: { _id: string } = await consultant.query(api.access.getProject, { projectId: seeded.projectBId });
 
       expect(company.name).toBe("Acme Health");
       expect(companies.some((item) => item._id === seeded.companyAId)).toBe(true);
@@ -92,8 +92,8 @@ describe("Phase 2 access checks", () => {
       expect(companies.some((item) => item._id === seeded.companyCId)).toBe(true);
       expect(project._id).toBe(seeded.projectBId);
 
-      const created = await consultant.mutation(api.admin.createCompany, { name: "New Client Workspace" });
-      const updatedCompanies = await consultant.query(api.access.listAccessibleCompanies, {});
+      const created: { companyId: string } = await consultant.mutation(api.admin.createCompany, { name: "New Client Workspace" });
+      const updatedCompanies: ReadonlyArray<{ _id: string }> = await consultant.query(api.access.listAccessibleCompanies, {});
       expect(updatedCompanies.some((item) => item._id === created.companyId)).toBe(true);
 
       const access = await consultant.query(api.access.getCurrentUserAccess, {});
@@ -253,8 +253,8 @@ describe("Phase 2 access checks", () => {
         name: "User 123",
       });
 
-      const companyAccess = await companyAdmin.query(api.access.getCurrentUserAccess, {});
-      const visibleCompanies = await companyAdmin.query(api.access.listAccessibleCompanies, {});
+      const companyAccess: { subject: string | null; tokenIdentifier: string | null; role: string | null } = await companyAdmin.query(api.access.getCurrentUserAccess, {});
+      const visibleCompanies: ReadonlyArray<{ _id: string }> = await companyAdmin.query(api.access.listAccessibleCompanies, {});
 
       expect(companyAccess.subject).toBe("user_123");
       expect(companyAccess.tokenIdentifier).toBe("https://auth.workos.com|user_123");
@@ -303,8 +303,8 @@ describe("Phase 2 access checks", () => {
       name: "First Time User",
     });
 
-    const access = await firstLogin.query(api.access.getCurrentUserAccess, {});
-    const visibleCompanies = await firstLogin.query(api.access.listAccessibleCompanies, {});
+    const access: { email: string | null; role: string | null; isConsultant: boolean; companyIds: string[] } = await firstLogin.query(api.access.getCurrentUserAccess, {});
+    const visibleCompanies: ReadonlyArray<{ _id: string }> = await firstLogin.query(api.access.listAccessibleCompanies, {});
 
     expect(access.email).toBe("new-user@example.com");
     expect(access.role).toBeNull();
@@ -356,22 +356,33 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
       });
 
-      await noEmailUser.mutation(api.access.acceptPendingInvites, {});
-      const noEmailAccess = await noEmailUser.query(api.access.getCurrentUserAccess, {});
-      expect(noEmailAccess.role).toBeNull();
-      expect(noEmailAccess.companyIds).toEqual([]);
+      const originalFetch = globalThis.fetch;
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockImplementationOnce(async () => new Response(JSON.stringify({ id: "frank-invite-no-email", email: null }), { status: 200 }))
+            .mockImplementationOnce(async () => new Response(JSON.stringify({ id: "frank-invite-unverified", email: "frank+invite@maxwellknight.co.uk", email_verified: false }), { status: 200 })),
+        );
 
-      const unverifiedUser = t.withIdentity({
-        tokenIdentifier: "frank-invite-unverified",
-        email: "frank+invite@maxwellknight.co.uk",
-        emailVerified: false,
-        name: "Frank Invite",
-      });
+        await noEmailUser.action(api.access.acceptPendingInvites, {});
+        const noEmailAccess = await noEmailUser.query(api.access.getCurrentUserAccess, {});
+        expect(noEmailAccess.role).toBeNull();
+        expect(noEmailAccess.companyIds).toEqual([]);
 
-      await unverifiedUser.mutation(api.access.acceptPendingInvites, {});
-      const unverifiedAccess = await unverifiedUser.query(api.access.getCurrentUserAccess, {});
-      expect(unverifiedAccess.role).toBeNull();
-      expect(unverifiedAccess.companyIds).toEqual([]);
+        const unverifiedUser = t.withIdentity({
+          subject: "frank-invite-unverified",
+          tokenIdentifier: "https://auth.workos.com|frank-invite-unverified",
+          email: "frank+invite@maxwellknight.co.uk",
+          name: "Frank Invite",
+        });
+
+        await unverifiedUser.action(api.access.acceptPendingInvites, {});
+        const unverifiedAccess = await unverifiedUser.query(api.access.getCurrentUserAccess, {});
+        expect(unverifiedAccess.role).toBeNull();
+        expect(unverifiedAccess.companyIds).toEqual([]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     } finally {
       if (previousGrantSecret === undefined) {
         delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
@@ -429,10 +440,20 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
       });
 
-      await invitedUser.mutation(api.access.acceptPendingInvites, {});
+      const originalFetch = globalThis.fetch;
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "frank-invite-verified", email: "frank+invite@maxwellknight.co.uk", email_verified: true, name: "Frank Invite" }), { status: 200 })),
+        );
 
-      const access = await invitedUser.query(api.access.getCurrentUserAccess, {});
-      const companies = await invitedUser.query(api.access.listAccessibleCompanies, {});
+        await invitedUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      const access: { role: string | null; companyIds: string[]; isConsultant: boolean } = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      const companies: ReadonlyArray<{ _id: string }> = await invitedUser.query(api.access.listAccessibleCompanies, {});
 
       expect(access.role).toBe("company-scorer");
       expect(access.companyIds).toEqual([company.companyId]);
@@ -500,8 +521,18 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
       });
 
-      await cancelledUser.mutation(api.access.acceptPendingInvites, {});
-      const cancelledAccess = await cancelledUser.query(api.access.getCurrentUserAccess, {});
+      const originalFetch = globalThis.fetch;
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "frank-cancelled", email: "frank+invite@maxwellknight.co.uk", email_verified: true, name: "Frank Invite" }), { status: 200 })),
+        );
+
+        await cancelledUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      const cancelledAccess: { role: string | null; companyIds: string[] } = await cancelledUser.query(api.access.getCurrentUserAccess, {});
       expect(cancelledAccess.role).toBeNull();
       expect(cancelledAccess.companyIds).toEqual([]);
 
@@ -524,8 +555,18 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
       });
 
-      await expiredUser.mutation(api.access.acceptPendingInvites, {});
-      const expiredAccess = await expiredUser.query(api.access.getCurrentUserAccess, {});
+      const expiredFetch = globalThis.fetch;
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "frank-expired", email: "frank+invite@maxwellknight.co.uk", email_verified: true, name: "Frank Invite" }), { status: 200 })),
+        );
+
+        await expiredUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = expiredFetch;
+      }
+      const expiredAccess: { role: string | null; companyIds: string[] } = await expiredUser.query(api.access.getCurrentUserAccess, {});
       expect(expiredAccess.role).toBeNull();
       expect(expiredAccess.companyIds).toEqual([]);
 
@@ -543,13 +584,23 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
       });
 
-      await acceptedUser.mutation(api.access.acceptPendingInvites, {});
+      const acceptedFetch = globalThis.fetch;
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "frank-finalized", email: "frank+invite@maxwellknight.co.uk", email_verified: true, name: "Frank Invite" }), { status: 200 })),
+        );
+
+        await acceptedUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = acceptedFetch;
+      }
       await consultant.mutation(api.admin.deactivateWorkspacePerson, {
         companyId: company.companyId,
         email: "frank+invite@maxwellknight.co.uk",
       });
 
-      const deactivatedAccess = await acceptedUser.query(api.access.getCurrentUserAccess, {});
+      const deactivatedAccess: { role: string | null; companyIds: string[] } = await acceptedUser.query(api.access.getCurrentUserAccess, {});
       expect(deactivatedAccess.role).toBeNull();
       expect(deactivatedAccess.companyIds).toEqual([]);
       expect(finalInvite).toBeDefined();
@@ -584,11 +635,11 @@ describe("Phase 2 access checks", () => {
       name: "ACME Admin",
     });
 
-    const access = await acmeAdmin.query(api.access.getCurrentUserAccess, {});
-    const visibleCompanies = await acmeAdmin.query(api.access.listAccessibleCompanies, {});
-    const companyA = await acmeAdmin.query(api.access.getCompany, { companyId: seeded.companyAId });
-    const companyAProjects = await acmeAdmin.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId });
-    const companyAProject = await acmeAdmin.query(api.access.getProject, { projectId: seeded.projectAId });
+    const access: { role: string | null; companyIds: string[] } = await acmeAdmin.query(api.access.getCurrentUserAccess, {});
+    const visibleCompanies: ReadonlyArray<{ _id: string; name: string }> = await acmeAdmin.query(api.access.listAccessibleCompanies, {});
+    const companyA: { name: string } = await acmeAdmin.query(api.access.getCompany, { companyId: seeded.companyAId });
+    const companyAProjects: ReadonlyArray<{ _id: string }> = await acmeAdmin.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId });
+    const companyAProject: { _id: string } = await acmeAdmin.query(api.access.getProject, { projectId: seeded.projectAId });
 
     expect(access.role).toBe("company-admin");
     expect(access.companyIds).toEqual([seeded.companyAId]);
@@ -652,8 +703,8 @@ describe("Phase 2 access checks", () => {
         name: "Frank Maxwell",
       });
 
-      const access = await companyAdminIdentity.query(api.access.getCurrentUserAccess, {});
-      const visibleCompanies = await companyAdminIdentity.query(api.access.listAccessibleCompanies, {});
+      const access: { role: string | null } = await companyAdminIdentity.query(api.access.getCurrentUserAccess, {});
+      const visibleCompanies: ReadonlyArray<{ _id: string }> = await companyAdminIdentity.query(api.access.listAccessibleCompanies, {});
 
       expect(access.role).toBe("company-admin");
       expect(visibleCompanies.map((company) => company._id)).toEqual([seeded.companyAId]);
