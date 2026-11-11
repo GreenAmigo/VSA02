@@ -316,6 +316,258 @@ describe("Phase 2 access checks", () => {
     await expect(firstLogin.query(api.access.getProject, { projectId: seeded.projectAId })).rejects.toThrow("Project access denied");
   });
 
+  test("a missing or unverified email never accepts a pending workspace invite", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "harbor-consultant",
+        email: "harbor@maxwellknight.co.uk",
+        displayName: "Harbor Consultant",
+      });
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "harbor-consultant",
+        email: "harbor@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Harbor Consultant",
+      });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Harbor Logistics Test",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Frank Invite",
+        email: "frank+invite@maxwellknight.co.uk",
+        role: "company-scorer",
+      });
+
+      const noEmailUser = t.withIdentity({
+        tokenIdentifier: "frank-invite-no-email",
+        name: "Frank Invite",
+      });
+
+      await noEmailUser.mutation(api.access.acceptPendingInvites, {});
+      const noEmailAccess = await noEmailUser.query(api.access.getCurrentUserAccess, {});
+      expect(noEmailAccess.role).toBeNull();
+      expect(noEmailAccess.companyIds).toEqual([]);
+
+      const unverifiedUser = t.withIdentity({
+        tokenIdentifier: "frank-invite-unverified",
+        email: "frank+invite@maxwellknight.co.uk",
+        emailVerified: false,
+        name: "Frank Invite",
+      });
+
+      await unverifiedUser.mutation(api.access.acceptPendingInvites, {});
+      const unverifiedAccess = await unverifiedUser.query(api.access.getCurrentUserAccess, {});
+      expect(unverifiedAccess.role).toBeNull();
+      expect(unverifiedAccess.companyIds).toEqual([]);
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
+  test("a matching verified email accepts exactly the invited workspace and role", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "verified-invite-consultant",
+        email: "consultant@maxwellknight.co.uk",
+        displayName: "Invite Consultant",
+      });
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "verified-invite-consultant",
+        email: "consultant@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Invite Consultant",
+      });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Harbor Logistics Test",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Frank Invite",
+        email: "frank+invite@maxwellknight.co.uk",
+        role: "company-scorer",
+      });
+
+      const invitedUser = t.withIdentity({
+        tokenIdentifier: "frank-invite-verified",
+        email: "frank+invite@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Frank Invite",
+      });
+
+      await invitedUser.mutation(api.access.acceptPendingInvites, {});
+
+      const access = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      const companies = await invitedUser.query(api.access.listAccessibleCompanies, {});
+
+      expect(access.role).toBe("company-scorer");
+      expect(access.companyIds).toEqual([company.companyId]);
+      expect(companies.map((entry) => entry._id)).toEqual([company.companyId]);
+      await expect(invitedUser.query(api.access.getCompany, { companyId: company.companyId })).resolves.toMatchObject({ name: "Harbor Logistics Test" });
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
+  test("cancelled, expired or deactivated invites provide no access", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "cancelled-invite-consultant",
+        email: "consultant@maxwellknight.co.uk",
+        displayName: "Invite Consultant",
+      });
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "cancelled-invite-consultant",
+        email: "consultant@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Invite Consultant",
+      });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Harbor Logistics Test",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Frank Invite",
+        email: "frank+invite@maxwellknight.co.uk",
+        role: "company-scorer",
+      });
+
+      await consultant.mutation(api.admin.cancelWorkspaceInvite, {
+        companyId: company.companyId,
+        email: "frank+invite@maxwellknight.co.uk",
+      });
+
+      const cancelledUser = t.withIdentity({
+        tokenIdentifier: "frank-cancelled",
+        email: "frank+invite@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Frank Invite",
+      });
+
+      await cancelledUser.mutation(api.access.acceptPendingInvites, {});
+      const cancelledAccess = await cancelledUser.query(api.access.getCurrentUserAccess, {});
+      expect(cancelledAccess.role).toBeNull();
+      expect(cancelledAccess.companyIds).toEqual([]);
+
+      const secondInvite = await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Frank Invite",
+        email: "frank+invite@maxwellknight.co.uk",
+        role: "company-scorer",
+      });
+
+      await consultant.mutation(api.admin.expireWorkspaceInvite, {
+        companyId: company.companyId,
+        inviteId: secondInvite.inviteId,
+      });
+
+      const expiredUser = t.withIdentity({
+        tokenIdentifier: "frank-expired",
+        email: "frank+invite@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Frank Invite",
+      });
+
+      await expiredUser.mutation(api.access.acceptPendingInvites, {});
+      const expiredAccess = await expiredUser.query(api.access.getCurrentUserAccess, {});
+      expect(expiredAccess.role).toBeNull();
+      expect(expiredAccess.companyIds).toEqual([]);
+
+      const finalInvite = await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Frank Invite",
+        email: "frank+invite@maxwellknight.co.uk",
+        role: "company-scorer",
+      });
+
+      const acceptedUser = t.withIdentity({
+        tokenIdentifier: "frank-finalized",
+        email: "frank+invite@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Frank Invite",
+      });
+
+      await acceptedUser.mutation(api.access.acceptPendingInvites, {});
+      await consultant.mutation(api.admin.deactivateWorkspacePerson, {
+        companyId: company.companyId,
+        email: "frank+invite@maxwellknight.co.uk",
+      });
+
+      const deactivatedAccess = await acceptedUser.query(api.access.getCurrentUserAccess, {});
+      expect(deactivatedAccess.role).toBeNull();
+      expect(deactivatedAccess.companyIds).toEqual([]);
+      expect(finalInvite).toBeDefined();
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("an Acme company admin sees only Acme Health and is blocked from Beta Logistics", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

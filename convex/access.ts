@@ -1,4 +1,4 @@
-import { query, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
@@ -72,6 +72,7 @@ async function getActiveConsultantRecord(ctx: any, identity: { subject?: string;
 
   return null;
 }
+
 
 export const seedScenario = internalMutation({
   args: {
@@ -227,6 +228,95 @@ export const seedScenario = internalMutation({
   },
 });
 
+export const acceptPendingInvites = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const targetEmail = identity.email?.trim().toLowerCase();
+    if (!targetEmail || identity.emailVerified !== true) {
+      return { accepted: 0, email: targetEmail ?? null, verified: false };
+    }
+
+    const userId = identity.subject ?? identity.tokenIdentifier;
+    if (!userId) {
+      return { accepted: 0, email: targetEmail, verified: true };
+    }
+
+    const pendingInvites = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("email"), targetEmail))
+      .filter((q: any) => q.or(q.eq(q.field("status"), "invited"), q.eq(q.field("status"), "active")))
+      .collect();
+
+    let accepted = 0;
+    for (const invite of pendingInvites) {
+      const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
+      if (invite.cancelledAt || invite.deactivatedAt || isExpired) {
+        await ctx.db.patch(invite._id, {
+          status: isExpired ? "expired" : invite.cancelledAt ? "cancelled" : "deactivated",
+          expiredAt: isExpired ? Date.now() : invite.expiredAt,
+          cancelledAt: invite.cancelledAt ?? undefined,
+          deactivatedAt: invite.deactivatedAt ?? undefined,
+        });
+        continue;
+      }
+
+      const existingMember = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
+        .filter((q: any) => q.eq(q.field("userId"), userId))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .first();
+
+      if (existingMember) {
+        await ctx.db.patch(existingMember._id, {
+          email: targetEmail,
+          displayName: invite.displayName,
+          role: invite.role,
+          isActive: true,
+        });
+      } else {
+        await ctx.db.insert("companyMembers", {
+          companyId: invite.companyId,
+          userId,
+          email: targetEmail,
+          displayName: invite.displayName,
+          role: invite.role,
+          isActive: true,
+          createdAt: Date.now(),
+          isTestData: invite.isTestData ?? false,
+        });
+      }
+
+      await ctx.db.patch(invite._id, {
+        status: "active",
+        acceptedAt: Date.now(),
+        cancelledAt: undefined,
+        deactivatedAt: undefined,
+        expiredAt: undefined,
+      });
+
+      await ctx.db.insert("activityLogs", {
+        actorUserId: userId,
+        actorEmail: targetEmail,
+        action: "accept_workspace_invite",
+        details: `Accepted invite to ${invite.displayName} for ${invite.role} access in this workspace.`,
+        workspaceName: "workspace",
+        companyId: invite.companyId,
+        createdAt: Date.now(),
+      });
+
+      accepted += 1;
+    }
+
+    return { accepted, email: targetEmail, verified: true };
+  },
+});
+
 export const getCurrentUserAccess = query({
   args: {},
   handler: async (ctx) => {
@@ -254,19 +344,18 @@ export const getCurrentUserAccess = query({
     const isConsultant = Boolean(consultantRecord);
     const role = isConsultant ? "vs-consultant" : memberships[0]?.role ?? null;
 
-    let companyIds: Id<"companies">[] = memberships.map((member) => member.companyId);
+    const visibleCompanyIds = new Set<Id<"companies">>();
+    for (const member of memberships) {
+      const company = (await ctx.db.get(member.companyId)) as { _id: Id<"companies">; isActive?: boolean } | null;
+      if (company && company.isActive !== false) {
+        visibleCompanyIds.add(member.companyId);
+      }
+    }
+
+    let companyIds: Id<"companies">[] = Array.from(visibleCompanyIds);
     if (isConsultant) {
       const allCompanies = await ctx.db.query("companies").collect();
       companyIds = allCompanies.filter((company) => company.isActive !== false).map((company) => company._id);
-    } else {
-      const visibleCompanyIds = new Set<Id<"companies">>();
-      for (const companyId of companyIds) {
-        const company = await ctx.db.get(companyId);
-        if (company && company.isActive !== false) {
-          visibleCompanyIds.add(companyId);
-        }
-      }
-      companyIds = Array.from(visibleCompanyIds);
     }
 
     return {
@@ -297,21 +386,21 @@ export const listAccessibleCompanies = query({
       .take(200);
 
     const consultantRecord = await getActiveConsultantRecord(ctx, identity);
-    const companyIds = memberships.map((item) => item.companyId);
     if (consultantRecord) {
       const companies = await ctx.db.query("companies").collect();
       return companies.filter((company) => company.isActive !== false);
     }
 
-    if (companyIds.length === 0) {
+    const dedupedCompanyIds = new Set(memberships.map((item) => item.companyId));
+    if (dedupedCompanyIds.size === 0) {
       return [] as const;
     }
 
     const companies = await Promise.all(
-      companyIds.map((id) => ctx.db.get(id)),
+      Array.from(dedupedCompanyIds).map((id) => ctx.db.get(id) as Promise<{ _id: Id<"companies">; name: string; isActive?: boolean } | null>),
     );
 
-    return companies.filter((company): company is NonNullable<typeof company> => company !== null && company.isActive !== false);
+    return companies.filter((company): company is { _id: Id<"companies">; name: string; isActive?: boolean } => company !== null && company.isActive !== false);
   },
 });
 
@@ -339,15 +428,17 @@ export const getCompany = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!membership) {
-      const consultantMembership = await getActiveConsultantRecord(ctx, identity);
-      const hasLegacyConsultantMembership = consultantMembership && "companyId" in consultantMembership
-        ? consultantMembership.companyId === args.companyId
-        : false;
+    if (membership) {
+      return company;
+    }
 
-      if (!consultantMembership && !hasLegacyConsultantMembership) {
-        throw new Error("Company access denied");
-      }
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity);
+    const hasLegacyConsultantMembership = consultantMembership && "companyId" in consultantMembership
+      ? consultantMembership.companyId === args.companyId
+      : false;
+
+    if (!consultantMembership && !hasLegacyConsultantMembership) {
+      throw new Error("Company access denied");
     }
 
     return company;

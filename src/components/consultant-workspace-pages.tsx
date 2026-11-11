@@ -731,20 +731,174 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | undefined;
 
-  if (isProtectedLoading || access === undefined || companies === undefined) {
+  const invitePerson = useMutation((api as any).admin.inviteWorkspacePerson);
+  const deactivatePerson = useMutation((api as any).admin.deactivateWorkspacePerson);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "company-scorer" as "company-admin" | "company-scorer" | "vendor" });
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
-  if (!company && !access.isConsultant) {
+  const canManagePeople = access.isConsultant || access.role === "company-admin";
+  if (!company || !canManagePeople) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
+  const handleInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedEmail = inviteForm.email.trim();
+    if (!inviteForm.name.trim() || !trimmedEmail) {
+      setNotice({ kind: "error", message: "Enter a name and email before inviting a person." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await invitePerson({
+        companyId: companyId as any,
+        name: inviteForm.name.trim(),
+        email: trimmedEmail,
+        role: inviteForm.role,
+      });
+      setInviteForm({ name: "", email: "", role: "company-scorer" });
+      setNotice({ kind: "success", message: "Invite created. The person will be linked automatically on their next verified sign-in." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to invite this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeactivate = async (person: { email: string; userId?: string | null }) => {
+    setBusy(true);
+    try {
+      await deactivatePerson({
+        companyId: companyId as any,
+        email: person.email,
+        userId: person.userId ?? undefined,
+      });
+      setNotice({ kind: "success", message: `Deactivated ${person.email}. Score history stays intact.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to deactivate this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">People</h1>
-      <p className="mt-3 text-slate-300">Authorized company: {company?.name ?? "Consultant view"}</p>
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Workspace people</p>
+            <h1 className="mt-2 text-2xl font-semibold text-white">{company.name}</h1>
+          </div>
+          <Link href={`/workspaces/${companyId}`} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-slate-500">
+            Back to workspace
+          </Link>
+        </div>
+
+        {notice ? (
+          <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {notice.message}
+          </div>
+        ) : null}
+
+        {canManagePeople ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Invite a person</h2>
+            <form onSubmit={handleInvite} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_180px_auto]">
+              <input
+                value={inviteForm.name}
+                onChange={(event) => setInviteForm((current) => ({ ...current, name: event.target.value }))}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                placeholder="Full name"
+              />
+              <input
+                value={inviteForm.email}
+                onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                placeholder="person@example.com"
+              />
+              <select
+                value={inviteForm.role}
+                onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value as "company-admin" | "company-scorer" | "vendor" }))}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              >
+                <option value="company-admin">Company admin</option>
+                <option value="company-scorer">Company scorer</option>
+                <option value="vendor">Vendor</option>
+              </select>
+              <button
+                type="submit"
+                disabled={busy}
+                className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Invite
+              </button>
+            </form>
+          </section>
+        ) : null}
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-white">People and invite status</h2>
+            <StatusPill label={`${people.length} records`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+          </div>
+
+          {people.length === 0 ? (
+            <p className="text-sm text-slate-400">No people or invitations yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {people.map((person) => (
+                <div key={person.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-base font-medium text-white">{person.name}</p>
+                      <p className="text-sm text-slate-400">{person.email}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusPill
+                        label={person.status}
+                        className={
+                          person.status === "active"
+                            ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
+                            : person.status === "deactivated"
+                              ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+                              : "border-sky-500/40 bg-sky-500/10 text-sky-200"
+                        }
+                      />
+                      <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-300">
+                        {person.role}
+                      </span>
+                    </div>
+                  </div>
+
+                  {person.status === "active" && person.userId ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleDeactivate(person)}
+                        disabled={busy}
+                        className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
+                      >
+                        Deactivate
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

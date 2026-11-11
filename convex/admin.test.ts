@@ -379,5 +379,45 @@ describe("admin console actions", () => {
       await expect(companyAdmin.query(api.admin.listActivityLogs, {})).rejects.toThrow("Only VS Consultants can manage workspaces");
     });
   });
+
+  test("a consultant can invite a person and the matching verified email accepts the invite after sign-in", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "phase3a-consultant", "phase3a@consultant.example", "Phase 3A Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "phase3a-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Phase 3A Company",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation((api as any).admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Aisha Ali",
+        email: "aisha@phase3a.example",
+        role: "company-scorer",
+      });
+
+      const people = await consultant.query((api as any).admin.listWorkspacePeople, { companyId: company.companyId });
+      expect(people.some((person: any) => person.email === "aisha@phase3a.example" && person.status === "invited")).toBe(true);
+
+      const invitedUser = t.withIdentity({
+        tokenIdentifier: "aisha-phase3a",
+        email: "aisha@phase3a.example",
+        emailVerified: true,
+        name: "Aisha Ali",
+      });
+
+      await invitedUser.mutation(api.access.acceptPendingInvites, {});
+
+      const access = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      const companyAccess = await invitedUser.query(api.access.listAccessibleCompanies, {});
+
+      expect(access.isConsultant).toBe(false);
+      expect(access.role).toBe("company-scorer");
+      expect(access.companyIds).toEqual(expect.arrayContaining([company.companyId]));
+      expect(companyAccess.some((item) => item._id === company.companyId)).toBe(true);
+    });
+  });
 });
 

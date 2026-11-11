@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
+import { useMutation } from "convex/react";
 import { useRouter } from "next/navigation";
+
+import { api } from "../../convex/_generated/api";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [redirecting, setRedirecting] = useState(false);
+  const acceptPendingInvites = useMutation(api.access.acceptPendingInvites);
+  const acceptedRef = useRef(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -18,6 +23,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return () => window.clearTimeout(timer);
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!loading && user && !acceptedRef.current) {
+      acceptedRef.current = true;
+      void acceptPendingInvites({});
+    }
+  }, [acceptPendingInvites, loading, user]);
 
   if (loading || !user) {
     return (

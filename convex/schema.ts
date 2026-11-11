@@ -34,6 +34,23 @@ export default defineSchema({
   }).index("by_company_user", ["companyId", "userId"])
     .index("by_company_role", ["companyId", "role"]),
 
+  workspaceInvites: defineTable({
+    companyId: v.id("companies"),
+    email: v.string(),
+    displayName: v.string(),
+    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    status: v.union(v.literal("invited"), v.literal("active"), v.literal("deactivated"), v.literal("cancelled"), v.literal("expired")),
+    invitedByUserId: v.string(),
+    invitedAt: v.number(),
+    expiresAt: v.number(),
+    acceptedAt: v.optional(v.number()),
+    deactivatedAt: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+    expiredAt: v.optional(v.number()),
+    isTestData: v.optional(v.boolean()),
+  }).index("by_company_email", ["companyId", "email"])
+    .index("by_company_status", ["companyId", "status"]),
+
   projects: defineTable({
     companyId: v.id("companies"),
     name: v.string(),

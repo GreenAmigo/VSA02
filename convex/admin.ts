@@ -983,6 +983,301 @@ export const listCompanyMembers = query({
   },
 });
 
+export const inviteWorkspacePerson = mutation({
+  args: {
+    companyId: v.id("companies"),
+    name: v.string(),
+    email: v.string(),
+    role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    const normalizedEmail = args.email.trim().toLowerCase();
+    const displayName = args.name.trim() || normalizedEmail;
+
+    const existingMember = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (existingMember) {
+      await ctx.db.patch(existingMember._id, {
+        displayName,
+        role: args.role,
+        isActive: true,
+      });
+
+      await recordActivity(ctx, {
+        actorUserId: canonicalUserId,
+        actorEmail: identity.email ?? undefined,
+        action: "update_workspace_person_role",
+        details: `Updated ${displayName} (${normalizedEmail}) to ${args.role} in this workspace.`,
+        workspaceName: "workspace",
+        companyId: args.companyId,
+      });
+
+      return {
+        email: normalizedEmail,
+        displayName,
+        role: args.role,
+        status: "active",
+      };
+    }
+
+    const existingInvite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .first();
+
+    const expiresAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
+    let inviteId: any = existingInvite?._id;
+
+    if (existingInvite) {
+      await ctx.db.patch(existingInvite._id, {
+        displayName,
+        role: args.role,
+        status: "invited",
+        invitedByUserId: canonicalUserId,
+        invitedAt: Date.now(),
+        expiresAt,
+        acceptedAt: undefined,
+        deactivatedAt: undefined,
+        cancelledAt: undefined,
+        expiredAt: undefined,
+      });
+    } else {
+      inviteId = await ctx.db.insert("workspaceInvites", {
+        companyId: args.companyId,
+        email: normalizedEmail,
+        displayName,
+        role: args.role,
+        status: "invited",
+        invitedByUserId: canonicalUserId,
+        invitedAt: Date.now(),
+        expiresAt,
+        isTestData: false,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: canonicalUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "invite_workspace_person",
+      details: `Invited ${displayName} (${normalizedEmail}) as ${args.role} to this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      email: normalizedEmail,
+      displayName,
+      role: args.role,
+      status: "invited",
+      inviteId,
+    };
+  },
+});
+
+export const listWorkspacePeople = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const members = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    const invites = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    const items = [
+      ...members.filter((member) => member.isActive).map((member) => ({
+        id: member._id,
+        userId: member.userId,
+        name: member.displayName,
+        email: member.email ?? "",
+        role: member.role,
+        status: "active" as const,
+        source: "member" as const,
+      })),
+      ...invites.map((invite) => ({
+        id: invite._id,
+        userId: null,
+        name: invite.displayName,
+        email: invite.email,
+        role: invite.role,
+        status: invite.status,
+        source: "invite" as const,
+      })),
+    ];
+
+    return items.sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const cancelWorkspaceInvite = mutation({
+  args: {
+    companyId: v.id("companies"),
+    email: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedEmail = args.email.trim().toLowerCase();
+    const invite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .first();
+
+    if (!invite) {
+      throw new Error("Workspace invite not found");
+    }
+
+    await ctx.db.patch(invite._id, {
+      status: "cancelled",
+      cancelledAt: Date.now(),
+      acceptedAt: undefined,
+      expiredAt: undefined,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "cancel_workspace_invite",
+      details: `Cancelled invite for ${invite.displayName} (${normalizedEmail}) in this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      email: normalizedEmail,
+      status: "cancelled",
+    };
+  },
+});
+
+export const expireWorkspaceInvite = mutation({
+  args: {
+    companyId: v.id("companies"),
+    inviteId: v.id("workspaceInvites"),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const invite = await ctx.db.get(args.inviteId);
+    if (!invite || invite.companyId !== args.companyId) {
+      throw new Error("Workspace invite not found");
+    }
+
+    await ctx.db.patch(invite._id, {
+      status: "expired",
+      expiredAt: Date.now(),
+      acceptedAt: undefined,
+      cancelledAt: undefined,
+    });
+
+    return {
+      companyId: args.companyId,
+      email: invite.email,
+      status: "expired",
+    };
+  },
+});
+
+export const deactivateWorkspacePerson = mutation({
+  args: {
+    companyId: v.id("companies"),
+    userId: v.optional(v.string()),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedEmail = args.email?.trim().toLowerCase();
+    const member = normalizedEmail
+      ? await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .first()
+      : await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("userId"), args.userId ?? ""))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .first();
+
+    if (!member) {
+      throw new Error("Workspace person not found");
+    }
+
+    await ctx.db.patch(member._id, {
+      isActive: false,
+    });
+
+    const invite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), (member.email ?? normalizedEmail ?? "").toLowerCase()))
+      .first();
+
+    if (invite) {
+      await ctx.db.patch(invite._id, {
+        status: "deactivated",
+        deactivatedAt: Date.now(),
+        cancelledAt: undefined,
+        expiredAt: undefined,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "deactivate_workspace_person",
+      details: `Deactivated ${member.displayName} (${member.email ?? normalizedEmail ?? "unknown email"}) in this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      userId: member.userId,
+      email: member.email ?? normalizedEmail ?? null,
+      status: "deactivated",
+    };
+  },
+});
+
 export const createProject = mutation({
   args: {
     companyId: v.id("companies"),
