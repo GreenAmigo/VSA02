@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
@@ -44,20 +45,30 @@ function StatCard({ label, value, helper }: { label: string; value: string; help
 function WorkspaceShell({
   workspace,
   activeTab,
+  showConsultantLinks = true,
   children,
 }: {
   workspace: WorkspaceShellWorkspace;
-  activeTab: "overview" | "projects" | "people" | "vendors" | "requirements" | "scoring";
+  activeTab: "overview" | "projects" | "people" | "departments" | "vendors" | "requirements" | "scoring";
+  showConsultantLinks?: boolean;
   children: React.ReactNode;
 }) {
-  const tabs = [
-    { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
-    { key: "projects", label: "Projects", href: `/workspaces/${workspace.slug}/projects` },
-    { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
-    { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
-    { key: "requirements", label: "Requirements", href: `/workspaces/${workspace.slug}/requirements` },
-    { key: "scoring", label: "Scoring", href: `/workspaces/${workspace.slug}/scoring` },
-  ] as const;
+  const tabs = showConsultantLinks
+    ? [
+        { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
+        { key: "projects", label: "Projects", href: `/workspaces/${workspace.slug}/projects` },
+        { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
+        { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
+        { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
+        { key: "requirements", label: "Requirements", href: `/workspaces/${workspace.slug}/requirements` },
+        { key: "scoring", label: "Scoring", href: `/workspaces/${workspace.slug}/scoring` },
+      ]
+    : [
+        { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
+        { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
+        { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
+        { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
+      ];
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
@@ -70,30 +81,34 @@ function WorkspaceShell({
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Company</p>
           <div className="mt-3 space-y-2">
-            <div className="rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">{workspace.name}</div>
+            <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 hover:border-sky-400">
+              {workspace.name}
+            </Link>
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
-          <div className="mt-3 space-y-2 text-sm text-slate-300">
-            <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-              Consultant home
-            </Link>
-            <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-              Activity log
-            </Link>
-            <Link
-              href={`/workspaces/${workspace.slug}/import`}
-              className="block rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sky-100 hover:border-sky-400"
-            >
-              Bulk data import
-            </Link>
-            <button type="button" className="w-full rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
-              Add company workspace
-            </button>
+        {showConsultantLinks ? (
+          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
+            <div className="mt-3 space-y-2 text-sm text-slate-300">
+              <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+                Back to all workspaces
+              </Link>
+              <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+                Activity log
+              </Link>
+              <Link
+                href={`/workspaces/${workspace.slug}/import`}
+                className="block rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sky-100 hover:border-sky-400"
+              >
+                Bulk data import
+              </Link>
+              <button type="button" className="w-full rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                Add company workspace
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </aside>
 
       <main className="flex-1">
@@ -159,6 +174,15 @@ export function ConsultantWorkspaceDirectoryPage() {
     | Array<{ _id: CompanyId; name: string; isTestData?: boolean; isActive?: boolean }>
     | undefined;
 
+  const router = useRouter();
+  const singleCompany = !access?.isConsultant && companies && companies.length === 1 ? companies[0] : null;
+
+  useEffect(() => {
+    if (singleCompany) {
+      router.replace(`/workspaces/${singleCompany._id}`);
+    }
+  }, [router, singleCompany]);
+
   const consultantWorkspaces = useQuery(
     api.admin.listWorkspacesForConsultant,
     isProtectedLoading || !access?.isConsultant ? "skip" : {},
@@ -166,6 +190,10 @@ export function ConsultantWorkspaceDirectoryPage() {
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
+  }
+
+  if (singleCompany) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Opening your workspace…</div>;
   }
 
   const canViewAnything = Boolean(access.isConsultant || access.role || companies.length);
@@ -348,17 +376,19 @@ export function ConsultantWorkspaceDirectoryPage() {
 
         <section className="grid gap-5 xl:grid-cols-2">
           {visibleWorkspaces.map((company) => (
-            <div key={company._id} className="block rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Company workspace</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">{company.name}</h2>
+            <div key={company._id} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <Link href={`/workspaces/${company._id}`} className="block">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Company workspace</p>
+                    <h2 className="mt-2 text-xl font-semibold text-white">{company.name}</h2>
+                  </div>
+                  <div className="flex gap-2">
+                    {company.isActive === false ? <StatusPill label="ARCHIVED" className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
+                    {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  {company.isActive === false ? <StatusPill label="ARCHIVED" className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
-                  {company.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
-                </div>
-              </div>
+              </Link>
 
               {access.isConsultant ? (
                 <div className="relative mt-4 flex justify-end">
@@ -615,6 +645,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     <WorkspaceShell
       workspace={workspace}
       activeTab="overview"
+      showConsultantLinks={Boolean(access.isConsultant)}
     >
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Company" value={workspace.name} helper="Visible via Convex access" />
@@ -664,6 +695,81 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
             </Link>
           </div>
         </div>
+      </section>
+    </WorkspaceShell>
+  );
+}
+
+export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: string }) {
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
+    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
+    | undefined;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | undefined;
+
+  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
+  }
+
+  const company = companies.find((item) => item._id === companyId) ?? companies[0];
+  if (!company) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
+  }
+
+  const workspace = {
+    id: companyId,
+    slug: companyId,
+    name: company.name,
+    isTestData: false,
+    projects: [],
+    people: people.map((person) => ({ id: person.id, name: person.name })),
+    vendors: [],
+    requirements: [],
+    scores: [],
+  };
+
+  const departments = [
+    { name: "Leadership", members: people.filter((person) => person.role === "company-admin") },
+    { name: "Scoring team", members: people.filter((person) => person.role === "company-scorer") },
+    { name: "Vendor access", members: people.filter((person) => person.role === "vendor") },
+  ].filter((section) => section.members.length > 0);
+
+  return (
+    <WorkspaceShell workspace={workspace} activeTab="departments" showConsultantLinks={Boolean(access.isConsultant)}>
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Departments</h2>
+          <StatusPill label="Workspace teams" className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+        </div>
+
+        {departments.length === 0 ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
+            No department groups are configured yet for this workspace.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {departments.map((department) => (
+              <div key={department.name} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-white">{department.name}</h3>
+                  <StatusPill label={`${department.members.length} members`} className="border-slate-700 bg-slate-900 text-slate-200" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {department.members.map((member) => (
+                    <span key={member.id} className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">
+                      {member.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </WorkspaceShell>
   );
