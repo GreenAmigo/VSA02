@@ -54,6 +54,7 @@ async function recordActivity(
     actorEmail?: string;
     action: string;
     details: string;
+    workspaceName?: string;
     companyId?: string;
     projectId?: string;
   },
@@ -63,6 +64,7 @@ async function recordActivity(
     actorEmail: payload.actorEmail,
     action: payload.action,
     details: payload.details,
+    workspaceName: payload.workspaceName,
     companyId: payload.companyId,
     projectId: payload.projectId,
     createdAt: Date.now(),
@@ -191,8 +193,9 @@ export const createCompany = mutation({
     const identity = await assertConsultantAccess(ctx);
 
     const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    const workspaceName = args.name.trim();
     const companyId = await ctx.db.insert("companies", {
-      name: args.name.trim(),
+      name: workspaceName,
       slug: slugify(args.name),
       createdBy: canonicalUserId,
       createdAt: Date.now(),
@@ -212,9 +215,18 @@ export const createCompany = mutation({
       isTestData: false,
     });
 
+    await recordActivity(ctx, {
+      actorUserId: canonicalUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "create_workspace",
+      details: `Created workspace ${workspaceName}.`,
+      workspaceName,
+      companyId,
+    });
+
     return {
       companyId,
-      name: args.name.trim(),
+      name: workspaceName,
       ssoProvider: args.ssoProvider ?? null,
     };
   },
@@ -242,6 +254,7 @@ export const archiveCompany = mutation({
       actorEmail: identity.email ?? undefined,
       action: "archive_workspace",
       details: `Archived workspace ${company.name}.`,
+      workspaceName: company.name,
       companyId: args.companyId,
     });
 
@@ -275,6 +288,7 @@ export const restoreCompany = mutation({
       actorEmail: identity.email ?? undefined,
       action: "restore_workspace",
       details: `Restored workspace ${company.name}.`,
+      workspaceName: company.name,
       companyId: args.companyId,
     });
 
@@ -372,15 +386,6 @@ export const deleteCompany = mutation({
       await ctx.db.delete(score._id);
     }
 
-    const activityLogs = await ctx.db
-      .query("activityLogs")
-      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .collect();
-
-    for (const log of activityLogs) {
-      await ctx.db.delete(log._id);
-    }
-
     await ctx.db.delete(args.companyId);
 
     await recordActivity(ctx, {
@@ -388,6 +393,7 @@ export const deleteCompany = mutation({
       actorEmail: identity.email ?? undefined,
       action: "delete_workspace",
       details: `Permanently deleted workspace ${company.name}.`,
+      workspaceName: company.name,
       companyId: args.companyId,
     });
 
@@ -893,6 +899,8 @@ export const listActivityLogs = query({
 
     if (args.companyId) {
       await assertCompanyAdmin(ctx, args.companyId);
+    } else {
+      await assertConsultantAccess(ctx);
     }
 
     const logs = args.companyId

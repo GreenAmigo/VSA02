@@ -120,6 +120,7 @@ export default defineSchema({
     actorEmail: v.optional(v.string()),
     action: v.string(),
     details: v.string(),
+    workspaceName: v.optional(v.string()),
     companyId: v.optional(v.id("companies")),
     projectId: v.optional(v.id("projects")),
     createdAt: v.number(),

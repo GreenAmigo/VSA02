@@ -490,6 +490,17 @@ export function ConsultantActivityLogPage() {
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
     | { email?: string | null; role?: string | null; isConsultant?: boolean }
     | undefined;
+  const logs = useQuery(api.admin.listActivityLogs, isProtectedLoading || !access?.isConsultant ? "skip" : {}) as
+    | Array<{
+        _id: string;
+        action: string;
+        details: string;
+        workspaceName?: string | null;
+        companyId?: string | null;
+        actorEmail?: string | null;
+        createdAt: number;
+      }>
+    | undefined;
 
   if (isProtectedLoading || access === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -529,9 +540,30 @@ export function ConsultantActivityLogPage() {
             <StatusPill label="Server filtered" className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
           </div>
 
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
-            Activity is loaded from Convex for authorized consultants only.
-          </div>
+          {logs && logs.length > 0 ? (
+            <div className="space-y-3">
+              {logs.map((log) => (
+                <div key={log._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <StatusPill label={log.action.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+                      <span className="text-sm font-medium text-white">{log.workspaceName ?? "Deleted workspace"}</span>
+                    </div>
+                    <span className="text-xs text-slate-400">{new Date(log.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">{log.details}</p>
+                  <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
+                    {log.companyId ? <span>Company: {log.companyId}</span> : null}
+                    {log.actorEmail ? <span>Actor: {log.actorEmail}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
+              No activity yet.
+            </div>
+          )}
         </div>
       </div>
     </div>

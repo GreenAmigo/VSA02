@@ -302,5 +302,82 @@ describe("admin console actions", () => {
       expect(deleted.deletedProjects).toBeGreaterThanOrEqual(1);
     });
   });
+
+  test("workspace lifecycle actions write the expected activity log rows", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "activity-log-consultant", "activity-log@consultant.example", "Activity Log Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "activity-log-consultant" });
+
+      const created = await consultant.mutation(api.admin.createCompany, {
+        name: "Delete Me Test",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.archiveCompany, {
+        companyId: created.companyId,
+      });
+
+      await consultant.mutation(api.admin.restoreCompany, {
+        companyId: created.companyId,
+      });
+
+      await consultant.mutation(api.admin.archiveCompany, {
+        companyId: created.companyId,
+      });
+
+      await consultant.mutation(api.admin.deleteCompany, {
+        companyId: created.companyId,
+        confirmationName: "Delete Me Test",
+      });
+
+      const logs = await consultant.query(api.admin.listActivityLogs, {});
+      const companyLogs = logs.filter((log) => log.companyId === created.companyId);
+      const actions = companyLogs.map((log) => log.action);
+
+      expect(actions).toEqual(expect.arrayContaining([
+        "create_workspace",
+        "archive_workspace",
+        "restore_workspace",
+        "delete_workspace",
+      ]));
+
+      expect(companyLogs.some((log) => log.action === "create_workspace" && log.workspaceName === "Delete Me Test")).toBe(true);
+      expect(companyLogs.some((log) => log.action === "archive_workspace" && log.workspaceName === "Delete Me Test")).toBe(true);
+      expect(companyLogs.some((log) => log.action === "delete_workspace" && log.workspaceName === "Delete Me Test")).toBe(true);
+    });
+  });
+
+  test("consultants can see all lifecycle activity logs and company admins cannot", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "audit-log-consultant", "audit-log@consultant.example", "Audit Log Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "audit-log-consultant" });
+      const companyAdmin = t.withIdentity({ tokenIdentifier: "regular-company-admin" });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Delete Me Test",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.archiveCompany, {
+        companyId: company.companyId,
+      });
+
+      await consultant.mutation(api.admin.deleteCompany, {
+        companyId: company.companyId,
+        confirmationName: "Delete Me Test",
+      });
+
+      const consultantLogs = await consultant.query(api.admin.listActivityLogs, {});
+      const companyRows = consultantLogs.filter((log) => log.companyId === company.companyId);
+
+      expect(companyRows.length).toBeGreaterThanOrEqual(3);
+      expect(companyRows.some((log) => log.action === "delete_workspace" && log.workspaceName === "Delete Me Test")).toBe(true);
+      await expect(companyAdmin.query(api.admin.listActivityLogs, {})).rejects.toThrow("Only VS Consultants can manage workspaces");
+    });
+  });
 });
 
