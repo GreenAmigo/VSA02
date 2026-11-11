@@ -92,7 +92,36 @@ Legend:
 | Vendor emailed-link login | B | The app can flow through the email-based AuthKit path, but the separate vendor-specific project-scoped emailed-link flow still needs the final app-level wiring and validation. |
 | Preview admin membership guard | A | The preview-only admin sync guard is enforced in Convex and tested so it cannot run in production. |
 | Server-side access checks | A | Company and project access checks are implemented and validated by Convex tests. |
+| Consultant workspace catalogue | A | The consultant directory is routed through a single canonical component so / and /workspaces share the same lifecycle UI, while archived/test workspaces are clearly labelled. |
+| TEST-badged preview data | A | Test workspaces are clearly labelled with a TEST badge wherever they appear in the consultant UI and in seeded preview data. |
+| Screen map and route governance | A | Every route is accounted for in the project brief and the app uses the canonical screen implementation instead of legacy duplicate layouts. |
 | Real data persistence in Convex | A | Core app data is persisted and queried in Convex with automated access-isolation coverage. |
+
+## Screen map
+
+The app uses a single canonical consultant home route for the workspace directory and a dedicated activity log route. The route-to-component map below is the source of truth for the consultant and company screens during Phase 3 planning.
+
+| Route | Component / page | Notes |
+| --- | --- | --- |
+| / | `src/app/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceDirectoryPage` | Canonical consultant home; same implementation as /workspaces |
+| /login | App login flow | WorkOS AuthKit login entry page |
+| /workspaces | `src/app/workspaces/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceDirectoryPage` | Consultant workspace directory and lifecycle controls |
+| /workspaces/activity | `src/app/workspaces/activity/page.tsx` -> `AuthGate` -> `ConsultantActivityLogPage` | Server-filtered activity log for consultants |
+| /workspaces/import | `src/app/workspaces/import/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceImportPage` | Bulk import entry for consultant-managed workspaces |
+| /workspaces/[companyId] | `src/app/workspaces/[companyId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceOverviewPage` | Company/workspace landing page |
+| /workspaces/[companyId]/projects | `src/app/workspaces/[companyId]/projects/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectsPage` | Project catalogue for a workspace |
+| /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Project detail screen |
+| /workspaces/[companyId]/people | `src/app/workspaces/[companyId]/people/page.tsx` -> `AuthGate` -> `ConsultantWorkspacePeoplePage` | People and role management |
+| /workspaces/[companyId]/vendors | `src/app/workspaces/[companyId]/vendors/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorsPage` | Workspace-level vendor management |
+| /workspaces/[companyId]/requirements | `src/app/workspaces/[companyId]/requirements/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceRequirementsPage` | Requirements and imports |
+| /workspaces/[companyId]/scoring | `src/app/workspaces/[companyId]/scoring/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceScoringPage` | Scoring dashboard and views |
+| /projects | `src/app/projects/page.tsx` -> `AuthGate` -> project dashboard shell | Project-level app screens |
+| /projects/new | `src/app/projects/new/page.tsx` -> `AuthGate` -> project creation flow | New project entry |
+| /projects/[id] | `src/app/projects/[id]/page.tsx` -> `AuthGate` -> project detail shell | Project overview |
+| /projects/[id]/people | `src/app/projects/[id]/people/page.tsx` -> `AuthGate` -> project people screen | Project people and assignments |
+| /projects/[id]/requirements | `src/app/projects/[id]/requirements/page.tsx` -> `AuthGate` -> project requirements screen | Requirement management |
+| /projects/[id]/scoring | `src/app/projects/[id]/scoring/page.tsx` -> `AuthGate` -> project scoring screen | Scoring workflow |
+| /projects/[id]/decision | `src/app/projects/[id]/decision/page.tsx` -> `AuthGate` -> decision screen | Recommendation and decision output |
 
 ## Deployment to-do
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.

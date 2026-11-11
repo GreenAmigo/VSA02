@@ -16,4 +16,5 @@
 - Prefer the smallest root-cause fix over broader rewrites.
 - Do not introduce UI-only access logic or mock data in screens.
 - Keep production and preview/dev behavior separated and guarded.
+- Screen map rule: every route must be listed in BRIEF.md, and the canonical consultant-home route must be used for / and /workspaces instead of legacy duplicate layouts.
 - When a task includes a verification step, run the exact proving commands and report the real output.
