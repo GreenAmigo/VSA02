@@ -711,13 +711,25 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
   const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
     | undefined;
+  const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ departmentId: string; name: string; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
+    | undefined;
 
-  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined) {
+  const createDepartment = useMutation((api as any).admin.createWorkspaceDepartment);
+  const addDepartmentMember = useMutation((api as any).admin.addWorkspaceDepartmentMember);
+  const removeDepartmentMember = useMutation((api as any).admin.removeWorkspaceDepartmentMember);
+  const [departmentName, setDepartmentName] = useState("");
+  const [selectedMembers, setSelectedMembers] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined || departments === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
-  if (!company) {
+  const canManagePeople = access.isConsultant || access.role === "company-admin";
+  if (!company || !canManagePeople) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
@@ -733,19 +745,95 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
     scores: [],
   };
 
-  const departments = [
-    { name: "Leadership", members: people.filter((person) => person.role === "company-admin") },
-    { name: "Scoring team", members: people.filter((person) => person.role === "company-scorer") },
-    { name: "Vendor access", members: people.filter((person) => person.role === "vendor") },
-  ].filter((section) => section.members.length > 0);
+  const activeWorkspaceMembers = people.filter((person) => person.status === "active" && person.userId);
+
+  const handleCreateDepartment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = departmentName.trim();
+    if (!trimmedName) {
+      setNotice({ kind: "error", message: "Enter a department name before creating it." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await createDepartment({ companyId: companyId as any, name: trimmedName });
+      setDepartmentName("");
+      setNotice({ kind: "success", message: `Created the ${trimmedName} department.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to create the department." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddMember = async (departmentId: string) => {
+    const userId = selectedMembers[departmentId];
+    if (!userId) {
+      setNotice({ kind: "error", message: "Choose a person to add to the department." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await addDepartmentMember({ companyId: companyId as any, departmentId: departmentId as any, userId });
+      setSelectedMembers((current) => ({ ...current, [departmentId]: "" }));
+      setNotice({ kind: "success", message: "Member added to the department." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to add the member." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveMember = async (departmentId: string, userId: string) => {
+    const confirmed = window.confirm("Remove this person from the department?");
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await removeDepartmentMember({ companyId: companyId as any, departmentId: departmentId as any, userId });
+      setNotice({ kind: "success", message: "Member removed from the department." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to remove the member." });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <WorkspaceShell workspace={workspace} activeTab="departments" showConsultantLinks={Boolean(access.isConsultant)}>
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Departments</h2>
-          <StatusPill label="Workspace teams" className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+          <StatusPill label={`${departments.length} groups`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
         </div>
+
+        {notice ? (
+          <div className={`mb-4 rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {notice.message}
+          </div>
+        ) : null}
+
+        {canManagePeople ? (
+          <form onSubmit={handleCreateDepartment} className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 md:flex-row">
+            <input
+              value={departmentName}
+              onChange={(event) => setDepartmentName(event.target.value)}
+              className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Department name"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+            >
+              Create department
+            </button>
+          </form>
+        ) : null}
 
         {departments.length === 0 ? (
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
@@ -753,21 +841,67 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
           </div>
         ) : (
           <div className="space-y-4">
-            {departments.map((department) => (
-              <div key={department.name} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-white">{department.name}</h3>
-                  <StatusPill label={`${department.members.length} members`} className="border-slate-700 bg-slate-900 text-slate-200" />
+            {departments.map((department) => {
+              const availableMembers = activeWorkspaceMembers.filter(
+                (person) => !department.members.some((member) => member.userId === person.userId),
+              );
+
+              return (
+                <div key={department.departmentId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-base font-semibold text-white">{department.name}</h3>
+                    <StatusPill label={`${department.members.length} members`} className="border-slate-700 bg-slate-900 text-slate-200" />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {department.members.length === 0 ? (
+                      <span className="text-sm text-slate-400">No members assigned yet.</span>
+                    ) : (
+                      department.members.map((member) => (
+                        <div key={`${department.departmentId}-${member.userId}`} className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">
+                          <span>{member.displayName}</span>
+                          {canManagePeople ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleRemoveMember(department.departmentId, member.userId)}
+                              className="text-rose-300 hover:text-rose-200"
+                              aria-label={`Remove ${member.displayName} from ${department.name}`}
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {canManagePeople && availableMembers.length > 0 ? (
+                    <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3 md:flex-row md:items-center">
+                      <select
+                        value={selectedMembers[department.departmentId] ?? ""}
+                        onChange={(event) => setSelectedMembers((current) => ({ ...current, [department.departmentId]: event.target.value }))}
+                        className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-sky-400"
+                      >
+                        <option value="">Choose a person</option>
+                        {availableMembers.map((person) => (
+                          <option key={person.id} value={person.userId ?? ""}>
+                            {person.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleAddMember(department.departmentId)}
+                        disabled={busy || !selectedMembers[department.departmentId]}
+                        className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
+                      >
+                        Add member
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {department.members.map((member) => (
-                    <span key={member.id} className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">
-                      {member.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

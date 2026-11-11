@@ -51,6 +51,27 @@ export default defineSchema({
   }).index("by_company_email", ["companyId", "email"])
     .index("by_company_status", ["companyId", "status"]),
 
+  workspaceDepartments: defineTable({
+    companyId: v.id("companies"),
+    name: v.string(),
+    createdByUserId: v.string(),
+    createdAt: v.number(),
+    isActive: v.boolean(),
+    isTestData: v.optional(v.boolean()),
+  }).index("by_company_name", ["companyId", "name"]),
+
+  departmentMembers: defineTable({
+    companyId: v.id("companies"),
+    departmentId: v.id("workspaceDepartments"),
+    userId: v.string(),
+    email: v.optional(v.string()),
+    displayName: v.string(),
+    role: v.optional(v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor"))),
+    createdAt: v.number(),
+    isActive: v.boolean(),
+  }).index("by_department_user", ["departmentId", "userId"])
+    .index("by_company_department", ["companyId", "departmentId"]),
+
   projects: defineTable({
     companyId: v.id("companies"),
     name: v.string(),

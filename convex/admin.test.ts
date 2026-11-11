@@ -411,6 +411,35 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a consultant can create departments and assign members to them", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "phase3b-consultant", "phase3b@consultant.example", "Phase 3B Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "phase3b-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Phase 3B Company",
+        ssoProvider: "google-workspace",
+      });
+
+      const department = await consultant.mutation((api as any).admin.createWorkspaceDepartment, {
+        companyId: company.companyId,
+        name: "Operations",
+      });
+
+      await consultant.mutation((api as any).admin.addWorkspaceDepartmentMember, {
+        companyId: company.companyId,
+        departmentId: department.departmentId,
+        userId: "phase3b-consultant",
+      });
+
+      const departments = await consultant.query((api as any).admin.listWorkspaceDepartments, { companyId: company.companyId });
+      expect(departments).toHaveLength(1);
+      expect(departments[0].name).toBe("Operations");
+      expect(departments[0].members.some((member: any) => member.userId === "phase3b-consultant")).toBe(true);
+    });
+  });
+
   test("a consultant can invite a person and the matching verified email accepts the invite after sign-in", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

@@ -1133,6 +1133,252 @@ export const listWorkspacePeople = query({
   },
 });
 
+export const createWorkspaceDepartment = mutation({
+  args: {
+    companyId: v.id("companies"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedName = args.name.trim();
+    if (!normalizedName) {
+      throw new Error("Department name is required");
+    }
+
+    const existingDepartment = await ctx.db
+      .query("workspaceDepartments")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("name"), normalizedName))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (existingDepartment) {
+      throw new Error("A department with that name already exists");
+    }
+
+    const departmentId = await ctx.db.insert("workspaceDepartments", {
+      companyId: args.companyId,
+      name: normalizedName,
+      createdByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      createdAt: Date.now(),
+      isActive: true,
+      isTestData: false,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "create_workspace_department",
+      details: `Created the ${normalizedName} department for this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      departmentId,
+      name: normalizedName,
+      members: [],
+    };
+  },
+});
+
+export const addWorkspaceDepartmentMember = mutation({
+  args: {
+    companyId: v.id("companies"),
+    departmentId: v.id("workspaceDepartments"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const department = await ctx.db.get(args.departmentId);
+    if (!department || department.companyId !== args.companyId || !department.isActive) {
+      throw new Error("Department not found");
+    }
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const identityUserIds = new Set(getIdentityUserIds(identity));
+    const member = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!member && !identityUserIds.has(args.userId)) {
+      const consultantRecord = await getActiveConsultantRow(ctx, args.userId);
+      if (!consultantRecord) {
+        throw new Error("User is not a member of this workspace");
+      }
+    }
+
+    const resolvedMember = member ?? {
+      _id: "system" as any,
+      userId: args.userId,
+      email: identity.email ?? undefined,
+      displayName: identity.name ?? args.userId,
+      role: "company-admin" as const,
+    };
+
+    const existingAssignment = await ctx.db
+      .query("departmentMembers")
+      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (existingAssignment) {
+      await ctx.db.patch(existingAssignment._id, {
+        email: resolvedMember.email,
+        displayName: resolvedMember.displayName,
+        role: resolvedMember.role,
+      });
+
+      return {
+        companyId: args.companyId,
+        departmentId: args.departmentId,
+        userId: args.userId,
+        displayName: resolvedMember.displayName,
+      };
+    }
+
+    await ctx.db.insert("departmentMembers", {
+      companyId: args.companyId,
+      departmentId: args.departmentId,
+      userId: args.userId,
+      email: resolvedMember.email,
+      displayName: resolvedMember.displayName,
+      role: resolvedMember.role,
+      createdAt: Date.now(),
+      isActive: true,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "add_department_member",
+      details: `Added ${resolvedMember.displayName} (${resolvedMember.email ?? args.userId}) to the ${department.name} department.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      departmentId: args.departmentId,
+      userId: args.userId,
+      displayName: resolvedMember.displayName,
+    };
+  },
+});
+
+export const removeWorkspaceDepartmentMember = mutation({
+  args: {
+    companyId: v.id("companies"),
+    departmentId: v.id("workspaceDepartments"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const department = await ctx.db.get(args.departmentId);
+    if (!department || department.companyId !== args.companyId || !department.isActive) {
+      throw new Error("Department not found");
+    }
+
+    const assignment = await ctx.db
+      .query("departmentMembers")
+      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!assignment) {
+      return {
+        companyId: args.companyId,
+        departmentId: args.departmentId,
+        userId: args.userId,
+        removed: false,
+      };
+    }
+
+    await ctx.db.patch(assignment._id, {
+      isActive: false,
+    });
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "remove_department_member",
+      details: `Removed ${assignment.displayName} from the ${department.name} department.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      companyId: args.companyId,
+      departmentId: args.departmentId,
+      userId: args.userId,
+      removed: true,
+    };
+  },
+});
+
+export const listWorkspaceDepartments = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const departments = await ctx.db
+      .query("workspaceDepartments")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    const rows = await Promise.all(departments.map(async (department) => {
+      const members = await ctx.db
+        .query("departmentMembers")
+        .filter((q: any) => q.eq(q.field("departmentId"), department._id))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .collect();
+
+      return {
+        departmentId: department._id,
+        name: department.name,
+        createdAt: department.createdAt,
+        members: members.map((member) => ({
+          userId: member.userId,
+          displayName: member.displayName,
+          email: member.email ?? null,
+          role: member.role ?? "company-scorer",
+        })),
+      };
+    }));
+
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
 export const cancelWorkspaceInvite = mutation({
   args: {
     companyId: v.id("companies"),
