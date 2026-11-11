@@ -380,6 +380,37 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a consultant can cancel a pending invitation and the activity log records the action", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "phase3a-consultant", "phase3a@consultant.example", "Phase 3A Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "phase3a-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Phase 3A Company",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation((api as any).admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Aisha Ali",
+        email: "aisha@phase3a.example",
+        role: "company-scorer",
+      });
+
+      await consultant.mutation((api as any).admin.cancelWorkspaceInvite, {
+        companyId: company.companyId,
+        email: "aisha@phase3a.example",
+      });
+
+      const people = await consultant.query((api as any).admin.listWorkspacePeople, { companyId: company.companyId });
+      expect(people.some((person: any) => person.email === "aisha@phase3a.example" && person.status === "cancelled")).toBe(true);
+
+      const logs = await consultant.query(api.admin.listActivityLogs, { companyId: company.companyId });
+      expect(logs.some((log: any) => log.action === "cancel_workspace_invite" && log.details.includes("aisha@phase3a.example"))).toBe(true);
+    });
+  });
+
   test("a consultant can invite a person and the matching verified email accepts the invite after sign-in", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

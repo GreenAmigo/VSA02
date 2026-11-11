@@ -842,6 +842,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
     | undefined;
 
   const invitePerson = useMutation((api as any).admin.inviteWorkspacePerson);
+  const cancelInvite = useMutation((api as any).admin.cancelWorkspaceInvite);
   const deactivatePerson = useMutation((api as any).admin.deactivateWorkspacePerson);
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "company-scorer" as "company-admin" | "company-scorer" | "vendor" });
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -877,6 +878,26 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
       setNotice({ kind: "success", message: "Invite created. The person will be linked automatically on their next verified sign-in." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to invite this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCancelInvite = async (person: { email: string; name: string }) => {
+    const confirmed = window.confirm(`Cancel the pending invitation for ${person.email}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await cancelInvite({
+        companyId: companyId as any,
+        email: person.email,
+      });
+      setNotice({ kind: "success", message: `Cancelled the invitation for ${person.name} (${person.email}).` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to cancel this invite." });
     } finally {
       setBusy(false);
     }
@@ -972,13 +993,15 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill
-                        label={person.status}
+                        label={person.status === "cancelled" ? "Cancelled" : person.status === "deactivated" ? "Deactivated" : person.status === "expired" ? "Expired" : person.status}
                         className={
                           person.status === "active"
                             ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
                             : person.status === "deactivated"
                               ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
-                              : "border-sky-500/40 bg-sky-500/10 text-sky-200"
+                              : person.status === "cancelled" || person.status === "expired"
+                                ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                                : "border-sky-500/40 bg-sky-500/10 text-sky-200"
                         }
                       />
                       <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-300">
@@ -986,6 +1009,19 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                       </span>
                     </div>
                   </div>
+
+                  {person.source === "invite" && person.status === "invited" ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelInvite(person)}
+                        disabled={busy}
+                        className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
+                      >
+                        Cancel invitation
+                      </button>
+                    </div>
+                  ) : null}
 
                   {person.status === "active" && person.userId ? (
                     <div className="mt-3 flex justify-end">
