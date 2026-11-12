@@ -1259,7 +1259,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
   const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
-  if (!company || !canManageProjects || !project) {
+  if (!company || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
@@ -1343,76 +1343,80 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         <p className="text-sm text-slate-300">{project.description || "No description for this project yet."}</p>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
-          <div className="mt-4 space-y-3">
-            <input
-              value={scorerDraft.name}
-              onChange={(event) => setScorerDraft((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              placeholder="Scorer name"
-            />
-            <input
-              value={scorerDraft.email}
-              onChange={(event) => setScorerDraft((current) => ({ ...current, email: event.target.value }))}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              placeholder="Scorer email"
-            />
-            <div className="flex gap-3">
-              <select
-                value={scorerDraft.role}
-                onChange={(event) => setScorerDraft((current) => ({ ...current, role: event.target.value as "individual" | "department" }))}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              >
-                <option value="individual">Individual</option>
-                <option value="department">Department</option>
-              </select>
-              {scorerDraft.role === "department" ? (
-                <select
-                  value={scorerDraft.departmentName}
-                  onChange={(event) => setScorerDraft((current) => ({ ...current, departmentName: event.target.value }))}
+      {canManageProjects ? (
+        <>
+          <section className="grid gap-6 xl:grid-cols-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
+              <div className="mt-4 space-y-3">
+                <input
+                  value={scorerDraft.name}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, name: event.target.value }))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                >
-                  <option value="">Select a department</option>
-                  {departments.map((department) => (
-                    <option key={department.departmentId} value={department.name}>{department.name}</option>
-                  ))}
-                </select>
-              ) : null}
+                  placeholder="Scorer name"
+                />
+                <input
+                  value={scorerDraft.email}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, email: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  placeholder="Scorer email"
+                />
+                <div className="flex gap-3">
+                  <select
+                    value={scorerDraft.role}
+                    onChange={(event) => setScorerDraft((current) => ({ ...current, role: event.target.value as "individual" | "department" }))}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  >
+                    <option value="individual">Individual</option>
+                    <option value="department">Department</option>
+                  </select>
+                  {scorerDraft.role === "department" ? (
+                    <select
+                      value={scorerDraft.departmentName}
+                      onChange={(event) => setScorerDraft((current) => ({ ...current, departmentName: event.target.value }))}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                    >
+                      <option value="">Select a department</option>
+                      {departments.map((department) => (
+                        <option key={department.departmentId} value={department.name}>{department.name}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
+                <button type="button" onClick={() => void handleAddScorer()} disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
+                  Add scorer
+                </button>
+              </div>
             </div>
-            <button type="button" onClick={() => void handleAddScorer()} disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
-              Add scorer
-            </button>
-          </div>
-        </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
-          <div className="mt-4 space-y-3">
-            <input
-              value={vendorDraft.name}
-              onChange={(event) => setVendorDraft((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              placeholder="Vendor name"
-            />
-            <input
-              value={vendorDraft.email}
-              onChange={(event) => setVendorDraft((current) => ({ ...current, email: event.target.value }))}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              placeholder="Vendor email"
-            />
-            <button type="button" onClick={() => void handleAddVendor()} disabled={busy} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
-              Add vendor
-            </button>
-          </div>
-        </div>
-      </section>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
+              <div className="mt-4 space-y-3">
+                <input
+                  value={vendorDraft.name}
+                  onChange={(event) => setVendorDraft((current) => ({ ...current, name: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  placeholder="Vendor name"
+                />
+                <input
+                  value={vendorDraft.email}
+                  onChange={(event) => setVendorDraft((current) => ({ ...current, email: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  placeholder="Vendor email"
+                />
+                <button type="button" onClick={() => void handleAddVendor()} disabled={busy} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
+                  Add vendor
+                </button>
+              </div>
+            </div>
+          </section>
 
-      {notice ? (
-        <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
-          {notice.message}
-        </div>
+          {notice ? (
+            <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+              {notice.message}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">

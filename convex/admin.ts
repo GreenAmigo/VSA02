@@ -2247,7 +2247,33 @@ export const listProjectMembers = query({
       throw new Error("Project not found");
     }
 
-    await assertCompanyAdmin(ctx, project.companyId);
+    const userIds = getIdentityUserIds(identity);
+    const hasCompanyAdminAccess = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .filter((q: any) => q.eq(q.field("role"), "company-admin"))
+      .first();
+
+    const hasProjectAccess = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .filter((q: any) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ))
+      .first();
+
+    const consultantAccess = await getActiveConsultantRow(ctx, userIds);
+    if (!hasCompanyAdminAccess && !hasProjectAccess && !consultantAccess) {
+      throw new Error("Project access denied");
+    }
 
     return await ctx.db
       .query("projectMembers")

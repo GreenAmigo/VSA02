@@ -67,6 +67,44 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a project member can load the project roster without being a company admin", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "acme-admin", "acme-admin@example.com", "ACME Admin");
+
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Green Workspace",
+        ssoProvider: "google-workspace",
+      });
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Green Assigned Project",
+      });
+
+      await admin.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Green Test1",
+        email: "green-test-one@example.com",
+        role: "individual",
+      });
+
+      const scorer = t.withIdentity({
+        tokenIdentifier: "green-test-one",
+        email: "green-test-one@example.com",
+        name: "Green Test1",
+        emailVerified: true,
+      });
+
+      const projectDetail = await scorer.query(api.access.getProject, { projectId: project.projectId });
+      const roster = await scorer.query(api.admin.listProjectMembers, { projectId: project.projectId });
+
+      expect(projectDetail._id).toBe(project.projectId);
+      expect(roster.some((member: { displayName: string }) => member.displayName === "Green Test1")).toBe(true);
+    });
+  });
+
   test("project vendor and scorer assignment creates project-scoped rows", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });
