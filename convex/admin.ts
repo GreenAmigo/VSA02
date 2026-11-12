@@ -214,7 +214,7 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
   }
 
   const userIds = getIdentityUserIds(identity);
-  const companyMatches = await ctx.db
+  const companyMatches: Array<{ userId: string; displayName?: string | null }> = await ctx.db
     .query("companyMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
     .filter((q: any) => q.or(
@@ -225,10 +225,12 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
 
-  const candidateUserIds = new Set([...userIds, ...companyMatches.map((member) => member.userId)]);
+  const candidateUserIds = new Set([...userIds, ...companyMatches.map((member: { userId: string }) => member.userId)]);
   const candidateNames = new Set([
     ...(identity.name?.trim() ? [identity.name.trim()] : []),
-    ...companyMatches.map((member) => member.displayName.trim()).filter(Boolean),
+    ...companyMatches
+      .map((member: { displayName?: string | null }) => member.displayName?.trim())
+      .filter((displayName): displayName is string => Boolean(displayName)),
   ]);
 
   const member = await ctx.db
