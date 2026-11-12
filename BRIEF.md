@@ -113,7 +113,8 @@ The app uses a single canonical consultant home route for the workspace director
 | /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Project detail screen |
 | /workspaces/[companyId]/people | `src/app/workspaces/[companyId]/people/page.tsx` -> `AuthGate` -> `ConsultantWorkspacePeoplePage` | People and role management |
 | /workspaces/[companyId]/departments | `src/app/workspaces/[companyId]/departments/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceDepartmentsPage` | Department/team view for workspace members |
-| /workspaces/[companyId]/vendors | `src/app/workspaces/[companyId]/vendors/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorsPage` | Workspace-level vendor management |
+| /workspaces/[companyId]/vendors | `src/app/workspaces/[companyId]/vendors/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorsPage` | Workspace-level vendor management and vendor-home redirect for vendor contacts |
+| /workspaces/[companyId]/vendors/[vendorId]/contacts | `src/app/workspaces/[companyId]/vendors/[vendorId]/contacts/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorContactsPage` | Vendor contact invitations, status, and reactivation |
 | /workspaces/[companyId]/requirements | `src/app/workspaces/[companyId]/requirements/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceRequirementsPage` | Requirements and imports |
 | /workspaces/[companyId]/scoring | `src/app/workspaces/[companyId]/scoring/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceScoringPage` | Scoring dashboard and views |
 | /projects | `src/app/projects/page.tsx` -> `AuthGate` -> project dashboard shell | Project-level app screens |

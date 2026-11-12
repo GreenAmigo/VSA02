@@ -333,11 +333,14 @@ export const acceptPendingInvitesForUser = internalMutation({
         .filter((q: any) => q.eq(q.field("userId"), args.userId))
         .collect();
 
-      const canonicalMembership = existingMemberships.length > 0
+      const canonicalMembership = (existingMemberships.length > 0
         ? [...existingMemberships].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.createdAt - b.createdAt)[0]
-        : null;
+        : null) as any;
+      const hasMatchingVendorMembership = invite.vendorId
+        ? existingMemberships.some((membership) => membership.vendorId === invite.vendorId)
+        : true;
 
-      if (canonicalMembership && canonicalMembership.isActive) {
+      if (canonicalMembership && canonicalMembership.isActive && hasMatchingVendorMembership) {
         for (const duplicate of existingMemberships) {
           if (duplicate._id !== canonicalMembership._id) {
             await ctx.db.delete(duplicate._id);
@@ -359,6 +362,7 @@ export const acceptPendingInvitesForUser = internalMutation({
           email: targetEmail,
           displayName: args.displayName ?? invite.displayName,
           role: invite.role,
+          vendorId: invite.vendorId ?? canonicalMembership.vendorId,
           isActive: true,
         });
       } else {
@@ -368,6 +372,7 @@ export const acceptPendingInvitesForUser = internalMutation({
           email: targetEmail,
           displayName: args.displayName ?? invite.displayName,
           role: invite.role,
+          vendorId: invite.vendorId,
           isActive: true,
           createdAt: Date.now(),
           isTestData: invite.isTestData ?? false,
@@ -464,7 +469,9 @@ export const getCurrentUserAccess = query({
 
     const consultantRecord = await getActiveConsultantRecord(ctx, identity);
     const isConsultant = Boolean(consultantRecord);
-    const role = isConsultant ? "vs-consultant" : memberships[0]?.role ?? null;
+    const primaryMembership = memberships[0] ?? null;
+    const vendorMembership = memberships.find((member) => member.role === "vendor") ?? null;
+    const role = isConsultant ? "vs-consultant" : primaryMembership?.role ?? null;
 
     const visibleCompanyIds = new Set<Id<"companies">>();
     for (const member of memberships) {
@@ -487,6 +494,8 @@ export const getCurrentUserAccess = query({
       subject: identity.subject,
       role,
       isConsultant,
+      isVendor: Boolean(vendorMembership),
+      vendorId: vendorMembership?.vendorId ?? null,
       companyIds,
     };
   },

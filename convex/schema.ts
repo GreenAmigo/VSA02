@@ -28,17 +28,31 @@ export default defineSchema({
     email: v.optional(v.string()),
     displayName: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     isActive: v.boolean(),
     createdAt: v.number(),
     isTestData: v.optional(v.boolean()),
   }).index("by_company_user", ["companyId", "userId"])
     .index("by_company_role", ["companyId", "role"]),
 
+  vendorOrganizations: defineTable({
+    companyId: v.id("companies"),
+    name: v.string(),
+    contactEmail: v.optional(v.string()),
+    status: v.union(v.literal("active"), v.literal("deactivated")),
+    createdByUserId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    isTestData: v.optional(v.boolean()),
+  }).index("by_company_name", ["companyId", "name"])
+    .index("by_company_status", ["companyId", "status"]),
+
   workspaceInvites: defineTable({
     companyId: v.id("companies"),
     email: v.string(),
     displayName: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     status: v.union(v.literal("invited"), v.literal("active"), v.literal("deactivated"), v.literal("cancelled"), v.literal("expired")),
     invitedByUserId: v.string(),
     invitedAt: v.number(),

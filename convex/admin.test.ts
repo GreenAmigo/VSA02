@@ -229,6 +229,54 @@ describe("admin console actions", () => {
     });
   });
 
+  test("vendor contacts are blocked from company screens and cannot manage another workspace's vendors", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "consultant-user", "consultant@example.com", "Consultant User");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "consultant-user" });
+      const companyA = await consultant.mutation(api.admin.createCompany, { name: "Acme Health", ssoProvider: "microsoft-entra" });
+      const companyB = await consultant.mutation(api.admin.createCompany, { name: "Beta Logistics", ssoProvider: "google-workspace" });
+
+      const vendorOrg = await consultant.mutation((api as any).admin.addWorkspaceVendor, {
+        companyId: companyA.companyId,
+        name: "Northwind Labs",
+        contactEmail: "vendor@northwind.example",
+      });
+
+      await consultant.mutation((api as any).admin.inviteVendorContact, {
+        companyId: companyA.companyId,
+        vendorId: vendorOrg.vendorId,
+        name: "Northwind Contact",
+        email: "northwind-contact@example.com",
+      });
+
+      const vendorIdentity = t.withIdentity({ tokenIdentifier: "vendor-contact-user", email: "northwind-contact@example.com", name: "Northwind Contact" });
+      await vendorIdentity.action((api as any).access.acceptPendingInvites, {});
+
+      await expect(vendorIdentity.query((api as any).admin.listWorkspacePeople, { companyId: companyA.companyId })).rejects.toThrow();
+      await expect(vendorIdentity.query((api as any).admin.listWorkspaceDepartments, { companyId: companyA.companyId })).rejects.toThrow();
+      await expect(vendorIdentity.query((api as any).admin.listActivityLogs, { companyId: companyA.companyId })).rejects.toThrow();
+      await expect(vendorIdentity.query((api as any).admin.listWorkspaceVendors, { companyId: companyB.companyId })).rejects.toThrow();
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: companyA.companyId,
+        name: "Acme Admin",
+        email: "admin@acme.example.com",
+        role: "company-admin",
+      });
+
+      const companyAdminIdentity = t.withIdentity({ tokenIdentifier: "company-admin-user", email: "admin@acme.example.com", name: "Acme Admin" });
+      await companyAdminIdentity.action((api as any).access.acceptPendingInvites, {});
+
+      await expect(companyAdminIdentity.mutation((api as any).admin.addWorkspaceVendor, {
+        companyId: companyB.companyId,
+        name: "Barn Owl Outsourcing",
+        contactEmail: "hello@barnowl.example",
+      })).rejects.toThrow();
+    });
+  });
+
   test("only VS Consultants can create, archive, restore, and delete workspaces", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

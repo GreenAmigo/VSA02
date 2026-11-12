@@ -983,6 +983,522 @@ export const listCompanyMembers = query({
   },
 });
 
+export const listWorkspaceVendors = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const vendors = await ctx.db
+      .query("vendorOrganizations")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+
+    return vendors
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((vendor) => ({
+        vendorId: vendor._id,
+        name: vendor.name,
+        contactEmail: vendor.contactEmail ?? null,
+        status: vendor.status,
+        createdAt: vendor.createdAt,
+        updatedAt: vendor.updatedAt,
+        contactCount: 0,
+      }));
+  },
+});
+
+export const addWorkspaceVendor = mutation({
+  args: {
+    companyId: v.id("companies"),
+    name: v.string(),
+    contactEmail: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedName = args.name.trim();
+    const normalizedContactEmail = args.contactEmail?.trim().toLowerCase() || undefined;
+
+    if (!normalizedName) {
+      throw new Error("Vendor name is required");
+    }
+
+    const existingVendor = await ctx.db
+      .query("vendorOrganizations")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("name"), normalizedName))
+      .first();
+
+    if (existingVendor) {
+      if (existingVendor.status === "deactivated") {
+        await ctx.db.patch(existingVendor._id, {
+          contactEmail: normalizedContactEmail ?? existingVendor.contactEmail,
+          status: "active",
+          updatedAt: Date.now(),
+        });
+      }
+
+      await recordActivity(ctx, {
+        actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+        actorEmail: identity.email ?? undefined,
+        action: "activate_workspace_vendor",
+        details: `Activated vendor organization ${normalizedName} in this workspace.`,
+        workspaceName: "workspace",
+        companyId: args.companyId,
+      });
+
+      return {
+        vendorId: existingVendor._id,
+        name: normalizedName,
+        contactEmail: normalizedContactEmail ?? existingVendor.contactEmail ?? null,
+        status: "active",
+      };
+    }
+
+    const vendorId = await ctx.db.insert("vendorOrganizations", {
+      companyId: args.companyId,
+      name: normalizedName,
+      contactEmail: normalizedContactEmail,
+      status: "active",
+      createdByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      isTestData: false,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "create_workspace_vendor",
+      details: `Created vendor organization ${normalizedName} for this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      vendorId: vendorId,
+      name: normalizedName,
+      contactEmail: normalizedContactEmail ?? null,
+      status: "active",
+    };
+  },
+});
+
+export const updateWorkspaceVendor = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+    name: v.string(),
+    contactEmail: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const vendor = await ctx.db.get(args.vendorId);
+    if (!vendor || vendor.companyId !== args.companyId) {
+      throw new Error("Vendor organization not found");
+    }
+
+    const normalizedName = args.name.trim();
+    const normalizedContactEmail = args.contactEmail?.trim().toLowerCase() || undefined;
+
+    await ctx.db.patch(args.vendorId, {
+      name: normalizedName,
+      contactEmail: normalizedContactEmail,
+      updatedAt: Date.now(),
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "update_workspace_vendor",
+      details: `Updated vendor organization ${normalizedName}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      vendorId: args.vendorId,
+      name: normalizedName,
+      contactEmail: normalizedContactEmail ?? vendor.contactEmail ?? null,
+      status: vendor.status,
+    };
+  },
+});
+
+export const deactivateWorkspaceVendor = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const vendor = await ctx.db.get(args.vendorId);
+    if (!vendor || vendor.companyId !== args.companyId) {
+      throw new Error("Vendor organization not found");
+    }
+
+    await ctx.db.patch(args.vendorId, {
+      status: "deactivated",
+      updatedAt: Date.now(),
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "deactivate_workspace_vendor",
+      details: `Deactivated vendor organization ${vendor.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, status: "deactivated" };
+  },
+});
+
+export const reactivateWorkspaceVendor = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const vendor = await ctx.db.get(args.vendorId);
+    if (!vendor || vendor.companyId !== args.companyId) {
+      throw new Error("Vendor organization not found");
+    }
+
+    await ctx.db.patch(args.vendorId, {
+      status: "active",
+      updatedAt: Date.now(),
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "reactivate_workspace_vendor",
+      details: `Reactivated vendor organization ${vendor.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, status: "active" };
+  },
+});
+
+export const inviteVendorContact = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+    name: v.string(),
+    email: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const vendor = await ctx.db.get(args.vendorId);
+    if (!vendor || vendor.companyId !== args.companyId) {
+      throw new Error("Vendor organization not found");
+    }
+
+    if (vendor.status === "deactivated") {
+      throw new Error("Vendor organization is deactivated");
+    }
+
+    const normalizedEmail = args.email.trim().toLowerCase();
+    const displayName = args.name.trim() || normalizedEmail;
+
+    const existingMember = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .filter((q: any) => q.eq(q.field("role"), "vendor"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (existingMember) {
+      await ctx.db.patch(existingMember._id, {
+        displayName,
+        role: "vendor",
+        vendorId: args.vendorId,
+        isActive: true,
+      });
+      return { vendorId: args.vendorId, email: normalizedEmail, displayName, status: "active" };
+    }
+
+    const existingInvite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .first();
+
+    const expiresAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
+    if (existingInvite) {
+      await ctx.db.patch(existingInvite._id, {
+        displayName,
+        role: "vendor",
+        vendorId: args.vendorId,
+        status: "invited",
+        invitedByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+        invitedAt: Date.now(),
+        expiresAt,
+        acceptedAt: undefined,
+        cancelledAt: undefined,
+        deactivatedAt: undefined,
+        expiredAt: undefined,
+      });
+
+      await recordActivity(ctx, {
+        actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+        actorEmail: identity.email ?? undefined,
+        action: "invite_vendor_contact",
+        details: `Invited ${displayName} (${normalizedEmail}) to vendor organization ${vendor.name}.`,
+        workspaceName: "workspace",
+        companyId: args.companyId,
+      });
+
+      return { vendorId: args.vendorId, email: normalizedEmail, displayName, status: "invited" };
+    }
+
+    await ctx.db.insert("workspaceInvites", {
+      companyId: args.companyId,
+      email: normalizedEmail,
+      displayName,
+      role: "vendor",
+      vendorId: args.vendorId,
+      status: "invited",
+      invitedByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      invitedAt: Date.now(),
+      expiresAt,
+      isTestData: false,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "invite_vendor_contact",
+      details: `Invited ${displayName} (${normalizedEmail}) to vendor organization ${vendor.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, email: normalizedEmail, displayName, status: "invited" };
+  },
+});
+
+export const listVendorContacts = query({
+  args: { companyId: v.id("companies"), vendorId: v.id("vendorOrganizations") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const vendor = await ctx.db.get(args.vendorId);
+    if (!vendor || vendor.companyId !== args.companyId) {
+      return [] as const;
+    }
+
+    const memberRows = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .collect();
+
+    const activeContacts = memberRows.map((member) => ({
+      id: member._id,
+      userId: member.userId,
+      name: member.displayName,
+      email: member.email ?? "",
+      role: member.role,
+      status: member.isActive ? "active" : "deactivated",
+      source: "member",
+    }));
+
+    const invites = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .collect();
+
+    const inviteEntries = invites
+      .filter((invite) => invite.status !== "active")
+      .filter((invite) => !activeContacts.some((contact) => contact.email.trim().toLowerCase() === invite.email.trim().toLowerCase()))
+      .map((invite) => ({
+        id: invite._id,
+        userId: null,
+        name: invite.displayName,
+        email: invite.email,
+        role: invite.role,
+        status: invite.status,
+        source: "invite",
+      }));
+
+    return [...activeContacts, ...inviteEntries].sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const cancelVendorContactInvite = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+    email: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedEmail = args.email.trim().toLowerCase();
+    const invite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+      .first();
+
+    if (!invite) {
+      throw new Error("Vendor contact invite not found");
+    }
+
+    await ctx.db.patch(invite._id, {
+      status: "cancelled",
+      cancelledAt: Date.now(),
+      acceptedAt: undefined,
+      expiredAt: undefined,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "cancel_vendor_contact_invite",
+      details: `Cancelled the contact invite for ${invite.displayName} (${normalizedEmail}) on this vendor organization.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, email: normalizedEmail, status: "cancelled" };
+  },
+});
+
+export const deactivateVendorContact = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const member = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .first();
+
+    if (!member) {
+      throw new Error("Vendor contact not found");
+    }
+
+    await ctx.db.patch(member._id, { isActive: false });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "deactivate_vendor_contact",
+      details: `Deactivated ${member.displayName} from this vendor organization.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, userId: args.userId, status: "deactivated" };
+  },
+});
+
+export const reactivateVendorContact = mutation({
+  args: {
+    companyId: v.id("companies"),
+    vendorId: v.id("vendorOrganizations"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const member = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
+      .first();
+
+    if (!member) {
+      throw new Error("Vendor contact not found");
+    }
+
+    await ctx.db.patch(member._id, { isActive: true });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "reactivate_vendor_contact",
+      details: `Reactivated ${member.displayName} for this vendor organization.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { vendorId: args.vendorId, userId: args.userId, status: "active" };
+  },
+});
+
 export const inviteWorkspacePerson = mutation({
   args: {
     companyId: v.id("companies"),

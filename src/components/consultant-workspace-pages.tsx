@@ -1253,14 +1253,202 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
   );
 }
 
+export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: { companyId: string; vendorId: string }) {
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const contacts = useQuery((api as any).admin.listVendorContacts, isProtectedLoading || !companyId || !vendorId ? "skip" : { companyId, vendorId }) as
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | undefined;
+
+  const invitePerson = useMutation((api as any).admin.inviteVendorContact);
+  const cancelInvite = useMutation((api as any).admin.cancelVendorContactInvite);
+  const deactivateContact = useMutation((api as any).admin.deactivateVendorContact);
+  const reactivateContact = useMutation((api as any).admin.reactivateVendorContact);
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (isProtectedLoading || access === undefined || companies === undefined || contacts === undefined) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
+  }
+
+  const company = companies.find((item) => item._id === companyId) ?? companies[0];
+  const canManage = access.isConsultant || access.role === "company-admin";
+  if (!company || !canManage) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
+  }
+
+  const handleInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = contactName.trim();
+    const email = contactEmail.trim();
+    if (!name || !email) {
+      setNotice({ kind: "error", message: "Add both a name and email for the vendor contact." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await invitePerson({ companyId: companyId as any, vendorId: vendorId as any, name, email });
+      setContactName("");
+      setContactEmail("");
+      setNotice({ kind: "success", message: `Invited ${name} to this vendor organization.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Invite failed." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCancelInvite = async (entry: { email: string }) => {
+    setBusy(true);
+    try {
+      await cancelInvite({ companyId: companyId as any, vendorId: vendorId as any, email: entry.email });
+      setNotice({ kind: "success", message: `Cancelled the invite for ${entry.email}.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to cancel the invite." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeactivate = async (entry: { userId: string | null; name: string }) => {
+    if (!entry.userId) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Deactivate ${entry.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await deactivateContact({ companyId: companyId as any, vendorId: vendorId as any, userId: entry.userId });
+      setNotice({ kind: "success", message: `${entry.name} has been deactivated.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to deactivate this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReactivate = async (entry: { userId: string | null; name: string }) => {
+    if (!entry.userId) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Reactivate ${entry.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await reactivateContact({ companyId: companyId as any, vendorId: vendorId as any, userId: entry.userId });
+      setNotice({ kind: "success", message: `${entry.name} has been reactivated.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to reactivate this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activeContacts = contacts.filter((entry) => entry.status === "active");
+  const invitedContacts = contacts.filter((entry) => entry.status !== "active" && entry.source === "invite");
+
+  return (
+    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor contacts</p>
+            <h1 className="mt-2 text-2xl font-semibold text-white">{company.name}</h1>
+          </div>
+          <StatusPill label="Vendor org" className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+        </div>
+
+        {notice ? (
+          <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {notice.message}
+          </div>
+        ) : null}
+
+        <form onSubmit={handleInvite} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <input value={contactName} onChange={(event) => setContactName(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Contact name" />
+            <input value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Contact email" type="email" />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button type="submit" disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">Invite contact</button>
+          </div>
+        </form>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Active contacts</h2>
+            <div className="mt-4 space-y-3">
+              {activeContacts.length === 0 ? <p className="text-sm text-slate-400">No active contacts yet.</p> : null}
+              {activeContacts.map((entry) => (
+                <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-white">{entry.name}</p>
+                      <p className="text-sm text-slate-400">{entry.email}</p>
+                    </div>
+                    <button type="button" onClick={() => void handleDeactivate(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Deactivate</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Pending invites</h2>
+            <div className="mt-4 space-y-3">
+              {invitedContacts.length === 0 ? <p className="text-sm text-slate-400">No pending invites.</p> : null}
+              {invitedContacts.map((entry) => (
+                <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-white">{entry.name}</p>
+                      <p className="text-sm text-slate-400">{entry.email}</p>
+                    </div>
+                    <button type="button" onClick={() => void handleCancelInvite(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Cancel</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: string }) {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
-  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
-    | undefined;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const canManage = Boolean(access?.isConsultant || access?.role === "company-admin");
+  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !canManage ? "skip" : { companyId }) as
+    | Array<{ vendorId: string; name: string; contactEmail: string | null; status: string; contactCount: number }>
+    | undefined;
+
+  const createVendor = useMutation((api as any).admin.addWorkspaceVendor);
+  const updateVendor = useMutation((api as any).admin.updateWorkspaceVendor);
+  const deactivateVendor = useMutation((api as any).admin.deactivateWorkspaceVendor);
+  const reactivateVendor = useMutation((api as any).admin.reactivateWorkspaceVendor);
+  const [vendorName, setVendorName] = useState("");
+  const [vendorEmail, setVendorEmail] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -1271,10 +1459,115 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
+  if (access.role === "vendor" && access.vendorId) {
+    const vendorNameText = (vendors ?? []).find((vendor) => vendor.vendorId === access.vendorId)?.name ?? "Vendor organisation";
+    return (
+      <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
+          <h1 className="mt-3 text-3xl font-semibold text-white">{vendorNameText}</h1>
+          <p className="mt-4 text-lg text-slate-300">No projects assigned yet.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleCreateVendor = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = vendorName.trim();
+    if (!name) {
+      setNotice({ kind: "error", message: "Enter a vendor organisation name before saving." });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await createVendor({ companyId: companyId as any, name, contactEmail: vendorEmail || undefined });
+      setVendorName("");
+      setVendorEmail("");
+      setNotice({ kind: "success", message: `Created ${name}.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to create the vendor organisation." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleVendor = async (vendor: { vendorId: string; status: string; name: string }, nextStatus: "active" | "deactivated") => {
+    setBusy(true);
+    try {
+      if (nextStatus === "deactivated") {
+        await deactivateVendor({ companyId: companyId as any, vendorId: vendor.vendorId as any });
+        setNotice({ kind: "success", message: `${vendor.name} is deactivated.` });
+      } else {
+        await reactivateVendor({ companyId: companyId as any, vendorId: vendor.vendorId as any });
+        setNotice({ kind: "success", message: `${vendor.name} is active again.` });
+      }
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to update the vendor organization." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">Vendors</h1>
-      <p className="mt-3 text-slate-300">Authorized company: {company?.name ?? "Consultant view"}</p>
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Workspace vendors</p>
+            <h1 className="text-2xl font-semibold text-white">{company.name}</h1>
+          </div>
+          {canManage ? <StatusPill label="Manage vendors" className="border-sky-500/40 bg-sky-500/10 text-sky-200" /> : null}
+        </div>
+
+        {notice ? (
+          <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {notice.message}
+          </div>
+        ) : null}
+
+        {canManage ? (
+          <form onSubmit={handleCreateVendor} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="grid gap-3 md:grid-cols-2">
+              <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Vendor organisation name" />
+              <input value={vendorEmail} onChange={(event) => setVendorEmail(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Primary contact email" type="email" />
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button type="submit" disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">Add vendor organisation</button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="space-y-4">
+          {vendors && vendors.length === 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">No vendor organisations are configured yet for this workspace.</div>
+          ) : null}
+
+          {vendors && vendors.map((vendor) => (
+            <div key={vendor.vendorId} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-semibold text-white">{vendor.name}</h2>
+                    <StatusPill label={vendor.status === "deactivated" ? "Deactivated" : "Active"} className={vendor.status === "deactivated" ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"} />
+                  </div>
+                  {vendor.contactEmail ? <p className="mt-2 text-sm text-slate-400">Primary contact: {vendor.contactEmail}</p> : null}
+                </div>
+
+                {canManage ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Link href={`/workspaces/${companyId}/vendors/${vendor.vendorId}/contacts`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">Manage contacts</Link>
+                    <button type="button" onClick={() => void toggleVendor(vendor as any, vendor.status === "active" ? "deactivated" : "active")} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                      {vendor.status === "active" ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
