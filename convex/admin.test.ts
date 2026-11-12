@@ -106,6 +106,67 @@ describe("admin console actions", () => {
     });
   });
 
+  test("projects store their description and deadlines and enforce score and vendor assignment limits", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "acme-admin", "acme-admin@example.com", "ACME Admin");
+
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Acme Health",
+        ssoProvider: "microsoft-entra",
+      });
+
+      const vendorDeadline = Date.now() + 1000 * 60 * 60 * 24 * 7;
+      const scorerDeadline = Date.now() + 1000 * 60 * 60 * 24 * 14;
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Data Platform Selection",
+        description: "Select a vendor for the new CRM data platform.",
+        vendorDeadline,
+        scorerDeadline,
+      });
+
+      expect(project.description).toBe("Select a vendor for the new CRM data platform.");
+      expect(project.vendorDeadline).toBe(vendorDeadline);
+      expect(project.scorerDeadline).toBe(scorerDeadline);
+
+      for (let index = 0; index < 10; index += 1) {
+        await admin.mutation(api.admin.addProjectVendor, {
+          companyId: company.companyId,
+          projectId: project.projectId,
+          displayName: `Vendor ${index + 1}`,
+          email: `vendor${index + 1}@example.com`,
+        });
+      }
+
+      await expect(admin.mutation(api.admin.addProjectVendor, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Vendor 11",
+        email: "vendor11@example.com",
+      })).rejects.toThrow("Project vendor limit reached");
+
+      for (let index = 0; index < 20; index += 1) {
+        await admin.mutation(api.admin.addProjectScorer, {
+          companyId: company.companyId,
+          projectId: project.projectId,
+          displayName: `Scorer ${index + 1}`,
+          email: `scorer${index + 1}@example.com`,
+          role: "individual",
+        });
+      }
+
+      await expect(admin.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Scorer 21",
+        email: "scorer21@example.com",
+        role: "individual",
+      })).rejects.toThrow("Project scorer limit reached");
+    });
+  });
+
   test("re-importing a workspace by the same stable id does not create duplicate companies", async () => {
     const t = convexTest({ schema, modules });
     const workspace = {

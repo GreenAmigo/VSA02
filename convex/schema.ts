@@ -89,6 +89,9 @@ export default defineSchema({
   projects: defineTable({
     companyId: v.id("companies"),
     name: v.string(),
+    description: v.optional(v.string()),
+    vendorDeadline: v.optional(v.number()),
+    scorerDeadline: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
     status: v.union(v.literal("draft"), v.literal("active")),

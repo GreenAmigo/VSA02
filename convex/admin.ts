@@ -2180,6 +2180,9 @@ export const createProject = mutation({
   args: {
     companyId: v.id("companies"),
     name: v.string(),
+    description: v.optional(v.string()),
+    vendorDeadline: v.optional(v.number()),
+    scorerDeadline: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
@@ -2189,10 +2192,19 @@ export const createProject = mutation({
       throw new Error("Not signed in");
     }
 
+    const trimmedName = args.name.trim();
+    if (!trimmedName) {
+      throw new Error("Project name is required");
+    }
+
     const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
+    const description = args.description?.trim() || undefined;
     const projectId = await ctx.db.insert("projects", {
       companyId: args.companyId,
-      name: args.name.trim(),
+      name: trimmedName,
+      description,
+      vendorDeadline: args.vendorDeadline ?? undefined,
+      scorerDeadline: args.scorerDeadline ?? undefined,
       createdBy: canonicalUserId,
       createdAt: Date.now(),
       status: "active",
@@ -2213,7 +2225,10 @@ export const createProject = mutation({
     return {
       projectId,
       companyId: args.companyId,
-      name: args.name.trim(),
+      name: trimmedName,
+      description,
+      vendorDeadline: args.vendorDeadline ?? null,
+      scorerDeadline: args.scorerDeadline ?? null,
     };
   },
 });
@@ -2250,6 +2265,17 @@ export const addProjectVendor = mutation({
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
     await assertProjectAccess(ctx, args.projectId, args.companyId);
+
+    const existingVendors = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("role"), "vendor"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    if (existingVendors.length >= 10) {
+      throw new Error("Project vendor limit reached");
+    }
 
     const userId = `vendor-${slugify(args.displayName)}-${Date.now()}`;
     const memberId = await ctx.db.insert("projectMembers", {
@@ -2291,6 +2317,17 @@ export const addProjectScorer = mutation({
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
     await assertProjectAccess(ctx, args.projectId, args.companyId);
+
+    const existingScorers = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    if (existingScorers.length >= 20) {
+      throw new Error("Project scorer limit reached");
+    }
 
     const userId = `scorer-${slugify(args.displayName)}-${Date.now()}`;
 
