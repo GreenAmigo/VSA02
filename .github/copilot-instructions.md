@@ -18,4 +18,8 @@
 - Keep production and preview/dev behavior separated and guarded.
 - Schema migration rule: any schema change that removes or narrows a field must be done in two steps. Step 1 is to keep the old value allowed, add a migration function, deploy that migration, and tell me to run the migration before any stricter deploy. Step 2 is to tighten the schema only after the migration has been run successfully. Always tell me if a change needs existing data migrated before it deploys.
 - Screen map rule: every route must be listed in BRIEF.md, and the canonical consultant-home route must be used for / and /workspaces instead of legacy duplicate layouts.
+- Shared workspace frame rule: every workspace page must use the same shell: the workspace name header, the same tab strip, and the signed-in panel. People and vendor contact pages must not be exceptions.
+- Breadcrumb rule: every workspace page must show a breadcrumb trail; consultants always include All workspaces, and vendor contact screens must link back to the vendor list before the vendor record.
+- Role menu rule: menu items are role-aware and server-enforced. Consultant: All workspaces, Activity log, and all workspace tabs; company admin: Overview, People, Departments, Vendors only; company scorer: Overview only; vendor: Vendor home only, with no People, Departments, Vendors or Activity log.
+- Long text rule: labels and values in cards must use a smaller, consistent type scale, clamp long strings with ellipses, and keep full values available on hover/focus; long emails and IDs may wrap instead of forcing overflow.
 - When a task includes a verification step, run the exact proving commands and report the real output.

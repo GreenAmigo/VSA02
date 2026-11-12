@@ -99,6 +99,12 @@ Legend:
 
 ## Screen map
 
+Shared app UI rules for workspace screens:
+- Every workspace page uses the same shell: common workspace header, matching tab strip, and a signed-in status panel.
+- Breadcrumbs are required on workspace pages, with All workspaces for consultant flows and a back-link to the vendor list before vendor contact records.
+- Role-based menus follow the server-authorized model: consultant gets the full workspace set, company admin gets Overview/People/Departments/Vendors, company scorers stay on Overview for now, and vendor contacts only see Vendor home.
+- Card labels and detail values use a smaller default type scale, truncate long content with ellipses, and keep full text on hover/focus; longer emails and IDs may wrap instead of overflowing.
+
 The app uses a single canonical consultant home route for the workspace directory and a dedicated activity log route. The route-to-component map below is the source of truth for the consultant and company screens during Phase 3 planning.
 
 | Route | Component / page | Notes |

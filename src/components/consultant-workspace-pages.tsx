@@ -22,7 +22,10 @@ type WorkspaceShellWorkspace = {
   scores: Array<{ scorer: string; vendor: string; score: number; status: string }>;
 };
 
+type WorkspaceRole = "consultant" | "company-admin" | "company-scorer" | "vendor";
 type CompanyId = Id<"companies">;
+
+type WorkspaceBreadcrumb = { label: string; href?: string };
 
 function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
@@ -32,43 +35,87 @@ function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-sla
   );
 }
 
+function LongValue({ value, wrap = false, className = "" }: { value: string; wrap?: boolean; className?: string }) {
+  const wrapClass = wrap ? "break-all" : "truncate";
+  return (
+    <span title={value} className={`block min-w-0 ${wrapClass} ${className}`}>
+      {value}
+    </span>
+  );
+}
+
 function StatCard({ label, value, helper }: { label: string; value: string; helper: string }) {
+  const wrapValue = value.length > 40;
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-sm shadow-slate-950/20">
       <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-white">{value}</p>
-      <p className="mt-1 text-sm text-slate-400">{helper}</p>
+      <div className="mt-3 min-w-0">
+        <LongValue value={value} wrap={wrapValue} className="text-base font-semibold text-white sm:text-lg" />
+      </div>
+      <p className="mt-1 text-xs text-slate-400 sm:text-sm">{helper}</p>
     </div>
+  );
+}
+
+function WorkspaceBreadcrumbs({ items }: { items: WorkspaceBreadcrumb[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+      {items.map((item, index) => (
+        <div key={`${item.label}-${index}`} className="flex items-center gap-2">
+          {index > 0 ? <span className="text-slate-600">›</span> : null}
+          {item.href ? (
+            <Link href={item.href} className="transition hover:text-slate-200">
+              {item.label}
+            </Link>
+          ) : (
+            <span className="text-slate-300">{item.label}</span>
+          )}
+        </div>
+      ))}
+    </nav>
   );
 }
 
 function WorkspaceShell({
   workspace,
   activeTab,
+  breadcrumbs,
+  role = "consultant",
+  userEmail,
   showConsultantLinks = true,
   children,
 }: {
   workspace: WorkspaceShellWorkspace;
   activeTab: "overview" | "projects" | "people" | "departments" | "vendors" | "requirements" | "scoring";
+  breadcrumbs?: WorkspaceBreadcrumb[];
+  role?: WorkspaceRole;
+  userEmail?: string | null;
   showConsultantLinks?: boolean;
   children: React.ReactNode;
 }) {
-  const tabs = showConsultantLinks
-    ? [
-        { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
-        { key: "projects", label: "Projects", href: `/workspaces/${workspace.slug}/projects` },
-        { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
-        { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
-        { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
-        { key: "requirements", label: "Requirements", href: `/workspaces/${workspace.slug}/requirements` },
-        { key: "scoring", label: "Scoring", href: `/workspaces/${workspace.slug}/scoring` },
-      ]
-    : [
-        { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
-        { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
-        { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
-        { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
-      ];
+  const tabsByRole: Record<WorkspaceRole, Array<{ key: string; label: string; href: string }>> = {
+    consultant: [
+      { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
+      { key: "projects", label: "Projects", href: `/workspaces/${workspace.slug}/projects` },
+      { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
+      { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
+      { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
+      { key: "requirements", label: "Requirements", href: `/workspaces/${workspace.slug}/requirements` },
+      { key: "scoring", label: "Scoring", href: `/workspaces/${workspace.slug}/scoring` },
+    ],
+    "company-admin": [
+      { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
+      { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
+      { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
+      { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
+    ],
+    "company-scorer": [{ key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` }],
+    vendor: [],
+  };
+
+  const tabs = tabsByRole[role ?? "consultant"] ?? tabsByRole.consultant;
+  const roleLabel =
+    role === "consultant" ? "VS Consultant" : role === "company-admin" ? "Company admin" : role === "company-scorer" ? "Company scorer" : "Vendor";
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100">
@@ -82,17 +129,25 @@ function WorkspaceShell({
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Company</p>
           <div className="mt-3 space-y-2">
             <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 hover:border-sky-400">
-              {workspace.name}
+              <span className="block truncate" title={workspace.name}>{workspace.name}</span>
             </Link>
           </div>
         </div>
 
-        {showConsultantLinks ? (
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-300">
+            <p className="truncate" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
+          </div>
+        </div>
+
+        {role === "consultant" || showConsultantLinks ? (
           <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
               <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-                Back to all workspaces
+                All workspaces
               </Link>
               <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
                 Activity log
@@ -113,31 +168,41 @@ function WorkspaceShell({
 
       <main className="flex-1">
         <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
-              <h1 className="mt-2 text-2xl font-semibold text-white">{workspace.name}</h1>
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0 flex-1">
+              {breadcrumbs && breadcrumbs.length > 0 ? <WorkspaceBreadcrumbs items={breadcrumbs} /> : null}
+              <div className="flex items-center gap-3">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
+                  <h1 className="mt-2 truncate text-2xl font-semibold text-white" title={workspace.name}>{workspace.name}</h1>
+                </div>
+                {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
+            <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+              <p className="truncate text-sm font-medium text-white" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
+              <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
             </div>
           </div>
         </header>
 
         <div className="space-y-6 p-6">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-            <div className="flex flex-wrap gap-2">
-              {tabs.map((tab) => (
-                <Link
-                  key={tab.key}
-                  href={tab.href}
-                  className={`rounded-xl border px-3 py-2 text-sm capitalize ${activeTab === tab.key ? "border-sky-500 bg-sky-500/10 text-sky-200" : "border-slate-700 bg-slate-950 text-slate-300"}`}
-                >
-                  {tab.label}
-                </Link>
-              ))}
+          {tabs.length > 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+              <div className="flex flex-wrap gap-2">
+                {tabs.map((tab) => (
+                  <Link
+                    key={tab.key}
+                    href={tab.href}
+                    className={`rounded-xl border px-3 py-2 text-sm capitalize ${activeTab === tab.key ? "border-sky-500 bg-sky-500/10 text-sky-200" : "border-slate-700 bg-slate-950 text-slate-300"}`}
+                  >
+                    {tab.label}
+                  </Link>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           {children}
         </div>
@@ -394,7 +459,7 @@ export function ConsultantWorkspaceDirectoryPage() {
                 <div className="relative mt-4 flex justify-end">
                   <button
                     type="button"
-                    onClick={() => setOpenActionsWorkspaceId((current) => (current === company._id ? null : company._id))}
+                    onClick={() => setOpenActionsWorkspaceId((current: CompanyId | null) => (current === company._id ? null : company._id))}
                     className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
                   >
                     Actions
@@ -605,9 +670,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
 
-  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
-    | undefined;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
 
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
 
@@ -645,6 +708,12 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     <WorkspaceShell
       workspace={workspace}
       activeTab="overview"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: workspace.name },
+      ]}
+      role={access.isConsultant ? "consultant" : access.isVendor ? "vendor" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "company-admin"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -804,7 +873,18 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
   };
 
   return (
-    <WorkspaceShell workspace={workspace} activeTab="departments" showConsultantLinks={Boolean(access.isConsultant)}>
+    <WorkspaceShell
+      workspace={workspace}
+      activeTab="departments"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "Departments" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Departments</h2>
@@ -1084,18 +1164,29 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="people"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "People" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
       <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.14em] text-sky-300">Workspace people</p>
-            <h1 className="mt-2 text-2xl font-semibold text-white">{company.name}</h1>
-          </div>
-          <Link href={`/workspaces/${companyId}`} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 hover:border-slate-500">
-            Back to workspace
-          </Link>
-        </div>
-
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -1151,9 +1242,9 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
               {members.map((person) => (
                 <div key={person.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-base font-medium text-white">{person.name}</p>
-                      <p className="text-sm text-slate-400">{person.email}</p>
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-medium text-white" title={person.name}>{person.name}</p>
+                      <p className="truncate text-sm text-slate-400" title={person.email}>{person.email}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill
@@ -1212,9 +1303,9 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
               {invitations.map((person) => (
                 <div key={person.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-base font-medium text-white">{person.name}</p>
-                      <p className="text-sm text-slate-400">{person.email}</p>
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-medium text-white" title={person.name}>{person.name}</p>
+                      <p className="truncate text-sm text-slate-400" title={person.email}>{person.email}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill
@@ -1249,7 +1340,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
           </section>
         ) : null}
       </div>
-    </div>
+    </WorkspaceShell>
   );
 }
 
@@ -1259,6 +1350,9 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ vendorId: string; name: string; contactEmail: string | null; status: string; contactCount: number }>
+    | undefined;
   const contacts = useQuery((api as any).admin.listVendorContacts, isProtectedLoading || !companyId || !vendorId ? "skip" : { companyId, vendorId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
     | undefined;
@@ -1360,18 +1454,33 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
 
   const activeContacts = contacts.filter((entry) => entry.status === "active");
   const invitedContacts = contacts.filter((entry) => entry.status !== "active" && entry.source === "invite");
+  const vendorName = vendors?.find((vendor) => vendor.vendorId === vendorId)?.name ?? "Vendor contact";
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="vendors"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "Vendors", href: `/workspaces/${companyId}/vendors` },
+        { label: vendorName },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor contacts</p>
-            <h1 className="mt-2 text-2xl font-semibold text-white">{company.name}</h1>
-          </div>
-          <StatusPill label="Vendor org" className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
-        </div>
-
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -1396,9 +1505,9 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
               {activeContacts.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-white">{entry.name}</p>
-                      <p className="text-sm text-slate-400">{entry.email}</p>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-white" title={entry.name}>{entry.name}</p>
+                      <p className="truncate text-sm text-slate-400" title={entry.email}>{entry.email}</p>
                     </div>
                     <button type="button" onClick={() => void handleDeactivate(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Deactivate</button>
                   </div>
@@ -1414,9 +1523,9 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
               {invitedContacts.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-white">{entry.name}</p>
-                      <p className="text-sm text-slate-400">{entry.email}</p>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-white" title={entry.name}>{entry.name}</p>
+                      <p className="truncate text-sm text-slate-400" title={entry.email}>{entry.email}</p>
                     </div>
                     <button type="button" onClick={() => void handleCancelInvite(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Cancel</button>
                   </div>
@@ -1426,7 +1535,7 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
           </section>
         </div>
       </div>
-    </div>
+    </WorkspaceShell>
   );
 }
 
@@ -1437,7 +1546,8 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const canManage = Boolean(access?.isConsultant || access?.role === "company-admin");
-  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !canManage ? "skip" : { companyId }) as
+  const showVendorHome = Boolean(access?.isVendor && access.vendorId);
+  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !(canManage || showVendorHome) ? "skip" : { companyId }) as
     | Array<{ vendorId: string; name: string; contactEmail: string | null; status: string; contactCount: number }>
     | undefined;
 
@@ -1459,16 +1569,39 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
-  if (access.role === "vendor" && access.vendorId) {
+  if (showVendorHome) {
     const vendorNameText = (vendors ?? []).find((vendor) => vendor.vendorId === access.vendorId)?.name ?? "Vendor organisation";
+    const companyName = company?.name ?? "Unknown workspace";
     return (
-      <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+      <WorkspaceShell
+        workspace={{
+          id: companyId,
+          slug: companyId,
+          name: companyName,
+          isTestData: false,
+          projects: [],
+          people: [],
+          vendors: [],
+          requirements: [],
+          scores: [],
+        }}
+        activeTab="vendors"
+        breadcrumbs={[
+          { label: "All workspaces", href: "/workspaces" },
+          { label: companyName, href: `/workspaces/${companyId}` },
+          { label: "Vendors" },
+        ]}
+        role="vendor"
+        userEmail={access.email ?? user?.email ?? "Unknown"}
+        showConsultantLinks={false}
+      >
         <div className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
-          <h1 className="mt-3 text-3xl font-semibold text-white">{vendorNameText}</h1>
-          <p className="mt-4 text-lg text-slate-300">No projects assigned yet.</p>
+          <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl" title={vendorNameText}>{vendorNameText}</h1>
+          <p className="mt-4 text-base text-slate-300">Workspace: {companyName}</p>
+          <p className="mt-2 text-lg text-slate-200">No projects assigned yet.</p>
         </div>
-      </div>
+      </WorkspaceShell>
     );
   }
 
@@ -1511,16 +1644,29 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="vendors"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "Vendors" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Workspace vendors</p>
-            <h1 className="text-2xl font-semibold text-white">{company.name}</h1>
-          </div>
-          {canManage ? <StatusPill label="Manage vendors" className="border-sky-500/40 bg-sky-500/10 text-sky-200" /> : null}
-        </div>
-
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -1547,12 +1693,12 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
           {vendors && vendors.map((vendor) => (
             <div key={vendor.vendorId} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
+                <div className="min-w-0">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-lg font-semibold text-white">{vendor.name}</h2>
+                    <h2 className="truncate text-lg font-semibold text-white" title={vendor.name}>{vendor.name}</h2>
                     <StatusPill label={vendor.status === "deactivated" ? "Deactivated" : "Active"} className={vendor.status === "deactivated" ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"} />
                   </div>
-                  {vendor.contactEmail ? <p className="mt-2 text-sm text-slate-400">Primary contact: {vendor.contactEmail}</p> : null}
+                  {vendor.contactEmail ? <p className="mt-2 truncate text-sm text-slate-400" title={vendor.contactEmail}>Primary contact: {vendor.contactEmail}</p> : null}
                 </div>
 
                 {canManage ? (
@@ -1568,7 +1714,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
           ))}
         </div>
       </div>
-    </div>
+    </WorkspaceShell>
   );
 }
 
