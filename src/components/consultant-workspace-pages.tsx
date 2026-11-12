@@ -1230,6 +1230,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
+  const canManageWorkspace = Boolean(access && (access.isConsultant || access.role === "company-admin"));
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | { _id: string; companyId: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }
@@ -1237,13 +1238,13 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
     | undefined;
-  const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+  const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
     | undefined;
-  const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+  const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ departmentId: string; name: string; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
     | undefined;
-  const workspaceVendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+  const workspaceVendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ vendorId: string; name: string; contactEmail?: string | null; status: string; contactCount?: number }>
     | undefined;
   const addProjectScorer = useMutation(api.admin.addProjectScorer);
@@ -1253,12 +1254,15 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || workspacePeople === undefined || departments === undefined || workspaceVendors === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
   const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
+  const workspacePeopleList = canManageWorkspace ? (workspacePeople ?? []) : [];
+  const departmentsList = canManageWorkspace ? (departments ?? []) : [];
+  const workspaceVendorsList = canManageWorkspace ? (workspaceVendors ?? []) : [];
   if (!company || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
@@ -1311,8 +1315,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         name: company.name,
         isTestData: false,
         projects: [],
-        people: workspacePeople.map((person) => ({ id: person.id, name: person.name })),
-        vendors: workspaceVendors.map((vendor) => ({ id: vendor.vendorId, name: vendor.name })),
+        people: workspacePeopleList.map((person) => ({ id: person.id, name: person.name })),
+        vendors: workspaceVendorsList.map((vendor) => ({ id: vendor.vendorId, name: vendor.name })),
         requirements: [],
         scores: [],
       }}
@@ -1377,7 +1381,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                       className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
                     >
                       <option value="">Select a department</option>
-                      {departments.map((department) => (
+                      {departmentsList.map((department) => (
                         <option key={department.departmentId} value={department.name}>{department.name}</option>
                       ))}
                     </select>

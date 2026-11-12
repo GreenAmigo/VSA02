@@ -868,7 +868,7 @@ describe("Phase 2 access checks", () => {
     }
   });
 
-  test("only the assigned project list is visible to scorers and vendors, and unassigned projects stay hidden", async () => {
+  test("assigned scorers and vendors can open their project detail, while unassigned and cross-workspace users are rejected", async () => {
     const t = convexTest({ schema, modules });
     const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
@@ -899,6 +899,13 @@ describe("Phase 2 access checks", () => {
         name: "Assigned Auditor",
       });
 
+      const anotherCompanyAdmin = t.withIdentity({
+        tokenIdentifier: "acme-admin",
+        email: "acme-admin@acme.example",
+        emailVerified: true,
+        name: "ACME Admin",
+      });
+
       const unassignedProject = await consultant.mutation(api.admin.createProject, {
         companyId: seeded.companyBId,
         name: "Unassigned Expansion Project",
@@ -923,8 +930,13 @@ describe("Phase 2 access checks", () => {
 
       expect(scorerProjects.map((project: { _id: string }) => project._id)).toEqual([seeded.projectBId]);
       expect(vendorProjects.map((project: { _id: string }) => project._id)).toEqual([seeded.projectBId]);
+      const scorerDetail = await scorer.query(api.access.getProject, { projectId: seeded.projectBId });
+      const vendorDetail = await vendor.query(api.access.getProject, { projectId: seeded.projectBId });
+      expect(scorerDetail._id).toBe(seeded.projectBId);
+      expect(vendorDetail._id).toBe(seeded.projectBId);
       await expect(scorer.query(api.access.getProject, { projectId: unassignedProject.projectId })).rejects.toThrow("Project access denied");
       await expect(vendor.query(api.access.getProject, { projectId: unassignedProject.projectId })).rejects.toThrow("Project access denied");
+      await expect(anotherCompanyAdmin.query(api.access.getProject, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
       await expect(scorer.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
       await expect(vendor.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
     } finally {
