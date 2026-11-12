@@ -1238,6 +1238,9 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
     | undefined;
+  const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
+    | Array<{ _id: string; requirementId: string; text: string; type?: string; priority?: number; status: "active" | "withdrawn" }>
+    | undefined;
   const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
     | undefined;
@@ -1249,12 +1252,12 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     | undefined;
   const addProjectScorer = useMutation(api.admin.addProjectScorer);
   const addProjectVendor = useMutation(api.admin.addProjectVendor);
-  const [scorerDraft, setScorerDraft] = useState({ name: "", email: "", role: "individual" as "individual" | "department", departmentName: "" });
-  const [vendorDraft, setVendorDraft] = useState({ name: "", email: "" });
+  const [scorerDraft, setScorerDraft] = useState({ selectedUserId: "", role: "individual" as "individual" | "department", departmentName: "" });
+  const [vendorDraft, setVendorDraft] = useState({ selectedVendorId: "" });
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -1263,23 +1266,38 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const workspacePeopleList = canManageWorkspace ? (workspacePeople ?? []) : [];
   const departmentsList = canManageWorkspace ? (departments ?? []) : [];
   const workspaceVendorsList = canManageWorkspace ? (workspaceVendors ?? []) : [];
+  const assignableScorers = workspacePeopleList.filter((person) => person.status === "active" && person.source === "member" && (person.role === "company-scorer" || person.role === "company-admin"));
+  const assignableVendors = workspaceVendorsList.filter((vendor) => vendor.status === "active");
+  const selectedScorer = assignableScorers.find((person) => person.id === scorerDraft.selectedUserId) ?? null;
+  const selectedVendor = assignableVendors.find((vendor) => vendor.vendorId === vendorDraft.selectedVendorId) ?? null;
   if (!company || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
   const handleAddScorer = async () => {
+    if (!selectedScorer) {
+      setNotice({ kind: "error", message: "Select a workspace person before assigning them as a scorer." });
+      return;
+    }
+
+    const isAlreadyAssigned = projectMembers.some((member) => member.userId === selectedScorer.userId || member.displayName === selectedScorer.name);
+    if (isAlreadyAssigned) {
+      setNotice({ kind: "error", message: `${selectedScorer.name} is already assigned to this project.` });
+      return;
+    }
+
     try {
       setBusy(true);
       setNotice(null);
       await addProjectScorer({
         companyId: companyId as any,
         projectId: projectId as any,
-        displayName: scorerDraft.name.trim(),
-        email: scorerDraft.email.trim(),
+        displayName: selectedScorer.name.trim(),
+        email: selectedScorer.email.trim(),
         role: scorerDraft.role,
         departmentName: scorerDraft.role === "department" ? scorerDraft.departmentName.trim() || undefined : undefined,
       });
-      setScorerDraft({ name: "", email: "", role: "individual", departmentName: "" });
+      setScorerDraft({ selectedUserId: "", role: "individual", departmentName: "" });
       setNotice({ kind: "success", message: "Scorer assigned to the project." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign scorer." });
@@ -1289,16 +1307,27 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   };
 
   const handleAddVendor = async () => {
+    if (!selectedVendor) {
+      setNotice({ kind: "error", message: "Select a workspace vendor before assigning it to the project." });
+      return;
+    }
+
+    const isAlreadyAssigned = projectMembers.some((member) => member.userId === selectedVendor.vendorId || member.displayName === selectedVendor.name);
+    if (isAlreadyAssigned) {
+      setNotice({ kind: "error", message: `${selectedVendor.name} is already assigned to this project.` });
+      return;
+    }
+
     try {
       setBusy(true);
       setNotice(null);
       await addProjectVendor({
         companyId: companyId as any,
         projectId: projectId as any,
-        displayName: vendorDraft.name.trim(),
-        email: vendorDraft.email.trim(),
+        displayName: selectedVendor.name.trim(),
+        email: selectedVendor.contactEmail?.trim() || `${selectedVendor.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "")}@workspace.local`,
       });
-      setVendorDraft({ name: "", email: "" });
+      setVendorDraft({ selectedVendorId: "" });
       setNotice({ kind: "success", message: "Vendor added to the project." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign vendor." });
@@ -1353,18 +1382,16 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
               <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
               <div className="mt-4 space-y-3">
-                <input
-                  value={scorerDraft.name}
-                  onChange={(event) => setScorerDraft((current) => ({ ...current, name: event.target.value }))}
+                <select
+                  value={scorerDraft.selectedUserId}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, selectedUserId: event.target.value }))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                  placeholder="Scorer name"
-                />
-                <input
-                  value={scorerDraft.email}
-                  onChange={(event) => setScorerDraft((current) => ({ ...current, email: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                  placeholder="Scorer email"
-                />
+                >
+                  <option value="">Select a workspace person</option>
+                  {assignableScorers.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name} — {person.email}</option>
+                  ))}
+                </select>
                 <div className="flex gap-3">
                   <select
                     value={scorerDraft.role}
@@ -1387,7 +1414,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                     </select>
                   ) : null}
                 </div>
-                <button type="button" onClick={() => void handleAddScorer()} disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
+                <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
                   Add scorer
                 </button>
               </div>
@@ -1396,19 +1423,17 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
               <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
               <div className="mt-4 space-y-3">
-                <input
-                  value={vendorDraft.name}
-                  onChange={(event) => setVendorDraft((current) => ({ ...current, name: event.target.value }))}
+                <select
+                  value={vendorDraft.selectedVendorId}
+                  onChange={(event) => setVendorDraft((current) => ({ ...current, selectedVendorId: event.target.value }))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                  placeholder="Vendor name"
-                />
-                <input
-                  value={vendorDraft.email}
-                  onChange={(event) => setVendorDraft((current) => ({ ...current, email: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                  placeholder="Vendor email"
-                />
-                <button type="button" onClick={() => void handleAddVendor()} disabled={busy} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
+                >
+                  <option value="">Select a workspace vendor</option>
+                  {assignableVendors.map((vendor) => (
+                    <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.name}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => void handleAddVendor()} disabled={busy || !selectedVendor} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
                   Add vendor
                 </button>
               </div>
@@ -1422,6 +1447,30 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
           ) : null}
         </>
       ) : null}
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-white">Requirements</h3>
+          <Link href={`/projects/${projectId}/requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
+            Open import / requirements
+          </Link>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Active rows</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{requirements.filter((row) => row.status === "active").length}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Access</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Consultant / admin" : "Read-only"}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Import</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Allowed" : "Blocked"}</p>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-slate-400">The canonical import flow is in the project requirements screen and remains restricted to consultants and company admins.</p>
+      </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <h3 className="text-lg font-semibold text-white">Assigned members</h3>
