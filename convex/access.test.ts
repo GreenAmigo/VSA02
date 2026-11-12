@@ -790,6 +790,80 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("only the assigned project list is visible to scorers and vendors, and unassigned projects stay hidden", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "assigned-project-auditor",
+        email: "audit@maxwellknight.co.uk",
+        displayName: "Assigned Auditor",
+      });
+
+      const seeded = await t.mutation(internal.access.seedScenario, {
+        companyAName: "Acme Health",
+        companyBName: "Beta Logistics",
+        companyCName: "Maxwell Knight Ltd",
+        projectAName: "HR Platform",
+        projectBName: "Supply Chain",
+      });
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "assigned-project-auditor",
+        email: "audit@maxwellknight.co.uk",
+        emailVerified: true,
+        name: "Assigned Auditor",
+      });
+
+      const unassignedProject = await consultant.mutation(api.admin.createProject, {
+        companyId: seeded.companyBId,
+        name: "Unassigned Expansion Project",
+      });
+
+      const scorer = t.withIdentity({
+        tokenIdentifier: "beta-scorer",
+        email: "scorer@beta.example",
+        emailVerified: true,
+        name: "Beta Scorer",
+      });
+
+      const vendor = t.withIdentity({
+        tokenIdentifier: "northwind-vendor",
+        email: "vendor@northwind.example",
+        emailVerified: true,
+        name: "Northwind Labs",
+      });
+
+      const scorerProjects = await scorer.query(api.access.listProjectsForCompany, { companyId: seeded.companyBId });
+      const vendorProjects = await vendor.query(api.access.listProjectsForCompany, { companyId: seeded.companyBId });
+
+      expect(scorerProjects.map((project: { _id: string }) => project._id)).toEqual([seeded.projectBId]);
+      expect(vendorProjects.map((project: { _id: string }) => project._id)).toEqual([seeded.projectBId]);
+      await expect(scorer.query(api.access.getProject, { projectId: unassignedProject.projectId })).rejects.toThrow("Project access denied");
+      await expect(vendor.query(api.access.getProject, { projectId: unassignedProject.projectId })).rejects.toThrow("Project access denied");
+      await expect(scorer.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
+      await expect(vendor.query(api.access.listProjectsForCompany, { companyId: seeded.companyAId })).rejects.toThrow("Company access denied");
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("preview-only workspace seed data is disabled in Production and labels records as test data", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;

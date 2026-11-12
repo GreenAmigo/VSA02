@@ -703,6 +703,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     requirements: [],
     scores: [],
   };
+  const canManageWorkspace = Boolean(access.isConsultant || access.role === "company-admin");
 
   return (
     <WorkspaceShell
@@ -727,9 +728,11 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Project dashboard</h2>
-            <Link href={`/workspaces/${workspace.slug}/projects`} className="text-sm text-sky-300 hover:text-sky-200">
-              View all projects
-            </Link>
+            {canManageWorkspace ? (
+              <Link href={`/workspaces/${workspace.slug}/projects`} className="text-sm text-sky-300 hover:text-sky-200">
+                View all projects
+              </Link>
+            ) : null}
           </div>
 
           <div className="space-y-3">
@@ -747,23 +750,25 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <h2 className="text-lg font-semibold text-white">Workspace actions</h2>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            <Link href={`/workspaces/${workspace.slug}/projects`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-              Add project
-            </Link>
-            <Link href={`/workspaces/${workspace.slug}/people`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-              Manage people and teams
-            </Link>
-            <Link href={`/workspaces/${workspace.slug}/vendors`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-              Manage vendors
-            </Link>
-            <Link href={`/workspaces/${workspace.slug}/requirements`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-              Upload requirements
-            </Link>
+        {canManageWorkspace ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">Workspace actions</h2>
+            <div className="mt-4 space-y-3 text-sm text-slate-300">
+              <Link href={`/workspaces/${workspace.slug}/projects`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
+                Add project
+              </Link>
+              <Link href={`/workspaces/${workspace.slug}/people`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
+                Manage people and teams
+              </Link>
+              <Link href={`/workspaces/${workspace.slug}/vendors`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
+                Manage vendors
+              </Link>
+              <Link href={`/workspaces/${workspace.slug}/requirements`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
+                Upload requirements
+              </Link>
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
     </WorkspaceShell>
   );

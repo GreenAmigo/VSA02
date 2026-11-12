@@ -604,6 +604,17 @@ export const getProject = query({
       return project;
     }
 
+    const companyMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (companyMembership && companyMembership.role === "company-admin") {
+      return project;
+    }
+
     const consultantMembership = await getActiveConsultantRecord(ctx, identity);
     if (!consultantMembership) {
       throw new Error("Project access denied");
@@ -622,23 +633,44 @@ export const listProjectsForCompany = query({
     }
 
     const userIds = getIdentityUserIds(identity);
-    const membership = await ctx.db
+    const memberships = await ctx.db
       .query("companyMembers")
       .filter((q) => q.eq(q.field("companyId"), args.companyId))
       .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
       .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+      .collect();
 
     const consultantMembership = await getActiveConsultantRecord(ctx, identity);
 
-    if (!membership && !consultantMembership) {
+    if (memberships.length === 0 && !consultantMembership) {
       throw new Error("Company access denied");
     }
 
-    return await ctx.db
+    if (consultantMembership || memberships.some((member) => member.role === "company-admin")) {
+      return await ctx.db
+        .query("projects")
+        .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+        .collect();
+    }
+
+    const allowedProjectIds = new Set<Id<"projects">>();
+    const assignedProjectMemberships = await ctx.db
+      .query("projectMembers")
+      .filter((q) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    for (const membership of assignedProjectMemberships) {
+      allowedProjectIds.add(membership.projectId);
+    }
+
+    const companyProjects = await ctx.db
       .query("projects")
       .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
       .collect();
+
+    return companyProjects.filter((project) => allowedProjectIds.has(project._id));
   },
 });
 
