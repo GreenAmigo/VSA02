@@ -214,10 +214,30 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
   }
 
   const userIds = getIdentityUserIds(identity);
+  const companyMatches = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+
+  const candidateUserIds = new Set([...userIds, ...companyMatches.map((member) => member.userId)]);
+  const candidateNames = new Set([
+    ...(identity.name?.trim() ? [identity.name.trim()] : []),
+    ...companyMatches.map((member) => member.displayName.trim()).filter(Boolean),
+  ]);
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+    .filter((q: any) => q.or(
+      ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
+      ...Array.from(candidateNames).map((displayName) => q.eq(q.field("displayName"), displayName)),
+    ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
 
