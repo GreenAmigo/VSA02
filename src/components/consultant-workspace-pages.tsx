@@ -997,22 +997,179 @@ export function ConsultantWorkspaceProjectsPage({ companyId }: { companyId: stri
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const projects = useQuery(api.access.listProjectsForCompany, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as
+    | Array<{ _id: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }>
+    | undefined;
+  const createProject = useMutation(api.admin.createProject);
+  const [draft, setDraft] = useState({ name: "", description: "", vendorDeadline: "", scorerDeadline: "" });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || projects === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
-  if (!company && !access.isConsultant) {
+  const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
+  if (!company || !canManageProjects) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
+  const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const projectName = draft.name.trim();
+    if (!projectName) {
+      setNotice("Project name is required.");
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+
+    try {
+      await createProject({
+        companyId: companyId as any,
+        name: projectName,
+        description: draft.description.trim() || undefined,
+        vendorDeadline: draft.vendorDeadline ? new Date(draft.vendorDeadline).getTime() : undefined,
+        scorerDeadline: draft.scorerDeadline ? new Date(draft.scorerDeadline).getTime() : undefined,
+      });
+      setDraft({ name: "", description: "", vendorDeadline: "", scorerDeadline: "" });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to create the project.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">Projects</h1>
-      <p className="mt-3 text-slate-300">Authorized company: {company?.name ?? "Consultant view"}</p>
-      <p className="mt-2 text-sm text-slate-400">This page is filtered by the server’s access checks and does not use hardcoded company data.</p>
-    </div>
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: projects.map((project) => ({
+          id: project._id,
+          name: project.name,
+          vendorCount: 0,
+          scorerCount: 0,
+          status: project.status,
+        })),
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="projects"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "Projects" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-5">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Workspace projects</p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">Project portfolio</h2>
+        </div>
+
+        <form onSubmit={handleCreate} className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 md:grid-cols-2">
+          <label className="block text-sm text-slate-300 md:col-span-2">
+            <span className="mb-2 block">Project name</span>
+            <input
+              value={draft.name}
+              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="HR platform selection"
+            />
+          </label>
+
+          <label className="block text-sm text-slate-300 md:col-span-2">
+            <span className="mb-2 block">Description</span>
+            <textarea
+              value={draft.description}
+              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+              rows={3}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Describe the sourcing goal and scope"
+            />
+          </label>
+
+          <label className="block text-sm text-slate-300">
+            <span className="mb-2 block">Vendor deadline</span>
+            <input
+              type="date"
+              value={draft.vendorDeadline}
+              onChange={(event) => setDraft((current) => ({ ...current, vendorDeadline: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+            />
+          </label>
+
+          <label className="block text-sm text-slate-300">
+            <span className="mb-2 block">Scorer deadline</span>
+            <input
+              type="date"
+              value={draft.scorerDeadline}
+              onChange={(event) => setDraft((current) => ({ ...current, scorerDeadline: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+            />
+          </label>
+
+          {notice ? <p className="md:col-span-2 text-sm text-rose-300">{notice}</p> : null}
+
+          <div className="md:col-span-2 flex justify-end">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? "Creating…" : "New project"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-white">Existing projects</h2>
+          <span className="text-sm text-slate-400">{projects.length} total</span>
+        </div>
+
+        {projects.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+            No projects are configured for this workspace yet.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {projects.map((project) => (
+              <Link
+                key={project._id}
+                href={`/workspaces/${companyId}/projects/${project._id}`}
+                className="block rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-sky-500/50 hover:bg-slate-950"
+              >
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-lg font-semibold text-white">{project.name}</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {project.description || "No description added yet."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+                    {project.vendorDeadline ? <StatusPill label={`Vendor due ${new Date(project.vendorDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
+                    {project.scorerDeadline ? <StatusPill label={`Scorer due ${new Date(project.scorerDeadline).toLocaleDateString()}`} className="border-violet-500/50 bg-violet-500/10 text-violet-200" /> : null}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+    </WorkspaceShell>
   );
 }
 
@@ -1024,22 +1181,209 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
+    | { _id: string; companyId: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }
+    | undefined;
+  const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
+    | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
+    | undefined;
+  const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | undefined;
+  const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ departmentId: string; name: string; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
+    | undefined;
+  const workspaceVendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ vendorId: string; name: string; contactEmail?: string | null; status: string; contactCount?: number }>
+    | undefined;
+  const addProjectScorer = useMutation(api.admin.addProjectScorer);
+  const addProjectVendor = useMutation(api.admin.addProjectVendor);
+  const [scorerDraft, setScorerDraft] = useState({ name: "", email: "", role: "individual" as "individual" | "department", departmentName: "" });
+  const [vendorDraft, setVendorDraft] = useState({ name: "", email: "" });
+  const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || workspacePeople === undefined || departments === undefined || workspaceVendors === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
-  if (!company && !access.isConsultant) {
+  const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
+  if (!company || !canManageProjects || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
+  const handleAddScorer = async () => {
+    try {
+      setBusy(true);
+      setNotice(null);
+      await addProjectScorer({
+        companyId: companyId as any,
+        projectId: projectId as any,
+        displayName: scorerDraft.name.trim(),
+        email: scorerDraft.email.trim(),
+        role: scorerDraft.role,
+        departmentName: scorerDraft.role === "department" ? scorerDraft.departmentName.trim() || undefined : undefined,
+      });
+      setScorerDraft({ name: "", email: "", role: "individual", departmentName: "" });
+      setNotice({ kind: "success", message: "Scorer assigned to the project." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign scorer." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddVendor = async () => {
+    try {
+      setBusy(true);
+      setNotice(null);
+      await addProjectVendor({
+        companyId: companyId as any,
+        projectId: projectId as any,
+        displayName: vendorDraft.name.trim(),
+        email: vendorDraft.email.trim(),
+      });
+      setVendorDraft({ name: "", email: "" });
+      setNotice({ kind: "success", message: "Vendor added to the project." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign vendor." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">Project detail</h1>
-      <p className="mt-3 text-slate-300">Company: {company?.name ?? "Consultant view"}</p>
-      <p className="mt-2 text-sm text-slate-400">Project ID: {projectId}</p>
-    </div>
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: [],
+        people: workspacePeople.map((person) => ({ id: person.id, name: person.name })),
+        vendors: workspaceVendors.map((vendor) => ({ id: vendor.vendorId, name: vendor.name })),
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="projects"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "Projects", href: `/workspaces/${companyId}/projects` },
+        { label: project.name },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Project</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{project.name}</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+            {project.vendorDeadline ? <StatusPill label={`Vendor due ${new Date(project.vendorDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
+            {project.scorerDeadline ? <StatusPill label={`Scorer due ${new Date(project.scorerDeadline).toLocaleDateString()}`} className="border-violet-500/50 bg-violet-500/10 text-violet-200" /> : null}
+          </div>
+        </div>
+
+        <p className="text-sm text-slate-300">{project.description || "No description for this project yet."}</p>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
+          <div className="mt-4 space-y-3">
+            <input
+              value={scorerDraft.name}
+              onChange={(event) => setScorerDraft((current) => ({ ...current, name: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Scorer name"
+            />
+            <input
+              value={scorerDraft.email}
+              onChange={(event) => setScorerDraft((current) => ({ ...current, email: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Scorer email"
+            />
+            <div className="flex gap-3">
+              <select
+                value={scorerDraft.role}
+                onChange={(event) => setScorerDraft((current) => ({ ...current, role: event.target.value as "individual" | "department" }))}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              >
+                <option value="individual">Individual</option>
+                <option value="department">Department</option>
+              </select>
+              {scorerDraft.role === "department" ? (
+                <select
+                  value={scorerDraft.departmentName}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, departmentName: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="">Select a department</option>
+                  {departments.map((department) => (
+                    <option key={department.departmentId} value={department.name}>{department.name}</option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+            <button type="button" onClick={() => void handleAddScorer()} disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
+              Add scorer
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
+          <div className="mt-4 space-y-3">
+            <input
+              value={vendorDraft.name}
+              onChange={(event) => setVendorDraft((current) => ({ ...current, name: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Vendor name"
+            />
+            <input
+              value={vendorDraft.email}
+              onChange={(event) => setVendorDraft((current) => ({ ...current, email: event.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              placeholder="Vendor email"
+            />
+            <button type="button" onClick={() => void handleAddVendor()} disabled={busy} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
+              Add vendor
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {notice ? (
+        <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+          {notice.message}
+        </div>
+      ) : null}
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <h3 className="text-lg font-semibold text-white">Assigned members</h3>
+        <div className="mt-4 space-y-3">
+          {projectMembers.length === 0 ? (
+            <p className="text-sm text-slate-400">No people or vendors are assigned yet.</p>
+          ) : (
+            projectMembers.map((member) => (
+              <div key={member._id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div>
+                  <p className="font-medium text-white">{member.displayName}</p>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{member.role}</p>
+                </div>
+                <StatusPill label={member.role === "company-admin" ? "Admin" : member.role === "company-scorer" ? "Scorer" : "Vendor"} className="border-slate-700 bg-slate-900 text-slate-200" />
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    </WorkspaceShell>
   );
 }
 
