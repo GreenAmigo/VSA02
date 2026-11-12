@@ -104,6 +104,8 @@ export default defineSchema({
     userId: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
     displayName: v.string(),
+    departmentId: v.optional(v.id("workspaceDepartments")),
+    departmentName: v.optional(v.string()),
     isActive: v.boolean(),
     createdAt: v.number(),
     isTestData: v.optional(v.boolean()),

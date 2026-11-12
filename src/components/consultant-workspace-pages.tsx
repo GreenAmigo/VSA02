@@ -671,10 +671,12 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
 
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
-
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const projects = useQuery(api.access.listProjectsForCompany, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as
+    | Array<{ _id: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }>
+    | undefined;
 
-  if (isProtectedLoading || access === undefined || companies === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || projects === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -697,13 +699,29 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     slug: companyId,
     name: companies.find((company) => company._id === companyId)?.name ?? companies[0]?.name ?? "Workspace",
     isTestData: false,
-    projects: [],
+    projects: projects.map((project) => ({
+      id: project._id,
+      name: project.name,
+      vendorCount: 0,
+      scorerCount: 0,
+      status: project.status,
+    })),
     people: [],
     vendors: [],
     requirements: [],
     scores: [],
   };
   const canManageWorkspace = Boolean(access.isConsultant || access.role === "company-admin");
+  const visibleProjects = projects.slice().sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const upcomingDeadlines = visibleProjects
+    .map((project) => ({
+      ...project,
+      nextDeadline: project.vendorDeadline && project.scorerDeadline
+        ? Math.min(project.vendorDeadline, project.scorerDeadline)
+        : project.vendorDeadline ?? project.scorerDeadline ?? null,
+    }))
+    .sort((a, b) => (a.nextDeadline ?? Number.MAX_SAFE_INTEGER) - (b.nextDeadline ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, 3);
 
   return (
     <WorkspaceShell
@@ -727,7 +745,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Project dashboard</h2>
+            <h2 className="text-lg font-semibold text-white">My projects</h2>
             {canManageWorkspace ? (
               <Link href={`/workspaces/${workspace.slug}/projects`} className="text-sm text-sky-300 hover:text-sky-200">
                 View all projects
@@ -736,39 +754,66 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
           </div>
 
           <div className="space-y-3">
-            {workspace.projects.map((project) => (
-              <div key={project.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-base font-medium text-white">{project.name}</p>
-                    <p className="mt-1 text-sm text-slate-400">{project.vendorCount} vendors • {project.scorerCount} scorers</p>
-                  </div>
-                  <StatusPill label={project.status} />
-                </div>
+            {visibleProjects.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                No projects assigned yet.
               </div>
-            ))}
+            ) : (
+              visibleProjects.map((project) => {
+                const nextDeadline = project.vendorDeadline && project.scorerDeadline
+                  ? Math.min(project.vendorDeadline, project.scorerDeadline)
+                  : project.vendorDeadline ?? project.scorerDeadline ?? null;
+
+                return (
+                  <Link
+                    key={project._id}
+                    href={`/workspaces/${workspace.slug}/projects/${project._id}`}
+                    className="block rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-sky-500/50 hover:bg-slate-950"
+                  >
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-base font-medium text-white">{project.name}</p>
+                        <p className="mt-1 text-sm text-slate-400">{project.description || "No description added yet."}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+                        {nextDeadline ? (
+                          <StatusPill label={`Due ${new Date(nextDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
+                        ) : null}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })
+            )}
           </div>
         </div>
 
-        {canManageWorkspace ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <h2 className="text-lg font-semibold text-white">Workspace actions</h2>
-            <div className="mt-4 space-y-3 text-sm text-slate-300">
-              <Link href={`/workspaces/${workspace.slug}/projects`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-                Add project
-              </Link>
-              <Link href={`/workspaces/${workspace.slug}/people`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-                Manage people and teams
-              </Link>
-              <Link href={`/workspaces/${workspace.slug}/vendors`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-                Manage vendors
-              </Link>
-              <Link href={`/workspaces/${workspace.slug}/requirements`} className="block rounded-xl border border-slate-800 bg-slate-950/50 p-3 hover:border-slate-700">
-                Upload requirements
-              </Link>
-            </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold text-white">What needs action</h2>
+          <div className="mt-4 space-y-3 text-sm text-slate-300">
+            {upcomingDeadlines.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                No project deadlines are set yet.
+              </div>
+            ) : (
+              upcomingDeadlines.map((project) => (
+                <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium text-white">{project.name}</p>
+                    <StatusPill label={project.status === "active" ? "Open" : "Draft"} />
+                  </div>
+                  {project.nextDeadline ? (
+                    <p className="mt-2 text-xs text-slate-400">Next deadline: {new Date(project.nextDeadline).toLocaleDateString()}</p>
+                  ) : null}
+                  <Link href={`/workspaces/${workspace.slug}/projects/${project._id}`} className="mt-3 inline-block text-sm text-sky-300 hover:text-sky-200">
+                    Open project
+                  </Link>
+                </div>
+              ))
+            )}
           </div>
-        ) : null}
+        </div>
       </section>
     </WorkspaceShell>
   );

@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
 const companyAdminRole = "company-admin" as const;
@@ -2329,6 +2330,28 @@ export const addProjectScorer = mutation({
       throw new Error("Project scorer limit reached");
     }
 
+    const normalizedName = args.displayName.trim();
+    const normalizedDepartmentName = args.role === "department" ? (args.departmentName ?? "").trim() : "";
+    let departmentId: Id<"workspaceDepartments"> | undefined;
+    if (args.role === "department") {
+      if (!normalizedDepartmentName) {
+        throw new Error("Department name is required for department scorers");
+      }
+
+      const department = await ctx.db
+        .query("workspaceDepartments")
+        .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+        .filter((q: any) => q.eq(q.field("name"), normalizedDepartmentName))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .first();
+
+      if (!department) {
+        throw new Error("Department not found");
+      }
+
+      departmentId = department._id;
+    }
+
     const userId = `scorer-${slugify(args.displayName)}-${Date.now()}`;
 
     const memberId = await ctx.db.insert("projectMembers", {
@@ -2336,7 +2359,9 @@ export const addProjectScorer = mutation({
       projectId: args.projectId,
       userId,
       role: "company-scorer",
-      displayName: args.displayName.trim(),
+      displayName: normalizedName,
+      departmentId,
+      departmentName: normalizedDepartmentName || undefined,
       isActive: true,
       createdAt: Date.now(),
     });
