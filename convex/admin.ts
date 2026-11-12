@@ -177,15 +177,23 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
   }
 
   const userIds = getIdentityUserIds(identity);
-  const member = await ctx.db
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedDisplayName = identity.name?.trim();
+
+  const identityMatches: Array<{ userId: string; role?: string; displayName?: string | null; email?: string | null }> = await ctx.db
     .query("companyMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
-    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+      ...(normalizedDisplayName ? [q.eq(q.field("displayName"), normalizedDisplayName)] : []),
+    ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
-    .first();
+    .collect();
 
+  const member = identityMatches.find((match) => match.role === companyAdminRole || match.role === consultantRole) ?? null;
   const consultantRow = await getActiveConsultantRow(ctx, userIds);
-  const hasConsultantAccess = Boolean(consultantRow) || (member && member.role === consultantRole);
+  const hasConsultantAccess = Boolean(consultantRow) || Boolean(identityMatches.some((match) => match.role === consultantRole));
 
   if (!member && !hasConsultantAccess) {
     throw new Error("Only company admins or VS Consultants can manage this company");

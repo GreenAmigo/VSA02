@@ -78,5 +78,88 @@ describe("Phase 4 requirement import preview and confirm", () => {
       }),
     ).rejects.toThrow("Project access denied");
   });
+
+  test("assigned scorers can view requirements without priorities but are rejected from all requirement writes; vendors are blocked from all requirement access", async () => {
+    const t = convexTest({ schema, modules });
+
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [
+        { id: "REQ-201", text: "Deliver on time", type: "user-story", priority: 9 },
+        { id: "REQ-202", text: "Support traceability", type: "nfr", priority: 3 },
+      ],
+      confirm: true,
+    });
+
+    const scorerView = await scorer.query(api.access.listProjectRequirements, {
+      projectId: seeded.projectBId,
+    });
+
+    expect(scorerView).toHaveLength(2);
+    expect(scorerView[0]).toMatchObject({ requirementId: "REQ-201", text: "Deliver on time" });
+    expect("priority" in scorerView[0]).toBe(false);
+    expect("type" in scorerView[0]).toBe(true);
+
+    await expect(async () => {
+      await scorer.mutation(api.requirements.previewRequirementImport, {
+        projectId: seeded.projectBId,
+        rows: [{ id: "REQ-999", text: "Forbidden import", type: "user-story", priority: 1 }],
+      });
+    }).rejects.toThrow("Project access denied");
+
+    await expect(async () => {
+      await scorer.mutation(api.requirements.applyRequirementImport, {
+        projectId: seeded.projectBId,
+        rows: [{ id: "REQ-999", text: "Forbidden import", type: "user-story", priority: 1 }],
+        confirm: true,
+      });
+    }).rejects.toThrow("Project access denied");
+
+    const vendorView = await vendor.query(api.access.listProjectRequirements, {
+      projectId: seeded.projectBId,
+    });
+
+    expect(vendorView).toHaveLength(2);
+    expect(vendorView[0]).toMatchObject({ requirementId: "REQ-201", text: "Deliver on time" });
+    expect("priority" in vendorView[0]).toBe(false);
+    expect("type" in vendorView[0]).toBe(false);
+
+    await expect(async () => {
+      await vendor.mutation(api.requirements.previewRequirementImport, {
+        projectId: seeded.projectBId,
+        rows: [{ id: "REQ-998", text: "Forbidden vendor import", type: "nfr", priority: 9 }],
+      });
+    }).rejects.toThrow("Project access denied");
+
+    await expect(async () => {
+      await vendor.mutation(api.requirements.applyRequirementImport, {
+        projectId: seeded.projectBId,
+        rows: [{ id: "REQ-998", text: "Forbidden vendor import", type: "nfr", priority: 9 }],
+        confirm: true,
+      });
+    }).rejects.toThrow("Project access denied");
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-201", text: "Deliver on time", type: "user-story", priority: 1 }],
+      confirm: true,
+    });
+
+    const priorityUpdated = await scorer.query(api.access.listProjectRequirements, {
+      projectId: seeded.projectBId,
+    });
+    expect("priority" in priorityUpdated[0]).toBe(false);
+  });
 });
 

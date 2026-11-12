@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
@@ -46,8 +47,8 @@ type RequirementItem = {
   _id: string;
   requirementId: string;
   text: string;
-  type: "user-story" | "nfr";
-  priority: 9 | 3 | 1 | 0;
+  type?: "user-story" | "nfr";
+  priority?: 9 | 3 | 1 | 0;
   status: "active" | "withdrawn";
 };
 
@@ -704,6 +705,9 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
+    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
+    | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading ? "skip" : { projectId: projectId as any }) as ProjectRecord | undefined;
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
   const previewImport = useMutation(api.requirements.previewRequirementImport);
@@ -717,10 +721,31 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   }
 
   const importValidationError = getRequirementImportValidationError(rows);
+  const canImportRequirements = Boolean(access && (access.isConsultant || access.role === "company-admin"));
 
   if (!project || !requirements) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Loading project requirements…</div>;
   }
+
+  const canSeePriority = Boolean(access && (access.isConsultant || access.role === "company-admin"));
+  const canSeeType = Boolean(access && (access.isConsultant || access.role === "company-admin" || access.role === "company-scorer"));
+
+  const buildDownloadTemplate = () => {
+    const requirementsSheet = [
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ["REQ-101", "Role-based admin access", "user-story", 9, "Security"],
+      ["REQ-102", "Audit log retention", "nfr", 3, "Operations"],
+    ];
+    const nfrSheet = [
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ["NFR-101", "99.9% uptime target", "nfr", 9, "Availability"],
+      ["NFR-102", "Encryption at rest", "nfr", 3, "Security"],
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(requirementsSheet), "Requirements");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(nfrSheet), "NFRs");
+    XLSX.writeFile(workbook, "vendor-selection-requirements-template.xlsx");
+  };
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -775,16 +800,31 @@ function RequirementsPage({ projectId }: { projectId: string }) {
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white">Import requirements</h2>
-              <label className="cursor-pointer rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
-                Upload CSV
-                <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
-              </label>
+              <div className="flex gap-2">
+                {canImportRequirements ? (
+                  <>
+                    <button type="button" onClick={buildDownloadTemplate} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+                      Download template
+                    </button>
+                    <label className="cursor-pointer rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                      Upload CSV or Excel
+                      <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
+                    </label>
+                  </>
+                ) : null}
+              </div>
             </div>
 
-            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
-              <p className="text-base font-medium text-slate-200">Drop a spreadsheet here or click to upload</p>
-              <p className="mt-2 text-sm text-slate-400">Supports CSV and Excel files; rows are matched by requirement ID.</p>
-            </div>
+            {canImportRequirements ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
+                <p className="text-base font-medium text-slate-200">Drop a spreadsheet here or click to upload</p>
+                <p className="mt-2 text-sm text-slate-400">Supports CSV and Excel files; rows are matched by requirement ID.</p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-6 text-sm text-slate-400">
+                Import is limited to consultants and company admins.
+              </div>
+            )}
 
             {importError ? (
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
@@ -798,17 +838,30 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                   <div>
                     <p className="text-sm font-medium text-emerald-100">Import preview</p>
                     <p className="mt-1 text-sm text-emerald-200">
-                      {preview.summary?.added ?? 0} added • {preview.summary?.updated ?? 0} updated • {preview.summary?.withdrawn ?? 0} withdrawn
+                      {preview.summary?.added ?? 0} added • {preview.summary?.updated ?? 0} updated • {preview.summary?.withdrawn ?? 0} withdrawn • {(preview.rejected ?? []).length} rejected
                     </p>
                   </div>
                   <button
                     onClick={handleApply}
-                    disabled={Boolean(importValidationError)}
+                    disabled={Boolean(importValidationError) || !canImportRequirements}
                     className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                   >
                     Confirm import
                   </button>
                 </div>
+
+                {(preview.rejected ?? []).length > 0 ? (
+                  <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                    <p className="font-medium">Rejected rows</p>
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {(preview.rejected ?? []).map((row: any, index: number) => (
+                        <li key={`${row.requirementId ?? "row"}-${index}`}>
+                          {row.requirementId || "Unnamed row"}: {row.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -821,16 +874,20 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</span>
-                      <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-slate-300">
-                        {row.type}
-                      </span>
+                      {canSeeType ? (
+                        <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-slate-300">
+                          {row.type}
+                        </span>
+                      ) : null}
                     </div>
                     <p className="mt-2 text-base font-medium text-white">{row.text}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-sky-200">
-                      {row.priority}
-                    </span>
+                    {canSeePriority ? (
+                      <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-sky-200">
+                        {row.priority}
+                      </span>
+                    ) : null}
                     <StatusPill label={row.status === "active" ? "Active" : "Withdrawn"} />
                   </div>
                 </div>

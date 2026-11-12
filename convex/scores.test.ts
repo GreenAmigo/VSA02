@@ -62,10 +62,11 @@ describe("Phase 5 score audit trail", () => {
       projectBName: "Supply Chain",
     });
 
+    const betaAdmin = t.withIdentity({ tokenIdentifier: "beta-admin" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
     const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
 
-    await scorer.mutation(api.requirements.applyRequirementImport, {
+    await betaAdmin.mutation(api.requirements.applyRequirementImport, {
       projectId: seeded.projectBId,
       rows: [
         {

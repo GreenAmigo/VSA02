@@ -217,6 +217,9 @@ export const seedScenario = internalMutation({
     await ensureCompanyMember(companyA._id, "acme-admin", "acme-admin@acme.example", "ACME Admin", "company-admin");
     await ensureProjectMember(companyA._id, companyAProjectId, "acme-admin", "company-admin", "ACME Admin");
 
+    await ensureCompanyMember(companyB._id, "beta-admin", "admin@beta.example", "Beta Admin", "company-admin");
+    await ensureProjectMember(companyB._id, companyBProjectId, "beta-admin", "company-admin", "Beta Admin");
+
     await ensureCompanyMember(companyB._id, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer");
     await ensureProjectMember(companyB._id, companyBProjectId, "beta-scorer", "company-scorer", "Beta Scorer");
 
@@ -747,6 +750,63 @@ export const listProjectsForCompany = query({
   },
 });
 
+export async function canViewRequirements(
+  ctx: any,
+  projectId: Id<"projects">,
+  identity: { subject?: string; tokenIdentifier?: string; email?: string; name?: string | null },
+) {
+  const project = await ctx.db.get(projectId);
+  if (!project) {
+    return { allowed: false, visibility: null as "full" | "scorer" | "vendor" | null };
+  }
+
+  const userIds = getIdentityUserIds(identity);
+  const projectMembership = await ctx.db
+    .query("projectMembers")
+    .filter((q: any) => q.eq(q.field("projectId"), projectId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("displayName"), identity.name?.trim() ?? identity.email.trim().toLowerCase())] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+
+  const companyMembership = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+
+  const consultantMembership = await getActiveConsultantRecord(ctx, identity);
+
+  if (consultantMembership) {
+    return { allowed: true, visibility: "full" as const };
+  }
+
+  if (companyMembership && companyMembership.role === "company-admin") {
+    return { allowed: true, visibility: "full" as const };
+  }
+
+  if (projectMembership && projectMembership.role === "company-admin") {
+    return { allowed: true, visibility: "full" as const };
+  }
+
+  if (projectMembership && projectMembership.role === "company-scorer") {
+    return { allowed: true, visibility: "scorer" as const };
+  }
+
+  if (projectMembership && projectMembership.role === "vendor") {
+    return { allowed: true, visibility: "vendor" as const };
+  }
+
+  return { allowed: false, visibility: null };
+}
+
 export const listProjectRequirements = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -760,25 +820,48 @@ export const listProjectRequirements = query({
       throw new Error("Project not found");
     }
 
-    const userIds = getIdentityUserIds(identity);
-    const membership = await ctx.db
-      .query("projectMembers")
-      .filter((q) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
-
-    if (!membership || membership.companyId !== project.companyId) {
-      const consultantMembership = await getActiveConsultantRecord(ctx, identity);
-      if (!consultantMembership) {
-        throw new Error("Project access denied");
-      }
+    const permission = await canViewRequirements(ctx, args.projectId, identity);
+    if (!permission.allowed || !permission.visibility) {
+      throw new Error("Project access denied");
     }
 
-    return await ctx.db
+    const rows = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
+
+    return rows.map((row) => {
+      if (permission.visibility === "full") {
+        return {
+          ...row,
+          requirementId: row.requirementId,
+          text: row.text,
+          type: row.type,
+          priority: row.priority,
+          status: row.status,
+        };
+      }
+
+      if (permission.visibility === "scorer") {
+        return {
+          ...row,
+          requirementId: row.requirementId,
+          text: row.text,
+          type: row.type,
+          status: row.status,
+          priority: undefined,
+        };
+      }
+
+      return {
+        ...row,
+        requirementId: row.requirementId,
+        text: row.text,
+        status: row.status,
+        type: undefined,
+        priority: undefined,
+      };
+    });
   },
 });
 

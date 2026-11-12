@@ -17,10 +17,11 @@ describe("Phase 7 dashboard totals", () => {
       projectBName: "Supply Chain",
     });
 
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
     const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
 
-    await scorer.mutation(api.requirements.applyRequirementImport, {
+    await admin.mutation(api.requirements.applyRequirementImport, {
       projectId: seeded.projectBId,
       rows: [
         { id: "REQ-201", text: "Deliver on time", type: "user-story", priority: 9 },
