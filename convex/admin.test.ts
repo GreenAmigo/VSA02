@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
@@ -437,6 +437,128 @@ describe("admin console actions", () => {
       expect(departments).toHaveLength(1);
       expect(departments[0].name).toBe("Operations");
       expect(departments[0].members.some((member: any) => member.userId === "phase3b-consultant")).toBe(true);
+    });
+  });
+
+  test("reactivation restores access for a previously deactivated workspace person", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "reactivate-consultant", "reactivate@consultant.example", "Reactivation Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "reactivate-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Reactivate Company",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Reactivated User",
+        email: "reactivate.user@example.com",
+        role: "company-scorer",
+      });
+
+      const invitedUser = t.withIdentity({
+        tokenIdentifier: "reactivate-member",
+        email: "reactivate.user@example.com",
+        emailVerified: true,
+        name: "Reactivated User",
+      });
+
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "reactivate-member", email: "reactivate.user@example.com", email_verified: true, name: "Reactivated User" }), { status: 200 }));
+        await invitedUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      let access: { role: string | null; companyIds: string[] } = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      expect(access.role).toBe("company-scorer");
+      expect(access.companyIds).toEqual([company.companyId]);
+
+      await consultant.mutation(api.admin.deactivateWorkspacePerson, {
+        companyId: company.companyId,
+        email: "reactivate.user@example.com",
+      });
+
+      access = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      expect(access.role).toBeNull();
+      expect(access.companyIds).toEqual([]);
+
+      await consultant.mutation(api.admin.reactivateWorkspacePerson, {
+        companyId: company.companyId,
+        email: "reactivate.user@example.com",
+      });
+
+      access = await invitedUser.query(api.access.getCurrentUserAccess, {});
+      expect(access.role).toBe("company-scorer");
+      expect(access.companyIds).toEqual([company.companyId]);
+    });
+  });
+
+  test("a company admin cannot reactivate someone from another workspace", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "cross-admin-consultant", "cross@consultant.example", "Cross Admin Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "cross-admin-consultant" });
+      const companyA = await consultant.mutation(api.admin.createCompany, {
+        name: "Alpha Workspace",
+        ssoProvider: "google-workspace",
+      });
+      const companyB = await consultant.mutation(api.admin.createCompany, {
+        name: "Beta Workspace",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: companyA.companyId,
+        name: "Alpha Admin",
+        email: "alpha.admin@example.com",
+        role: "company-admin",
+      });
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: companyB.companyId,
+        name: "Beta Admin",
+        email: "beta.admin@example.com",
+        role: "company-admin",
+      });
+
+      const alphaAdmin = t.withIdentity({
+        tokenIdentifier: "alpha-admin",
+        email: "alpha.admin@example.com",
+        emailVerified: true,
+        name: "Alpha Admin",
+      });
+      const betaAdmin = t.withIdentity({
+        tokenIdentifier: "beta-admin",
+        email: "beta.admin@example.com",
+        emailVerified: true,
+        name: "Beta Admin",
+      });
+
+      const originalFetch = globalThis.fetch;
+      try {
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce(new Response(JSON.stringify({ id: "alpha-admin", email: "alpha.admin@example.com", email_verified: true, name: "Alpha Admin" }), { status: 200 }))
+          .mockResolvedValueOnce(new Response(JSON.stringify({ id: "beta-admin", email: "beta.admin@example.com", email_verified: true, name: "Beta Admin" }), { status: 200 }));
+        globalThis.fetch = fetchMock;
+        await alphaAdmin.action(api.access.acceptPendingInvites, {});
+        await betaAdmin.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      await consultant.mutation(api.admin.deactivateWorkspacePerson, {
+        companyId: companyB.companyId,
+        email: "beta.admin@example.com",
+      });
+
+      await expect(alphaAdmin.mutation(api.admin.reactivateWorkspacePerson, {
+        companyId: companyB.companyId,
+        email: "beta.admin@example.com",
+      })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     });
   });
 

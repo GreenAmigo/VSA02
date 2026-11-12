@@ -1109,13 +1109,13 @@ export const listWorkspacePeople = query({
       .collect();
 
     const items = [
-      ...members.filter((member) => member.isActive).map((member) => ({
+      ...members.map((member) => ({
         id: member._id,
         userId: member.userId,
         name: member.displayName,
         email: member.email ?? "",
         role: member.role,
-        status: "active" as const,
+        status: member.isActive ? ("active" as const) : ("deactivated" as const),
         source: "member" as const,
       })),
       ...invites.map((invite) => ({
@@ -1130,6 +1130,78 @@ export const listWorkspacePeople = query({
     ];
 
     return items.sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const reactivateWorkspacePerson = mutation({
+  args: {
+    companyId: v.id("companies"),
+    userId: v.optional(v.string()),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedEmail = args.email?.trim().toLowerCase();
+    const member = normalizedEmail
+      ? await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
+          .first()
+      : await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("userId"), args.userId ?? ""))
+          .first();
+
+    if (!member) {
+      throw new Error("Workspace person not found");
+    }
+
+    if (member.isActive) {
+      throw new Error("Workspace person is already active");
+    }
+
+    await ctx.db.patch(member._id, {
+      isActive: true,
+    });
+
+    const invite = await ctx.db
+      .query("workspaceInvites")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("email"), (member.email ?? normalizedEmail ?? "").toLowerCase()))
+      .first();
+
+    if (invite) {
+      await ctx.db.patch(invite._id, {
+        status: "active",
+        acceptedAt: Date.now(),
+        cancelledAt: undefined,
+        deactivatedAt: undefined,
+        expiredAt: undefined,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "reactivate_workspace_person",
+      details: `Reactivated ${member.displayName} (${member.email ?? normalizedEmail ?? "unknown email"}) in this workspace.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      userId: member.userId,
+      email: member.email ?? normalizedEmail ?? null,
+      status: "active",
+    };
   },
 });
 

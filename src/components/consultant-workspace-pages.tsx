@@ -978,6 +978,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
   const invitePerson = useMutation((api as any).admin.inviteWorkspacePerson);
   const cancelInvite = useMutation((api as any).admin.cancelWorkspaceInvite);
   const deactivatePerson = useMutation((api as any).admin.deactivateWorkspacePerson);
+  const reactivatePerson = useMutation((api as any).admin.reactivateWorkspacePerson);
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "company-scorer" as "company-admin" | "company-scorer" | "vendor" });
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1038,6 +1039,11 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
   };
 
   const handleDeactivate = async (person: { email: string; userId?: string | null }) => {
+    const confirmed = window.confirm(`Deactivate ${person.email} and remove their workspace access?`);
+    if (!confirmed) {
+      return;
+    }
+
     setBusy(true);
     try {
       await deactivatePerson({
@@ -1048,6 +1054,27 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
       setNotice({ kind: "success", message: `Deactivated ${person.email}. Score history stays intact.` });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to deactivate this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReactivate = async (person: { email: string; userId?: string | null }) => {
+    const confirmed = window.confirm(`Reactivate ${person.email} and restore their previous access?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await reactivatePerson({
+        companyId: companyId as any,
+        email: person.email,
+        userId: person.userId ?? undefined,
+      });
+      setNotice({ kind: "success", message: `Reactivated ${person.email}. Their previous access has been restored.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to reactivate this person." });
     } finally {
       setBusy(false);
     }
@@ -1166,6 +1193,19 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                         className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
                       >
                         Deactivate
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {person.status === "deactivated" && person.userId ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleReactivate(person)}
+                        disabled={busy}
+                        className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200 hover:border-emerald-400 disabled:opacity-60"
+                      >
+                        Reactivate
                       </button>
                     </div>
                   ) : null}
