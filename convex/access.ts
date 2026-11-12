@@ -327,17 +327,37 @@ export const acceptPendingInvitesForUser = internalMutation({
         continue;
       }
 
-      const existingMember = await ctx.db
+      const existingMemberships = await ctx.db
         .query("companyMembers")
         .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
         .filter((q: any) => q.eq(q.field("userId"), args.userId))
-        .filter((q: any) => q.eq(q.field("isActive"), true))
-        .first();
+        .collect();
 
-      if (existingMember) {
-        await ctx.db.patch(existingMember._id, {
+      const canonicalMembership = existingMemberships.length > 0
+        ? [...existingMemberships].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.createdAt - b.createdAt)[0]
+        : null;
+
+      if (canonicalMembership && canonicalMembership.isActive) {
+        for (const duplicate of existingMemberships) {
+          if (duplicate._id !== canonicalMembership._id) {
+            await ctx.db.delete(duplicate._id);
+          }
+        }
+
+        await ctx.db.patch(invite._id, {
+          status: "active",
+          acceptedAt: invite.acceptedAt ?? Date.now(),
+          cancelledAt: undefined,
+          deactivatedAt: undefined,
+          expiredAt: undefined,
+        });
+        continue;
+      }
+
+      if (canonicalMembership) {
+        await ctx.db.patch(canonicalMembership._id, {
           email: targetEmail,
-          displayName: invite.displayName,
+          displayName: args.displayName ?? invite.displayName,
           role: invite.role,
           isActive: true,
         });
@@ -346,12 +366,24 @@ export const acceptPendingInvitesForUser = internalMutation({
           companyId: invite.companyId,
           userId: args.userId,
           email: targetEmail,
-          displayName: invite.displayName,
+          displayName: args.displayName ?? invite.displayName,
           role: invite.role,
           isActive: true,
           createdAt: Date.now(),
           isTestData: invite.isTestData ?? false,
         });
+      }
+
+      for (const duplicate of existingMemberships) {
+        if (duplicate._id !== canonicalMembership?._id) {
+          await ctx.db.delete(duplicate._id);
+        }
+      }
+
+      if (canonicalMembership && !canonicalMembership.isActive) {
+        accepted += 1;
+      } else if (!canonicalMembership) {
+        accepted += 1;
       }
 
       await ctx.db.patch(invite._id, {
@@ -371,8 +403,6 @@ export const acceptPendingInvitesForUser = internalMutation({
         companyId: invite.companyId,
         createdAt: Date.now(),
       });
-
-      accepted += 1;
     }
 
     return { accepted, email: targetEmail, verified: true };

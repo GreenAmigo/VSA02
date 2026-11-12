@@ -1103,22 +1103,35 @@ export const listWorkspacePeople = query({
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
       .collect();
 
+    const canonicalMembers = new Map<string, any>();
+    for (const member of members) {
+      const key = `${member.userId}::${member.email ?? ""}`.toLowerCase();
+      const current = canonicalMembers.get(key);
+      if (!current || Number(current.isActive) < Number(member.isActive) || (current.isActive === member.isActive && current.createdAt > member.createdAt)) {
+        canonicalMembers.set(key, member);
+      }
+    }
+
+    const memberEntries = Array.from(canonicalMembers.values()).map((member) => ({
+      id: member._id,
+      userId: member.userId,
+      name: member.displayName,
+      email: member.email ?? "",
+      role: member.role,
+      status: member.isActive ? ("active" as const) : ("deactivated" as const),
+      source: "member" as const,
+    }));
+
     const invites = await ctx.db
       .query("workspaceInvites")
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
       .collect();
 
-    const items = [
-      ...members.map((member) => ({
-        id: member._id,
-        userId: member.userId,
-        name: member.displayName,
-        email: member.email ?? "",
-        role: member.role,
-        status: member.isActive ? ("active" as const) : ("deactivated" as const),
-        source: "member" as const,
-      })),
-      ...invites.map((invite) => ({
+    const memberEmails = new Set(memberEntries.map((member) => member.email.trim().toLowerCase()).filter(Boolean));
+    const inviteEntries = invites
+      .filter((invite) => invite.status !== "active")
+      .filter((invite) => !memberEmails.has(invite.email.trim().toLowerCase()))
+      .map((invite) => ({
         id: invite._id,
         userId: null,
         name: invite.displayName,
@@ -1126,10 +1139,61 @@ export const listWorkspacePeople = query({
         role: invite.role,
         status: invite.status,
         source: "invite" as const,
-      })),
-    ];
+      }));
 
-    return items.sort((a, b) => a.name.localeCompare(b.name));
+    return [...memberEntries, ...inviteEntries].sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const cleanupDuplicateWorkspaceMembers = mutation({
+  args: {
+    companyId: v.id("companies"),
+    userId: v.optional(v.string()),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const normalizedEmail = args.email?.trim().toLowerCase();
+    const memberships = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => (args.userId ? q.eq(q.field("userId"), args.userId) : q.eq(q.field("email"), normalizedEmail ?? "")))
+      .collect();
+
+    if (memberships.length <= 1) {
+      return { removed: 0, keptUserId: memberships[0]?.userId ?? null };
+    }
+
+    const canonical = [...memberships].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.createdAt - b.createdAt)[0];
+    let removed = 0;
+
+    for (const membership of memberships) {
+      if (membership._id !== canonical._id) {
+        await ctx.db.delete(membership._id);
+        removed += 1;
+      }
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "cleanup_duplicate_workspace_members",
+      details: `Removed ${removed} duplicate membership rows and kept the canonical workspace membership for ${canonical.displayName}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      removed,
+      keptUserId: canonical.userId,
+      keptEmail: canonical.email ?? normalizedEmail ?? null,
+    };
   },
 });
 

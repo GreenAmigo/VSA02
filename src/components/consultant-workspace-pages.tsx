@@ -993,6 +993,9 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
 
+  const members = people.filter((person) => person.source === "member");
+  const invitations = people.filter((person) => person.source === "invite");
+
   const handleInvite = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedEmail = inviteForm.email.trim();
@@ -1137,15 +1140,15 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">People and invite status</h2>
-            <StatusPill label={`${people.length} records`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+            <h2 className="text-lg font-semibold text-white">People</h2>
+            <StatusPill label={`${members.length} people`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
           </div>
 
-          {people.length === 0 ? (
-            <p className="text-sm text-slate-400">No people or invitations yet.</p>
+          {members.length === 0 ? (
+            <p className="text-sm text-slate-400">No workspace members yet.</p>
           ) : (
             <div className="space-y-3">
-              {people.map((person) => (
+              {members.map((person) => (
                 <div key={person.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -1154,15 +1157,11 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill
-                        label={person.status === "cancelled" ? "Cancelled" : person.status === "deactivated" ? "Deactivated" : person.status === "expired" ? "Expired" : person.status}
+                        label={person.status === "deactivated" ? "Deactivated" : "Active"}
                         className={
                           person.status === "active"
                             ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
-                            : person.status === "deactivated"
-                              ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
-                              : person.status === "cancelled" || person.status === "expired"
-                                ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
-                                : "border-sky-500/40 bg-sky-500/10 text-sky-200"
+                            : "border-amber-500/50 bg-amber-500/10 text-amber-200"
                         }
                       />
                       <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-300">
@@ -1170,19 +1169,6 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                       </span>
                     </div>
                   </div>
-
-                  {person.source === "invite" && person.status === "invited" ? (
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => void handleCancelInvite(person)}
-                        disabled={busy}
-                        className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
-                      >
-                        Cancel invitation
-                      </button>
-                    </div>
-                  ) : null}
 
                   {person.status === "active" && person.userId ? (
                     <div className="mt-3 flex justify-end">
@@ -1214,6 +1200,54 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
             </div>
           )}
         </section>
+
+        {invitations.length > 0 ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Invitations</h2>
+              <StatusPill label={`${invitations.length} pending`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+            </div>
+
+            <div className="space-y-3">
+              {invitations.map((person) => (
+                <div key={person.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-base font-medium text-white">{person.name}</p>
+                      <p className="text-sm text-slate-400">{person.email}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <StatusPill
+                        label={person.status === "cancelled" ? "Cancelled" : person.status === "expired" ? "Expired" : "Invited"}
+                        className={
+                          person.status === "cancelled" || person.status === "expired"
+                            ? "border-rose-500/40 bg-rose-500/10 text-rose-200"
+                            : "border-sky-500/40 bg-sky-500/10 text-sky-200"
+                        }
+                      />
+                      <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-slate-300">
+                        {person.role}
+                      </span>
+                    </div>
+                  </div>
+
+                  {person.status === "invited" ? (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleCancelInvite(person)}
+                        disabled={busy}
+                        className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
+                      >
+                        Cancel invitation
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   );

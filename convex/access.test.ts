@@ -619,6 +619,70 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("accepting the same invite twice never creates a duplicate company membership", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "duplicate-accept-check",
+        email: "duplicate-check@consultant.example",
+        displayName: "Duplicate Check Consultant",
+      });
+
+      const consultant = t.withIdentity({ tokenIdentifier: "duplicate-accept-check" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Duplicate Membership Company",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Green Test1",
+        email: "greenamigo+new@hotmail.co.uk",
+        role: "company-scorer",
+      });
+
+      const user = t.withIdentity({
+        tokenIdentifier: "green-test-one",
+        email: "greenamigo+new@hotmail.co.uk",
+        emailVerified: true,
+        name: "Green Test1",
+      });
+
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "green-test-one", email: "greenamigo+new@hotmail.co.uk", email_verified: true, name: "Green Test1" }), { status: 200 }));
+        const firstAttempt = await user.action(api.access.acceptPendingInvites, {});
+        const secondAttempt = await user.action(api.access.acceptPendingInvites, {});
+        expect(firstAttempt.accepted).toBe(1);
+        expect(secondAttempt.accepted).toBe(0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      const people = await consultant.query(api.admin.listWorkspacePeople, { companyId: company.companyId });
+      expect(people.filter((person: any) => person.email === "greenamigo+new@hotmail.co.uk")).toHaveLength(1);
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("an Acme company admin sees only Acme Health and is blocked from Beta Logistics", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

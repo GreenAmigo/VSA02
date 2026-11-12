@@ -562,6 +562,46 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a consultant sees each workspace person once and accepted invites do not appear as extra people", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "people-unique-consultant", "people@consultant.example", "People Unique Consultant");
+
+      const consultant = t.withIdentity({ tokenIdentifier: "people-unique-consultant" });
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "People Unique Company",
+        ssoProvider: "google-workspace",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Single Person",
+        email: "single.person@example.com",
+        role: "company-scorer",
+      });
+
+      const invitedUser = t.withIdentity({
+        tokenIdentifier: "single-person-user",
+        email: "single.person@example.com",
+        emailVerified: true,
+        name: "Single Person",
+      });
+
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "single-person-user", email: "single.person@example.com", email_verified: true, name: "Single Person" }), { status: 200 }));
+        await invitedUser.action(api.access.acceptPendingInvites, {});
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      const people = await consultant.query(api.admin.listWorkspacePeople, { companyId: company.companyId });
+      const matching = people.filter((person: any) => person.email === "single.person@example.com");
+      expect(matching).toHaveLength(1);
+      expect(matching[0].status).toBe("active");
+    });
+  });
+
   test("a consultant can invite a person and the matching verified email accepts the invite after sign-in", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });
