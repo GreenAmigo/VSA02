@@ -463,7 +463,11 @@ export const getCurrentUserAccess = query({
     const userIds = getIdentityUserIds(identity);
     const memberships = await ctx.db
       .query("companyMembers")
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+      .filter((q) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
 
@@ -512,7 +516,11 @@ export const listAccessibleCompanies = query({
     const userIds = getIdentityUserIds(identity);
     const memberships = await ctx.db
       .query("companyMembers")
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+      .filter((q) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
 
@@ -552,12 +560,7 @@ export const getCompany = query({
     }
 
     const userIds = getIdentityUserIds(identity);
-    const membership = await ctx.db
-      .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+    const membership = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity).then((members) => members[0] ?? null);
 
     if (membership) {
       return company;
@@ -576,13 +579,48 @@ export const getCompany = query({
   },
 });
 
-async function getAccessibleProjectIdsForUser(ctx: any, companyId: Id<"companies">, userIds: string[]) {
+async function findActiveCompanyMembershipsForIdentity(
+  ctx: any,
+  companyId: Id<"companies">,
+  identity: { subject?: string; tokenIdentifier?: string; email?: string; name?: string | null },
+) {
+  const userIds = getIdentityUserIds(identity);
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedDisplayName = identity.name?.trim();
+
+  return await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+      ...(normalizedDisplayName ? [q.eq(q.field("displayName"), normalizedDisplayName)] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+}
+
+async function getAccessibleProjectIdsForUser(
+  ctx: any,
+  companyId: Id<"companies">,
+  userIds: string[],
+  identity?: { subject?: string; tokenIdentifier?: string; email?: string; name?: string | null },
+) {
   const allowedProjectIds = new Set<Id<"projects">>();
+  const identityMatches = identity ? await findActiveCompanyMembershipsForIdentity(ctx, companyId, identity) : [];
+  const candidateUserIds = new Set<string>([...userIds, ...identityMatches.map((member: { userId: string }) => member.userId)]);
+  const candidateDisplayNames = new Set<string>([
+    ...identityMatches.map((member: { displayName: string }) => member.displayName.trim()).filter(Boolean),
+    ...(identity?.name?.trim() ? [identity.name.trim()] : []),
+  ]);
 
   const directMemberships = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
-    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+    .filter((q: any) => q.or(
+      ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
+      ...Array.from(candidateDisplayNames).map((displayName) => q.eq(q.field("displayName"), displayName)),
+    ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
 
@@ -593,7 +631,11 @@ async function getAccessibleProjectIdsForUser(ctx: any, companyId: Id<"companies
   const departmentMemberships = await ctx.db
     .query("departmentMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
-    .filter((q: any) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
+    .filter((q: any) => q.or(
+      ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity?.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
 
@@ -651,17 +693,12 @@ export const getProject = query({
     }
 
     const userIds = getIdentityUserIds(identity);
-    const allowedProjectIds = await getAccessibleProjectIdsForUser(ctx, project.companyId, userIds);
+    const allowedProjectIds = await getAccessibleProjectIdsForUser(ctx, project.companyId, userIds, identity);
     if (allowedProjectIds.has(args.projectId)) {
       return project;
     }
 
-    const companyMembership = await ctx.db
-      .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+    const companyMembership = await findActiveCompanyMembershipsForIdentity(ctx, project.companyId, identity).then((members) => members[0] ?? null);
 
     if (companyMembership && companyMembership.role === "company-admin") {
       return project;
@@ -685,12 +722,7 @@ export const listProjectsForCompany = query({
     }
 
     const userIds = getIdentityUserIds(identity);
-    const memberships = await ctx.db
-      .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q) => q.or(...userIds.map((userId) => q.eq(q.field("userId"), userId))))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .collect();
+    const memberships = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity);
 
     const consultantMembership = await getActiveConsultantRecord(ctx, identity);
 
@@ -698,14 +730,14 @@ export const listProjectsForCompany = query({
       throw new Error("Company access denied");
     }
 
-    if (consultantMembership || memberships.some((member) => member.role === "company-admin")) {
+    if (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")) {
       return await ctx.db
         .query("projects")
         .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
         .collect();
     }
 
-    const allowedProjectIds = await getAccessibleProjectIdsForUser(ctx, args.companyId, userIds);
+    const allowedProjectIds = await getAccessibleProjectIdsForUser(ctx, args.companyId, userIds, identity);
     const companyProjects = await ctx.db
       .query("projects")
       .withIndex("by_company", (q) => q.eq("companyId", args.companyId))

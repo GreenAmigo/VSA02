@@ -790,6 +790,84 @@ describe("Phase 2 access checks", () => {
     }
   });
 
+  test("a scorer keeps access when the project assignment uses a legacy user id but matches the same email and display name", async () => {
+    const t = convexTest({ schema, modules });
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+
+    try {
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
+      process.env.APP_ENVIRONMENT = "development";
+
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "legacy-assignment-consultant",
+        email: "consultant@greenworkspace.example",
+        displayName: "Workspace Consultant",
+      });
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "legacy-assignment-consultant",
+        email: "consultant@greenworkspace.example",
+        name: "Workspace Consultant",
+        emailVerified: true,
+      });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Green Workspace",
+        ssoProvider: "google-workspace",
+      });
+
+    await consultant.mutation(api.admin.inviteWorkspacePerson, {
+      companyId: company.companyId,
+      name: "Green Test1",
+      email: "green-test-one@example.com",
+      role: "company-scorer",
+    });
+
+    const scorer = t.withIdentity({
+      tokenIdentifier: "green-test-one",
+      email: "green-test-one@example.com",
+      emailVerified: true,
+      name: "Green Test1",
+    });
+
+    const inviteResult = await scorer.action(api.access.acceptPendingInvites, {});
+    expect(inviteResult.accepted).toBe(1);
+
+      const project = await consultant.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Green Assigned Project",
+      });
+
+      await consultant.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        displayName: "Green Test1",
+        email: "green-test-one@example.com",
+        role: "individual",
+      });
+
+      const visibleProjects = await scorer.query(api.access.listProjectsForCompany, { companyId: company.companyId });
+      const projectDetail = await scorer.query(api.access.getProject, { projectId: project.projectId });
+
+      expect(visibleProjects.map((item: { _id: string }) => item._id)).toEqual([project.projectId]);
+      expect(projectDetail._id).toBe(project.projectId);
+    } finally {
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
+      }
+
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
   test("only the assigned project list is visible to scorers and vendors, and unassigned projects stay hidden", async () => {
     const t = convexTest({ schema, modules });
     const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
