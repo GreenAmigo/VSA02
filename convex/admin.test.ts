@@ -2,6 +2,8 @@
 
 import { describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
+import { v } from "convex/values";
+import { mutation } from "./_generated/server";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 
@@ -38,6 +40,27 @@ async function grantConsultant(t: ReturnType<typeof convexTest>, userId: string,
     displayName,
   });
 }
+
+const seedLegacyProjectMember = mutation({
+  args: {
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    userId: v.string(),
+    displayName: v.string(),
+    role: v.union(v.literal("company-scorer"), v.literal("vendor")),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("projectMembers", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      userId: args.userId,
+      displayName: args.displayName,
+      role: args.role,
+      isActive: true,
+      createdAt: Date.now(),
+    });
+  },
+});
 
 describe("admin console actions", () => {
   test("company and project creation creates the expected company and project membership records", async () => {
@@ -116,6 +139,37 @@ describe("admin console actions", () => {
 
       expect(projectDetail._id).toBe(project.projectId);
       expect(roster.some((member: { displayName: string }) => member.displayName === "Green Test1")).toBe(true);
+    });
+  });
+
+  test("listProjectMembers ignores leftover legacy generated rows without writing", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "acme-admin", "acme-admin@example.com", "ACME Admin");
+
+      const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Legacy Row Test",
+        ssoProvider: "microsoft-entra",
+      });
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Legacy Member Project",
+      });
+
+      await t.mutation(seedLegacyProjectMember as any, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        userId: "vendor-legacy-member",
+        displayName: "Legacy Vendor Member",
+        role: "vendor",
+      });
+
+      const members = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
+      expect(members.some((member: { userId: string }) => member.userId === "vendor-legacy-member")).toBe(false);
+
+      const membersAfter = await admin.query(api.admin.listProjectMembers, { projectId: project.projectId });
+      expect(membersAfter.some((member: { userId: string }) => member.userId === "vendor-legacy-member")).toBe(false);
     });
   });
 

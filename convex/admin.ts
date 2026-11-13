@@ -206,34 +206,9 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
   return identity;
 }
 
-async function isLegacyGeneratedUserId(userId: string | null | undefined): Promise<boolean> {
-  return Boolean(userId && /^(vendor-|scorer-)/i.test(userId));
-}
-
-async function cleanupLegacyGeneratedProjectMembers(ctx: any, projectId?: string) {
-  const rows = projectId
-    ? await ctx.db
-        .query("projectMembers")
-        .filter((q: any) => q.eq(q.field("projectId"), projectId))
-        .collect()
-    : await ctx.db.query("projectMembers").collect();
-
-  const removed: Array<{ _id: string; projectId: string; userId: string; displayName: string; role: string }> = [];
-
-  for (const row of rows) {
-    if (await isLegacyGeneratedUserId(row.userId)) {
-      removed.push({
-        _id: row._id,
-        projectId: row.projectId,
-        userId: row.userId,
-        displayName: row.displayName,
-        role: row.role,
-      });
-      await ctx.db.delete(row._id);
-    }
-  }
-
-  return { removed, removedCount: removed.length };
+function isLegacyGeneratedUserId(userId: string | null | undefined): boolean {
+  const normalized = String(userId ?? "").trim();
+  return normalized.length > 0 && /^(vendor-|scorer-)/i.test(normalized);
 }
 
 async function assertProjectAccess(ctx: any, projectId: string, companyId: string) {
@@ -2294,6 +2269,54 @@ export const createProject = mutation({
   },
 });
 
+export const cleanupLegacyGeneratedProjectMembers = internalMutation({
+  args: {
+    secret: v.string(),
+    projectId: v.optional(v.id("projects")),
+  },
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Legacy project-member cleanup is disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET before running the legacy project-member cleanup");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid cleanup secret");
+    }
+
+    const rows = args.projectId
+      ? await ctx.db
+          .query("projectMembers")
+          .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+          .collect()
+      : await ctx.db.query("projectMembers").collect();
+
+    const removed: Array<{ _id: string; projectId: string; userId: string; displayName: string; role: string }> = [];
+
+    for (const row of rows) {
+      if (isLegacyGeneratedUserId(row.userId)) {
+        removed.push({
+          _id: row._id,
+          projectId: row.projectId,
+          userId: row.userId,
+          displayName: row.displayName,
+          role: row.role,
+        });
+        await ctx.db.delete(row._id);
+      }
+    }
+
+    return {
+      projectId: args.projectId ?? null,
+      removedCount: removed.length,
+      removed,
+    };
+  },
+});
+
 export const listProjectMembers = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -2340,6 +2363,8 @@ export const listProjectMembers = query({
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
 
+    const visibleMembers = members.filter((member) => !isLegacyGeneratedUserId(member.userId));
+
     const projectVendorAssignments = await ctx.db
       .query("projectVendors")
       .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
@@ -2359,9 +2384,7 @@ export const listProjectMembers = query({
       };
     }));
 
-    await cleanupLegacyGeneratedProjectMembers(ctx, args.projectId);
-
-    return [...members, ...vendorRows];
+    return [...visibleMembers, ...vendorRows];
   },
 });
 
@@ -2446,8 +2469,6 @@ export const addProjectVendor = mutation({
       createdAt: Date.now(),
       isTestData: false,
     });
-
-    await cleanupLegacyGeneratedProjectMembers(ctx, args.projectId);
 
     return {
       _id: projectVendorId,

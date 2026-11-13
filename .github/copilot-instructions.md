@@ -4,6 +4,7 @@
 - Read BRIEF.md before starting any task.
 - Never use hard-coded sample data in the UI; all data comes from Convex.
 - Access rules are enforced on the server only; never rely on the UI to hide data.
+- Queries must never write to the database; data migrations and clean-ups are separate internal mutations that I run explicitly.
 - Before saying a task is done: run npx tsc --noEmit (zero errors) and the full test suite, show me both outputs, commit and push, and give me the commit code.
 - Tests must call the same Convex functions the pages use.
 - When giving me arguments to run in the Convex dashboard, use clearly marked placeholders like <REAL_WORKOS_USER_ID>, never realistic-looking example values.
