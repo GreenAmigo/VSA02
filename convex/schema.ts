@@ -112,6 +112,15 @@ export default defineSchema({
   }).index("by_project_user", ["projectId", "userId"])
     .index("by_company_project", ["companyId", "projectId"]),
 
+  projectVendors: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    vendorId: v.id("vendorOrganizations"),
+    createdAt: v.number(),
+    isTestData: v.optional(v.boolean()),
+  }).index("by_project_vendor", ["projectId", "vendorId"])
+    .index("by_company_project", ["companyId", "projectId"]),
+
   vendorLoginTokens: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),

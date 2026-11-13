@@ -152,7 +152,37 @@ export const seedScenario = internalMutation({
       isTestData: true,
     });
 
-    const ensureCompanyMember = async (companyId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer" | "vendor") => {
+    const ensureVendorOrganization = async (companyId: any, name: string, contactEmail?: string) => {
+      const existing = await ctx.db
+        .query("vendorOrganizations")
+        .filter((q) => q.eq(q.field("companyId"), companyId))
+        .filter((q) => q.eq(q.field("name"), name))
+        .first();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          contactEmail: contactEmail ?? existing.contactEmail,
+          status: "active",
+          updatedAt: Date.now(),
+          isTestData: true,
+        });
+        return existing._id;
+      }
+
+      const vendorId = await ctx.db.insert("vendorOrganizations", {
+        companyId,
+        name,
+        contactEmail,
+        status: "active",
+        createdByUserId: "seed",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        isTestData: true,
+      });
+      return vendorId;
+    };
+
+    const ensureCompanyMember = async (companyId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer" | "vendor", vendorId?: any) => {
       const existing = await ctx.db
         .query("companyMembers")
         .filter((q) => q.eq(q.field("companyId"), companyId))
@@ -164,6 +194,7 @@ export const seedScenario = internalMutation({
           email,
           displayName,
           role,
+          vendorId: vendorId ?? existing.vendorId,
           isActive: true,
           isTestData: true,
         });
@@ -176,6 +207,7 @@ export const seedScenario = internalMutation({
         email,
         displayName,
         role,
+        vendorId,
         isActive: true,
         createdAt: Date.now(),
         isTestData: true,
@@ -223,8 +255,16 @@ export const seedScenario = internalMutation({
     await ensureCompanyMember(companyB._id, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer");
     await ensureProjectMember(companyB._id, companyBProjectId, "beta-scorer", "company-scorer", "Beta Scorer");
 
-    await ensureCompanyMember(companyB._id, "northwind-vendor", "vendor@northwind.example", "Northwind Labs", "vendor");
+    const northwindVendorId = await ensureVendorOrganization(companyB._id, "Northwind Labs", "vendor@northwind.example");
+    await ensureCompanyMember(companyB._id, "northwind-vendor", "vendor@northwind.example", "Northwind Labs", "vendor", northwindVendorId);
     await ensureProjectMember(companyB._id, companyBProjectId, "northwind-vendor", "vendor", "Northwind Labs");
+    await ctx.db.insert("projectVendors", {
+      companyId: companyB._id,
+      projectId: companyBProjectId,
+      vendorId: northwindVendorId,
+      createdAt: Date.now(),
+      isTestData: true,
+    });
 
     await ensureCompanyMember(companyC._id, "frazer-knight-admin", "frazerknight@hotmail.com", "Frazer Knight", "company-admin");
 
@@ -631,6 +671,34 @@ async function getAccessibleProjectIdsForUser(
     allowedProjectIds.add(membership.projectId);
   }
 
+  const vendorMemberships = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), companyId))
+    .filter((q: any) => q.or(
+      ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity?.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.eq(q.field("role"), "vendor"))
+    .collect();
+
+  for (const vendorMembership of vendorMemberships) {
+    if (!vendorMembership.vendorId) {
+      continue;
+    }
+
+    const vendorAssignments = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("companyId"), companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
+      .collect();
+
+    for (const assignment of vendorAssignments) {
+      allowedProjectIds.add(assignment.projectId);
+    }
+  }
+
   const departmentMemberships = await ctx.db
     .query("departmentMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
@@ -802,6 +870,31 @@ export async function canViewRequirements(
 
   if (projectMembership && projectMembership.role === "vendor") {
     return { allowed: true, visibility: "vendor" as const };
+  }
+
+  const vendorCompanyMembership = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.eq(q.field("role"), "vendor"))
+    .first();
+
+  if (vendorCompanyMembership && vendorCompanyMembership.vendorId) {
+    const vendorAssignment = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.eq(q.field("projectId"), projectId))
+      .filter((q: any) => q.eq(q.field("vendorId"), vendorCompanyMembership.vendorId))
+      .first();
+
+    if (vendorAssignment) {
+      return { allowed: true, visibility: "vendor" as const };
+    }
   }
 
   return { allowed: false, visibility: null };

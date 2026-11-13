@@ -26,19 +26,17 @@ export const requestVendorMagicLink = mutation({
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!member) {
+    if (!member || !member.vendorId) {
       throw new Error("Vendor not assigned to this project");
     }
 
-    const projectMember = await ctx.db
-      .query("projectMembers")
+    const projectVendor = await ctx.db
+      .query("projectVendors")
       .filter((q) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q) => q.eq(q.field("userId"), member.userId))
-      .filter((q) => q.eq(q.field("role"), "vendor"))
-      .filter((q) => q.eq(q.field("isActive"), true))
+      .filter((q) => q.eq(q.field("vendorId"), member.vendorId))
       .first();
 
-    if (!projectMember) {
+    if (!projectVendor) {
       throw new Error("Vendor not assigned to this project");
     }
 
@@ -87,15 +85,25 @@ export const completeVendorMagicLink = mutation({
       throw new Error("Magic link has expired");
     }
 
-    const projectMember = await ctx.db
-      .query("projectMembers")
-      .filter((q) => q.eq(q.field("projectId"), record.projectId))
+    const companyMember = await ctx.db
+      .query("companyMembers")
+      .filter((q) => q.eq(q.field("companyId"), record.companyId))
       .filter((q) => q.eq(q.field("userId"), record.userId))
       .filter((q) => q.eq(q.field("role"), "vendor"))
       .filter((q) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!projectMember) {
+    if (!companyMember || !companyMember.vendorId) {
+      throw new Error("Vendor access denied for this project");
+    }
+
+    const projectVendor = await ctx.db
+      .query("projectVendors")
+      .filter((q) => q.eq(q.field("projectId"), record.projectId))
+      .filter((q) => q.eq(q.field("vendorId"), companyMember.vendorId))
+      .first();
+
+    if (!projectVendor) {
       throw new Error("Vendor access denied for this project");
     }
 
@@ -106,7 +114,7 @@ export const completeVendorMagicLink = mutation({
       projectId: record.projectId,
       userId: record.userId,
       email: record.email,
-      displayName: projectMember.displayName,
+      displayName: companyMember.displayName,
       role: "vendor" as const,
     };
   },

@@ -206,6 +206,36 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
   return identity;
 }
 
+async function isLegacyGeneratedUserId(userId: string | null | undefined): Promise<boolean> {
+  return Boolean(userId && /^(vendor-|scorer-)/i.test(userId));
+}
+
+async function cleanupLegacyGeneratedProjectMembers(ctx: any, projectId?: string) {
+  const rows = projectId
+    ? await ctx.db
+        .query("projectMembers")
+        .filter((q: any) => q.eq(q.field("projectId"), projectId))
+        .collect()
+    : await ctx.db.query("projectMembers").collect();
+
+  const removed: Array<{ _id: string; projectId: string; userId: string; displayName: string; role: string }> = [];
+
+  for (const row of rows) {
+    if (await isLegacyGeneratedUserId(row.userId)) {
+      removed.push({
+        _id: row._id,
+        projectId: row.projectId,
+        userId: row.userId,
+        displayName: row.displayName,
+        role: row.role,
+      });
+      await ctx.db.delete(row._id);
+    }
+  }
+
+  return { removed, removedCount: removed.length };
+}
+
 async function assertProjectAccess(ctx: any, projectId: string, companyId: string) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
@@ -2305,10 +2335,33 @@ export const listProjectMembers = query({
       throw new Error("Project access denied");
     }
 
-    return await ctx.db
+    const members = await ctx.db
       .query("projectMembers")
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
+
+    const projectVendorAssignments = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .collect();
+
+    const vendorRows = await Promise.all(projectVendorAssignments.map(async (assignment) => {
+      const vendor = await ctx.db.get(assignment.vendorId);
+      return {
+        _id: assignment._id,
+        projectId: assignment.projectId,
+        userId: assignment.vendorId,
+        role: "vendor",
+        displayName: vendor?.name ?? "Vendor organization",
+        isActive: true,
+        createdAt: assignment.createdAt,
+      };
+    }));
+
+    await cleanupLegacyGeneratedProjectMembers(ctx, args.projectId);
+
+    return [...members, ...vendorRows];
   },
 });
 
@@ -2316,48 +2369,94 @@ export const addProjectVendor = mutation({
   args: {
     companyId: v.id("companies"),
     projectId: v.id("projects"),
-    displayName: v.string(),
-    email: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
+    displayName: v.optional(v.string()),
+    email: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
     await assertProjectAccess(ctx, args.projectId, args.companyId);
 
-    const existingVendors = await ctx.db
-      .query("projectMembers")
+    let vendorId = args.vendorId;
+    let vendorName = args.displayName?.trim() ?? "";
+
+    if (!vendorId) {
+      if (!vendorName) {
+        throw new Error("Select a vendor organization before assigning it to the project.");
+      }
+
+      const existingVendor = await ctx.db
+        .query("vendorOrganizations")
+        .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+        .filter((q: any) => q.eq(q.field("name"), vendorName))
+        .first();
+
+      if (!existingVendor) {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) {
+          throw new Error("Not signed in");
+        }
+
+        vendorId = await ctx.db.insert("vendorOrganizations", {
+          companyId: args.companyId,
+          name: vendorName,
+          contactEmail: args.email?.trim().toLowerCase() || undefined,
+          status: "active",
+          createdByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          isTestData: false,
+        });
+      } else {
+        vendorId = existingVendor._id;
+        vendorName = existingVendor.name;
+      }
+    }
+
+    const vendor = await ctx.db.get(vendorId);
+    if (!vendor || vendor.companyId !== args.companyId || vendor.status !== "active") {
+      throw new Error("Vendor organization not found");
+    }
+
+    const projectVendorCount = await ctx.db
+      .query("projectVendors")
       .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("role"), "vendor"))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
       .collect();
 
-    if (existingVendors.length >= 10) {
+    if (projectVendorCount.length >= 10) {
       throw new Error("Project vendor limit reached");
     }
 
-    const userId = `vendor-${slugify(args.displayName)}-${Date.now()}`;
-    const memberId = await ctx.db.insert("projectMembers", {
-      companyId: args.companyId,
-      projectId: args.projectId,
-      userId,
-      role: "vendor",
-      displayName: args.displayName.trim(),
-      isActive: true,
-      createdAt: Date.now(),
-    });
+    const existingAssignment = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("vendorId"), vendorId))
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .first();
 
-    const projectMember = await ctx.db.get(memberId);
-    if (!projectMember) {
-      throw new Error("Project member could not be created");
+    if (existingAssignment) {
+      throw new Error(`${vendor.name} is already assigned to this project.`);
     }
 
-    return {
-      _id: memberId,
+    const projectVendorId = await ctx.db.insert("projectVendors", {
       companyId: args.companyId,
       projectId: args.projectId,
-      userId,
+      vendorId,
+      createdAt: Date.now(),
+      isTestData: false,
+    });
+
+    await cleanupLegacyGeneratedProjectMembers(ctx, args.projectId);
+
+    return {
+      _id: projectVendorId,
+      companyId: args.companyId,
+      projectId: args.projectId,
+      vendorId,
       role: "vendor",
-      displayName: args.displayName.trim(),
-      email: args.email.trim(),
+      displayName: vendor.name,
+      email: vendor.contactEmail ?? null,
     };
   },
 });
@@ -2366,9 +2465,11 @@ export const addProjectScorer = mutation({
   args: {
     companyId: v.id("companies"),
     projectId: v.id("projects"),
-    displayName: v.string(),
-    email: v.string(),
+    userId: v.optional(v.string()),
+    displayName: v.optional(v.string()),
+    email: v.optional(v.string()),
     role: v.union(v.literal("individual"), v.literal("department")),
+    departmentId: v.optional(v.id("workspaceDepartments")),
     departmentName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -2386,38 +2487,102 @@ export const addProjectScorer = mutation({
       throw new Error("Project scorer limit reached");
     }
 
-    const normalizedName = args.displayName.trim();
-    const normalizedDepartmentName = args.role === "department" ? (args.departmentName ?? "").trim() : "";
-    let departmentId: Id<"workspaceDepartments"> | undefined;
-    if (args.role === "department") {
-      if (!normalizedDepartmentName) {
-        throw new Error("Department name is required for department scorers");
+    let selectedUserId = args.userId?.trim() ?? "";
+    let selectedDisplayName = args.displayName?.trim() ?? "";
+    let selectedEmail = args.email?.trim().toLowerCase() ?? "";
+    let departmentId = args.departmentId;
+    let departmentName = args.departmentName?.trim() ?? "";
+
+    if (args.role === "individual") {
+      if (!selectedUserId) {
+        if (!selectedDisplayName && !selectedEmail) {
+          throw new Error("Select a workspace person before assigning them as a scorer.");
+        }
+
+        const member = await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.or(
+            ...(selectedEmail ? [q.eq(q.field("email"), selectedEmail)] : []),
+            ...(selectedDisplayName ? [q.eq(q.field("displayName"), selectedDisplayName)] : []),
+          ))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .first();
+
+        if (!member) {
+          throw new Error("Workspace person not found");
+        }
+
+        selectedUserId = member.userId;
+        selectedDisplayName = member.displayName;
+        selectedEmail = member.email ?? selectedEmail;
       }
 
-      const department = await ctx.db
-        .query("workspaceDepartments")
+      const member = await ctx.db
+        .query("companyMembers")
         .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-        .filter((q: any) => q.eq(q.field("name"), normalizedDepartmentName))
+        .filter((q: any) => q.eq(q.field("userId"), selectedUserId))
         .filter((q: any) => q.eq(q.field("isActive"), true))
         .first();
 
-      if (!department) {
+      if (!member) {
+        throw new Error("Workspace person not found");
+      }
+
+      if (await isLegacyGeneratedUserId(selectedUserId)) {
+        throw new Error("Scorer assignments must use a real workspace person userId or department.");
+      }
+
+      selectedDisplayName = member.displayName;
+      selectedEmail = member.email ?? selectedEmail;
+    } else {
+      if (!departmentId && !departmentName) {
+        throw new Error("Department name is required for department scorers");
+      }
+
+      const department = (departmentId
+        ? await ctx.db.get(departmentId as any)
+        : await ctx.db
+            .query("workspaceDepartments")
+            .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+            .filter((q: any) => q.eq(q.field("name"), departmentName))
+            .filter((q: any) => q.eq(q.field("isActive"), true))
+            .first()) as any;
+
+      if (!department || department.companyId !== args.companyId || department.isActive === false) {
         throw new Error("Department not found");
       }
 
       departmentId = department._id;
+      departmentName = department.name;
+      selectedDisplayName = department.name;
+      selectedUserId = `department:${department._id}`;
     }
 
-    const userId = `scorer-${slugify(args.displayName)}-${Date.now()}`;
+    const duplicate = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .filter((q: any) => q.or(
+        q.eq(q.field("userId"), selectedUserId),
+        ...(departmentId ? [q.eq(q.field("departmentId"), departmentId)] : []),
+      ))
+      .first();
+
+    if (duplicate) {
+      throw new Error(`${selectedDisplayName} is already assigned to this project.`);
+    }
 
     const memberId = await ctx.db.insert("projectMembers", {
       companyId: args.companyId,
       projectId: args.projectId,
-      userId,
+      userId: selectedUserId,
       role: "company-scorer",
-      displayName: normalizedName,
+      displayName: selectedDisplayName,
       departmentId,
-      departmentName: normalizedDepartmentName || undefined,
+      departmentName: departmentName || undefined,
       isActive: true,
       createdAt: Date.now(),
     });
@@ -2431,12 +2596,12 @@ export const addProjectScorer = mutation({
       _id: memberId,
       companyId: args.companyId,
       projectId: args.projectId,
-      userId,
+      userId: selectedUserId,
       role: "company-scorer",
-      displayName: args.displayName.trim(),
-      email: args.email.trim(),
+      displayName: selectedDisplayName,
+      email: selectedEmail,
       scorerRole: args.role,
-      departmentName: args.departmentName?.trim() ?? null,
+      departmentName: departmentName || null,
     };
   },
 });

@@ -1292,6 +1292,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       await addProjectScorer({
         companyId: companyId as any,
         projectId: projectId as any,
+        userId: selectedScorer.userId ?? undefined,
         displayName: selectedScorer.name.trim(),
         email: selectedScorer.email.trim(),
         role: scorerDraft.role,
@@ -1324,8 +1325,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       await addProjectVendor({
         companyId: companyId as any,
         projectId: projectId as any,
-        displayName: selectedVendor.name.trim(),
-        email: selectedVendor.contactEmail?.trim() || `${selectedVendor.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "")}@workspace.local`,
+        vendorId: selectedVendor.vendorId as any,
       });
       setVendorDraft({ selectedVendorId: "" });
       setNotice({ kind: "success", message: "Vendor added to the project." });

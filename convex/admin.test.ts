@@ -82,9 +82,23 @@ describe("admin console actions", () => {
         name: "Green Assigned Project",
       });
 
+      await admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Green Test1",
+        email: "green-test-one@example.com",
+        role: "company-scorer",
+      });
+
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "green-test-one",
+        email: "green-test-one@example.com",
+        displayName: "Green Test1",
+      });
+
       await admin.mutation(api.admin.addProjectScorer, {
         companyId: company.companyId,
         projectId: project.projectId,
+        userId: "green-test-one",
         displayName: "Green Test1",
         email: "green-test-one@example.com",
         role: "individual",
@@ -122,16 +136,35 @@ describe("admin console actions", () => {
         name: "HR Platform",
       });
 
+      const vendorOrg = await admin.mutation(api.admin.addWorkspaceVendor, {
+        companyId: company.companyId,
+        name: "Northwind Labs",
+        contactEmail: "vendor@northwind.example",
+      });
+
       const vendor = await admin.mutation(api.admin.addProjectVendor, {
         companyId: company.companyId,
         projectId: project.projectId,
-        displayName: "Northwind Labs",
-        email: "vendor@northwind.example",
+        vendorId: vendorOrg.vendorId,
+      });
+
+      await admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Sam Lee",
+        email: "sam@acme.example",
+        role: "company-scorer",
+      });
+
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "sam-lee",
+        email: "sam@acme.example",
+        displayName: "Sam Lee",
       });
 
       const scorer = await admin.mutation(api.admin.addProjectScorer, {
         companyId: company.companyId,
         projectId: project.projectId,
+        userId: "sam-lee",
         displayName: "Sam Lee",
         email: "sam@acme.example",
         role: "individual",
@@ -186,18 +219,45 @@ describe("admin console actions", () => {
       })).rejects.toThrow("Project vendor limit reached");
 
       for (let index = 0; index < 20; index += 1) {
+        const email = `scorer${index + 1}@example.com`;
+        const userId = `user-scorer-${index + 1}`;
+        await admin.mutation(api.admin.inviteWorkspacePerson, {
+          companyId: company.companyId,
+          name: `Scorer ${index + 1}`,
+          email,
+          role: "company-scorer",
+        });
+        await t.mutation(internal.access.acceptPendingInvitesForUser, {
+          userId,
+          email,
+          displayName: `Scorer ${index + 1}`,
+        });
         await admin.mutation(api.admin.addProjectScorer, {
           companyId: company.companyId,
           projectId: project.projectId,
+          userId,
           displayName: `Scorer ${index + 1}`,
-          email: `scorer${index + 1}@example.com`,
+          email,
           role: "individual",
         });
       }
 
+      await admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Scorer 21",
+        email: "scorer21@example.com",
+        role: "company-scorer",
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "user-scorer-21",
+        email: "scorer21@example.com",
+        displayName: "Scorer 21",
+      });
+
       await expect(admin.mutation(api.admin.addProjectScorer, {
         companyId: company.companyId,
         projectId: project.projectId,
+        userId: "user-scorer-21",
         displayName: "Scorer 21",
         email: "scorer21@example.com",
         role: "individual",
