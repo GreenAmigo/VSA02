@@ -11,8 +11,11 @@ import { api } from "../../convex/_generated/api";
 import { getProjectDraftError, normalizeProjectName } from "@/lib/projectDraft";
 import { getPersonInviteDraftError } from "@/lib/projectPeople";
 import {
+  buildRequirementTemplateWorkbook,
   getRequirementImportValidationError,
   parseRequirementFile,
+  parseRequirementFileWithIssues,
+  type RequirementImportIssue,
   type RequirementRecord,
 } from "@/lib/projectRequirements";
 import { getScoringDraftError, getScoringModeMeta } from "@/lib/projectScoring";
@@ -714,7 +717,9 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   const applyImport = useMutation(api.requirements.applyRequirementImport);
   const [preview, setPreview] = useState<any>(null);
   const [rows, setRows] = useState<RequirementRecord[]>([]);
+  const [importIssues, setImportIssues] = useState<RequirementImportIssue[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   if (isProtectedLoading) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-slate-200">Checking sign-in…</div>;
@@ -731,33 +736,23 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   const canSeeType = Boolean(access && (access.isConsultant || access.role === "company-admin" || access.role === "company-scorer"));
 
   const buildDownloadTemplate = () => {
-    const requirementsSheet = [
-      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
-      ["REQ-101", "Role-based admin access", "user-story", 9, "Security"],
-      ["REQ-102", "Audit log retention", "nfr", 3, "Operations"],
-    ];
-    const nfrSheet = [
-      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
-      ["NFR-101", "99.9% uptime target", "nfr", 9, "Availability"],
-      ["NFR-102", "Encryption at rest", "nfr", 3, "Security"],
-    ];
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(requirementsSheet), "Requirements");
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(nfrSheet), "NFRs");
+    const workbook = buildRequirementTemplateWorkbook();
     XLSX.writeFile(workbook, "vendor-selection-requirements-template.xlsx");
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
+  const handleFiles = async (fileList: FileList | File[] | null) => {
+    if (!fileList || fileList.length === 0) {
       return;
     }
 
-    const parsedRows = await parseRequirementFile(file);
-    const validationError = getRequirementImportValidationError(parsedRows);
+    const file = fileList[0];
+    const parsed = await parseRequirementFileWithIssues(file);
+    const validationError = getRequirementImportValidationError(parsed.rows);
     setImportError(validationError);
-    setRows(parsedRows);
+    setRows(parsed.rows);
+    setImportIssues(parsed.issues);
     setPreview(null);
+    setIsDragging(false);
 
     if (validationError) {
       return;
@@ -765,10 +760,20 @@ function RequirementsPage({ projectId }: { projectId: string }) {
 
     const previewResult = await previewImport({
       projectId: projectId as any,
-      rows: parsedRows.map(toImportRow),
+      rows: parsed.rows.map(toImportRow),
     });
 
     setPreview(previewResult);
+  };
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    await handleFiles(event.target.files);
+    event.target.value = "";
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    await handleFiles(event.dataTransfer.files);
   };
 
   const handleApply = async () => {
@@ -806,7 +811,18 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                     <button type="button" onClick={buildDownloadTemplate} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
                       Download template
                     </button>
-                    <label className="cursor-pointer rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+                    <label
+                      className={`cursor-pointer rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 ${isDragging ? "ring-2 ring-sky-400" : ""}`}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        void handleDrop(event);
+                      }}
+                    >
                       Upload CSV or Excel
                       <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
                     </label>
@@ -816,7 +832,18 @@ function RequirementsPage({ projectId }: { projectId: string }) {
             </div>
 
             {canImportRequirements ? (
-              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center">
+              <div
+                className={`rounded-xl border border-dashed p-6 text-center transition ${isDragging ? "border-sky-400 bg-sky-500/10" : "border-slate-700 bg-slate-950/40"}`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  void handleDrop(event);
+                }}
+              >
                 <p className="text-base font-medium text-slate-200">Drop a spreadsheet here or click to upload</p>
                 <p className="mt-2 text-sm text-slate-400">Supports CSV and Excel files; rows are matched by requirement ID.</p>
               </div>
@@ -825,6 +852,19 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                 Import is limited to consultants and company admins.
               </div>
             )}
+
+            {importIssues.length > 0 ? (
+              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                <p className="font-medium text-amber-200">Row-level issues</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {importIssues.map((issue, index) => (
+                    <li key={`${issue.sheetName}-${issue.rowIndex}-${index}`}>
+                      {issue.sheetName} row {issue.rowIndex}: {issue.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {importError ? (
               <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">

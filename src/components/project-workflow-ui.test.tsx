@@ -1,8 +1,9 @@
+import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 
 import { getProjectDraftError, normalizeProjectName } from "../lib/projectDraft";
 import { getPersonInviteDraftError } from "../lib/projectPeople";
-import { getRequirementImportValidationError } from "../lib/projectRequirements";
+import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFile, parseRequirementFileWithIssues } from "../lib/projectRequirements";
 import { getScoringDraftError, getScoringModeMeta } from "../lib/projectScoring";
 
 describe("project creation screen", () => {
@@ -23,6 +24,46 @@ describe("project creation screen", () => {
     expect(getRequirementImportValidationError([
       { id: "REQ-1", text: "Security review", type: "user-story", priority: 9, status: "active", updatedAt: "2026-11-05T00:00:00.000Z" },
     ])).toBeNull();
+  });
+
+  it("reads the generated requirements and NFR template workbook and csv through the same importer contract", async () => {
+    const workbook = buildRequirementTemplateWorkbook();
+    const requirementsRows = [
+      ["REQ-101", "Role-based access control", "user-story", 9, "Security"],
+      ["REQ-102", "Audit retention policy", "user-story", 3, "Compliance"],
+    ];
+    const nfrRows = [
+      ["NFR-101", "99.9% availability", "nfr", 9, "Availability"],
+      ["NFR-102", "End-to-end encryption", "nfr", 3, "Security"],
+    ];
+    workbook.Sheets.Requirements = XLSX.utils.aoa_to_sheet([
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ...requirementsRows,
+    ]);
+    workbook.Sheets.NFRs = XLSX.utils.aoa_to_sheet([
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ...nfrRows,
+    ]);
+
+    const xlsxBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+    const xlsxFile = new File([xlsxBuffer], "template.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const xlsxResult = await parseRequirementFile(xlsxFile);
+    expect(xlsxResult).toHaveLength(4);
+    expect(xlsxResult.map((row) => row.id).sort()).toEqual(["NFR-101", "NFR-102", "REQ-101", "REQ-102"]);
+
+    const csvContent = [
+      "Requirement ID,Title/Text,Type,Priority,Category",
+      "REQ-201,SSO support,user-story,9,Security",
+      "NFR-201,Encryption at rest,nfr,3,Security",
+    ].join("\n");
+    const csvFile = new File([csvContent], "requirements.csv", { type: "text/csv" });
+    const csvResult = await parseRequirementFile(csvFile);
+    expect(csvResult).toHaveLength(2);
+    expect(csvResult[0].id).toBe("REQ-201");
+
+    const issues = await parseRequirementFileWithIssues(csvFile);
+    expect(issues.issues).toEqual([]);
+    expect(issues.rows).toHaveLength(2);
   });
 
   it("requires a valid person invite before sending", () => {

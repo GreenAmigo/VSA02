@@ -29,8 +29,178 @@ export type RequirementImportSummary = {
   total: number;
 };
 
+export type RequirementImportIssue = {
+  rowIndex: number;
+  sheetName: string;
+  requirementId?: string;
+  reason: string;
+  foundHeaders: string[];
+};
+
+const requirementHeaderAliases = {
+  id: ["requirementid", "requirementidfield", "requirementidcode", "requirementidnumber", "id"],
+  text: ["requirementtext", "titletext", "title", "text", "description", "summary", "requirement", "requirementdescription"],
+  type: ["type", "requirementtype", "category", "requirementcategory", "kind"],
+  priority: ["priority", "priorityvalue", "weight", "scoreweight"],
+} as const;
+
+const requirementSheetNames = ["Requirements", "NFRs"] as const;
+
 function normalizeText(value: unknown, fallback = ""): string {
   return String(value ?? fallback).trim();
+}
+
+function normalizeHeaderName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isInstructionSheetName(sheetName: string): boolean {
+  return normalizeHeaderName(sheetName).includes("instruction");
+}
+
+function isRelevantRequirementSheetName(sheetName: string): boolean {
+  const normalized = normalizeHeaderName(sheetName);
+  return requirementSheetNames.some((name) => normalizeHeaderName(name) === normalized)
+    || normalized.includes("requirement")
+    || normalized.includes("nfr");
+}
+
+function getMatchingHeaderKey(row: Record<string, unknown>, candidates: readonly string[]): string | null {
+  const normalizedRows = Object.keys(row).map((key) => ({ raw: key, normalized: normalizeHeaderName(key) }));
+
+  for (const candidate of candidates) {
+    const match = normalizedRows.find((entry) => entry.normalized === candidate || entry.normalized.includes(candidate));
+    if (match) {
+      return match.raw;
+    }
+  }
+
+  return null;
+}
+
+function isBlankRow(row: Record<string, unknown>): boolean {
+  return Object.values(row).every((value) => String(value ?? "").trim() === "");
+}
+
+export function buildRequirementTemplateWorkbook() {
+  const workbook = XLSX.utils.book_new();
+  const requirementsHeader = ["Requirement ID", "Title/Text", "Type", "Priority", "Category"];
+  const nfrHeader = ["Requirement ID", "Title/Text", "Type", "Priority", "Category"];
+  const requirementsRows = [
+    requirementsHeader,
+    ["REQ-101", "Role-based admin access", "user-story", 9, "Security"],
+  ];
+  const nfrRows = [
+    nfrHeader,
+    ["NFR-101", "99.9% availability", "nfr", 9, "Availability"],
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(requirementsRows), "Requirements");
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(nfrRows), "NFRs");
+
+  return workbook;
+}
+
+export function parseRequirementFileWithIssues(file: File): Promise<{ rows: RequirementRecord[]; issues: RequirementImportIssue[]; sheetNames: string[] }> {
+  return (async () => {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", raw: true });
+    const candidates = workbook.SheetNames.filter((sheetName) => !isInstructionSheetName(sheetName));
+    const relevantSheets = candidates.filter((sheetName) => isRelevantRequirementSheetName(sheetName)) || candidates;
+    const sheetNames = relevantSheets.length > 0 ? relevantSheets : candidates;
+    const rows: RequirementRecord[] = [];
+    const issues: RequirementImportIssue[] = [];
+
+    for (const sheetName of sheetNames) {
+      const worksheet = workbook.Sheets[sheetName];
+      if (!worksheet) {
+        continue;
+      }
+
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: "",
+        raw: true,
+      });
+
+      for (let index = 0; index < rawRows.length; index += 1) {
+        const rawRow = rawRows[index];
+        if (!rawRow || isBlankRow(rawRow)) {
+          continue;
+        }
+
+        const foundHeaders = Object.keys(rawRow).map((key) => String(key));
+        const idKey = getMatchingHeaderKey(rawRow, requirementHeaderAliases.id);
+        const textKey = getMatchingHeaderKey(rawRow, requirementHeaderAliases.text);
+        if (!idKey || !textKey) {
+          const missing = [];
+          if (!idKey) {
+            missing.push("Requirement ID");
+          }
+          if (!textKey) {
+            missing.push("Requirement Text");
+          }
+          issues.push({
+            rowIndex: index + 2,
+            sheetName,
+            reason: `Missing required heading${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. Found headings: ${foundHeaders.join(", ") || "none"}.`,
+            foundHeaders,
+          });
+          continue;
+        }
+
+        const requirementId = normalizeRequirementId(rawRow[idKey]);
+        const requirementText = normalizeText(rawRow[textKey]);
+        if (!requirementId) {
+          issues.push({
+            rowIndex: index + 2,
+            sheetName,
+            reason: `Row has an empty Requirement ID. Found headings: ${foundHeaders.join(", ") || "none"}.`,
+            foundHeaders,
+          });
+          continue;
+        }
+
+        if (!requirementText) {
+          issues.push({
+            rowIndex: index + 2,
+            sheetName,
+            reason: `Row has an empty requirement text. Found headings: ${foundHeaders.join(", ") || "none"}.`,
+            foundHeaders,
+            requirementId,
+          });
+          continue;
+        }
+
+        const typeKey = getMatchingHeaderKey(rawRow, requirementHeaderAliases.type);
+        const priorityKey = getMatchingHeaderKey(rawRow, requirementHeaderAliases.priority);
+        let type: RequirementType = requirementTypeFromValue(
+          typeKey ? rawRow[typeKey] : sheetName.toLowerCase().includes("nfr") ? "nfr" : "user-story",
+        );
+
+        if (typeKey && rawRow[typeKey] === "Functional") {
+          type = "user-story";
+        }
+
+        const priority = priorityKey ? requirementPriorityFromValue(rawRow[priorityKey]) : 3;
+
+        rows.push({
+          id: requirementId,
+          text: requirementText,
+          type,
+          priority,
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    return { rows, issues, sheetNames };
+  })();
+}
+
+export async function parseRequirementFile(file: File): Promise<RequirementRecord[]> {
+  const parsed = await parseRequirementFileWithIssues(file);
+  return parsed.rows;
 }
 
 export function normalizeRequirementId(value: unknown): string {
@@ -97,26 +267,6 @@ export function toRequirementRecord(row: Record<string, unknown>): RequirementRe
     status: "active",
     updatedAt: new Date().toISOString(),
   };
-}
-
-export async function parseRequirementFile(file: File): Promise<RequirementRecord[]> {
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: "array" });
-  const firstSheetName = workbook.SheetNames[0];
-
-  if (!firstSheetName) {
-    return [];
-  }
-
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-    defval: "",
-    raw: true,
-  });
-
-  return rows
-    .map((row) => toRequirementRecord(row))
-    .filter((row): row is RequirementRecord => row !== null);
 }
 
 export function buildRequirementImportPlan(
