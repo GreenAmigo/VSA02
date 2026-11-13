@@ -746,24 +746,42 @@ function RequirementsPage({ projectId }: { projectId: string }) {
     }
 
     const file = fileList[0];
-    const parsed = await parseRequirementFileWithIssues(file);
-    const validationError = getRequirementImportValidationError(parsed.rows);
-    setImportError(validationError);
-    setRows(parsed.rows);
-    setImportIssues(parsed.issues);
-    setPreview(null);
-    setIsDragging(false);
 
-    if (validationError) {
-      return;
+    try {
+      const parsed = await parseRequirementFileWithIssues(file);
+      const validationError = getRequirementImportValidationError(parsed.rows);
+      const rejectedRows = parsed.issues.map((issue) => ({
+        requirementId: issue.requirementId ?? `row-${issue.rowIndex}`,
+        reason: issue.reason,
+      }));
+
+      setImportError(validationError);
+      setRows(parsed.rows);
+      setImportIssues(parsed.issues);
+      setPreview(null);
+      setIsDragging(false);
+
+      if (validationError) {
+        return;
+      }
+
+      const previewResult = await previewImport({
+        projectId: projectId as any,
+        rows: parsed.rows.map(toImportRow),
+      });
+
+      setPreview({
+        ...previewResult,
+        rejected: [...(previewResult.rejected ?? []), ...rejectedRows],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "We couldn't read that spreadsheet. Please upload a CSV or Excel file with a Requirements or NFRs sheet.";
+      setImportError(message);
+      setRows([]);
+      setImportIssues([]);
+      setPreview(null);
+      setIsDragging(false);
     }
-
-    const previewResult = await previewImport({
-      projectId: projectId as any,
-      rows: parsed.rows.map(toImportRow),
-    });
-
-    setPreview(previewResult);
   };
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -783,15 +801,26 @@ function RequirementsPage({ projectId }: { projectId: string }) {
       return;
     }
 
-    const result = await applyImport({
-      projectId: projectId as any,
-      rows: rows.map(toImportRow),
-      confirm: true,
-    });
+    try {
+      const result = await applyImport({
+        projectId: projectId as any,
+        rows: rows.map(toImportRow),
+        confirm: true,
+      });
 
-    setPreview({ summary: result.summary, count: result.count });
-    setRows([]);
-    setImportError(null);
+      const importedCount = rows.length;
+      const rejectedCount = Array.isArray(result.rejected) ? result.rejected.length : 0;
+      setPreview({
+        ...result,
+        summary: result.summary,
+        confirmation: `${importedCount} imported, ${rejectedCount} rejected`,
+      });
+      setRows([]);
+      setImportError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The import could not be confirmed. Please try again.";
+      setImportError(message);
+    }
   };
 
   return (
@@ -878,7 +907,10 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                   <div>
                     <p className="text-sm font-medium text-emerald-100">Import preview</p>
                     <p className="mt-1 text-sm text-emerald-200">
-                      {preview.summary?.added ?? 0} added • {preview.summary?.updated ?? 0} updated • {preview.summary?.withdrawn ?? 0} withdrawn • {(preview.rejected ?? []).length} rejected
+                      {preview.confirmation ?? `${rows.length} imported, ${(preview.rejected ?? []).length} rejected`}
+                    </p>
+                    <p className="mt-1 text-xs text-emerald-200/80">
+                      {(preview.summary?.added ?? 0)} added • {(preview.summary?.updated ?? 0)} updated • {(preview.summary?.withdrawn ?? 0)} withdrawn • {(preview.rejected ?? []).length} rejected
                     </p>
                   </div>
                   <button
@@ -896,7 +928,7 @@ function RequirementsPage({ projectId }: { projectId: string }) {
                     <ul className="mt-2 list-disc space-y-1 pl-5">
                       {(preview.rejected ?? []).map((row: any, index: number) => (
                         <li key={`${row.requirementId ?? "row"}-${index}`}>
-                          {row.requirementId || "Unnamed row"}: {row.reason}
+                          {row.reason || `${row.requirementId || "Unnamed row"}: rejected`}
                         </li>
                       ))}
                     </ul>

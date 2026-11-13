@@ -10,6 +10,7 @@
 - Never put deploy keys or secrets in code, chat or .env.local.
 - Explain things in plain English and give me exact steps one at a time.
 - Diagnose the cause and explain it before changing code when something fails.
+- Every error a user can trigger must be shown on screen in plain English; never fail silently.
 - Never loosen a permission check to make a test pass. If a test fails on permissions, explain it to me and ask before changing who is allowed to do what.
 
 ## Working expectations

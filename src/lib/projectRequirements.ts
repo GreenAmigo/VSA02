@@ -82,6 +82,14 @@ function isBlankRow(row: Record<string, unknown>): boolean {
   return Object.values(row).every((value) => String(value ?? "").trim() === "");
 }
 
+function formatRequirementRowIssue(rowIndex: number, requirementId: string | undefined, reason: string): string {
+  if (!requirementId) {
+    return `Row ${rowIndex}: ${reason}`;
+  }
+
+  return `Row ${rowIndex} (${requirementId}): ${reason}`;
+}
+
 export function buildRequirementTemplateWorkbook() {
   const workbook = XLSX.utils.book_new();
   const requirementsHeader = ["Requirement ID", "Title/Text", "Type", "Priority", "Category"];
@@ -181,7 +189,25 @@ export function parseRequirementFileWithIssues(file: File): Promise<{ rows: Requ
           type = "user-story";
         }
 
-        const priority = priorityKey ? requirementPriorityFromValue(rawRow[priorityKey]) : 3;
+        let priority: RequirementPriority;
+        if (priorityKey) {
+          const rawPriorityValue = rawRow[priorityKey];
+          try {
+            priority = requirementPriorityFromValue(rawPriorityValue);
+          } catch (error) {
+            const rawPriorityText = String(rawPriorityValue ?? "").trim();
+            issues.push({
+              rowIndex: index + 2,
+              sheetName,
+              requirementId,
+              reason: formatRequirementRowIssue(index + 2, requirementId, `priority ${rawPriorityText || "blank"} isn't allowed. Use 9, 3, 1 or 0.`),
+              foundHeaders,
+            });
+            continue;
+          }
+        } else {
+          priority = 3;
+        }
 
         rows.push({
           id: requirementId,

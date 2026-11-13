@@ -66,6 +66,26 @@ describe("project creation screen", () => {
     expect(issues.rows).toHaveLength(2);
   });
 
+  it("keeps valid rows and rejects a row with an invalid priority", async () => {
+    const workbook = buildRequirementTemplateWorkbook();
+    workbook.Sheets.Requirements = XLSX.utils.aoa_to_sheet([
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ["REQ-101", "Role-based access control", "user-story", 9, "Security"],
+      ["REQ-102", "Audit retention policy", "user-story", 99, "Compliance"],
+      ["REQ-103", "Password reset flow", "user-story", 3, "Security"],
+    ]);
+
+    const xlsxBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+    const xlsxFile = new File([xlsxBuffer], "template.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const parsed = await parseRequirementFileWithIssues(xlsxFile);
+
+    expect(parsed.rows.map((row) => row.id).sort()).toEqual(["NFR-101", "REQ-101", "REQ-103"]);
+    expect(parsed.issues).toHaveLength(1);
+    expect(parsed.issues[0].reason).toContain("Row 3");
+    expect(parsed.issues[0].reason).toContain("priority 99 isn't allowed");
+    expect(parsed.issues[0].reason).toContain("Use 9, 3, 1 or 0");
+  });
+
   it("requires a valid person invite before sending", () => {
     expect(getPersonInviteDraftError("", "alex@example.com")).toBe("Full name is required.");
     expect(getPersonInviteDraftError("Alex Turner", "")).toBe("Email is required.");
