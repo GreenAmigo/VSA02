@@ -93,10 +93,10 @@ describe("project creation screen", () => {
     expect(getPersonInviteDraftError("Alex Turner", "alex@example.com")).toBeNull();
   });
 
-  it("requires a valid score draft before submission", () => {
+  it("allows optional comments on a 0 score and only validates vendor and requirement selection", () => {
     expect(getScoringDraftError(null, "REQ-1", "Needs review", 1)).toBe("Select a vendor before submitting a score.");
     expect(getScoringDraftError("vendor-1", null, "Needs review", 0)).toBe("Select a requirement before submitting a score.");
-    expect(getScoringDraftError("vendor-1", "REQ-1", "", 0)).toBe("Add a note when scoring a requirement as not met.");
+    expect(getScoringDraftError("vendor-1", "REQ-1", "", 0)).toBeNull();
     expect(getScoringDraftError("vendor-1", "REQ-1", "Works as expected", 1)).toBeNull();
   });
 

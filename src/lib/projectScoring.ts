@@ -28,9 +28,5 @@ export function getScoringDraftError(
     return "Select a requirement before submitting a score.";
   }
 
-  if (score === 0 && !comment.trim()) {
-    return "Add a note when scoring a requirement as not met.";
-  }
-
   return null;
 }

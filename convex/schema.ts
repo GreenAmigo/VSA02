@@ -154,6 +154,24 @@ export default defineSchema({
     comment: v.optional(v.string()),
     enteredBy: v.string(),
     enteredAt: v.number(),
+    amendedByUserId: v.optional(v.string()),
+    amendedByDisplayName: v.optional(v.string()),
+    amendedAt: v.optional(v.number()),
+    amendmentReason: v.optional(v.string()),
+  }).index("by_project_vendor", ["projectId", "vendorUserId"])
+    .index("by_project_requirement", ["projectId", "requirementId"]),
+
+  scoreAmendments: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    vendorUserId: v.string(),
+    requirementId: v.string(),
+    originalScore: v.union(v.literal(0), v.literal(1)),
+    newScore: v.union(v.literal(0), v.literal(1)),
+    amendedByUserId: v.string(),
+    amendedByDisplayName: v.string(),
+    reason: v.string(),
+    amendedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_requirement", ["projectId", "requirementId"]),
 

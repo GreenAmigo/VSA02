@@ -34,6 +34,8 @@ type ProjectRecord = {
   name: string;
   companyId: string;
   status: "draft" | "active";
+  vendorDeadline?: number | null;
+  scorerDeadline?: number | null;
   createdAt?: number;
 };
 
@@ -1302,8 +1304,12 @@ function ScoringPage({ projectId }: { projectId: string }) {
   const selected = activeRequirements.find((row) => row.requirementId === selectedRequirementId) ?? activeRequirements[0];
   const isScorerMode = scoringRole === "company-scorer" || scoringRole === "company-admin";
   const scoreDraftError = getScoringDraftError(selectedVendorId, selected?.requirementId ?? null, comment, scoreValue);
-  const selectedScore = (scoreHistory ?? []).find(
-    (row) => row.requirementId === selected?.requirementId && row.vendorUserId === selectedVendorId,
+  const activeVendorScores = (scoreHistory ?? []).filter((row) => row.vendorUserId === selectedVendorId);
+  const answeredRequirementIds = new Set(activeVendorScores.map((row) => row.requirementId));
+  const answeredCount = activeRequirements.filter((row) => answeredRequirementIds.has(row.requirementId)).length;
+  const isVendorLocked = scoringRole === "vendor" && Boolean(project.vendorDeadline && project.vendorDeadline <= Date.now());
+  const selectedScore = activeVendorScores.find(
+    (row) => row.requirementId === selected?.requirementId,
   );
 
   const handleSubmit = async () => {
@@ -1348,21 +1354,34 @@ function ScoringPage({ projectId }: { projectId: string }) {
                 <p className="mt-2 text-xs uppercase tracking-[0.16em] text-sky-300">Logged in as {currentMember.displayName}</p>
               ) : null}
             </div>
-            <h2 className="text-lg font-semibold text-white">Requirement list</h2>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Requirement list</h2>
+              <span className="text-xs uppercase tracking-[0.14em] text-sky-300">{answeredCount} of {activeRequirements.length} answered</span>
+            </div>
+
+            {isVendorLocked ? (
+              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                Vendor scoring is locked after the deadline. Only admins and consultants can amend saved scores.
+              </div>
+            ) : null}
+
             <div className="mt-4 space-y-3">
-              {activeRequirements.map((row) => (
-                <button
-                  key={row._id}
-                  onClick={() => setSelectedRequirementId(row.requirementId)}
-                  className={`w-full rounded-xl border p-3 text-left transition ${selectedRequirementId === row.requirementId ? "border-sky-500 bg-sky-500/10" : "border-slate-800 bg-slate-950/60 hover:border-sky-500"}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</span>
-                    <StatusPill label={row.type === "user-story" ? "User story" : "NFR"} />
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-white">{row.text}</p>
-                </button>
-              ))}
+              {activeRequirements.map((row) => {
+                const hasAnswer = answeredRequirementIds.has(row.requirementId);
+                return (
+                  <button
+                    key={row._id}
+                    onClick={() => setSelectedRequirementId(row.requirementId)}
+                    className={`w-full rounded-xl border p-3 text-left transition ${selectedRequirementId === row.requirementId ? "border-sky-500 bg-sky-500/10" : hasAnswer ? "border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400" : "border-amber-500/30 bg-amber-500/5 hover:border-amber-400"}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</span>
+                      <StatusPill label={hasAnswer ? "Answered" : "Unanswered"} />
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-white">{row.text}</p>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1435,10 +1454,10 @@ function ScoringPage({ projectId }: { projectId: string }) {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting || Boolean(scoreDraftError)}
+                disabled={isSubmitting || Boolean(scoreDraftError) || isVendorLocked}
                 className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 hover:bg-violet-400"
               >
-                {isSubmitting ? "Submitting…" : "Submit score"}
+                {isSubmitting ? "Submitting…" : isVendorLocked ? "Score locked" : "Submit score"}
               </button>
             </div>
           </div>

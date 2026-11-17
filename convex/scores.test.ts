@@ -108,5 +108,84 @@ describe("Phase 5 score audit trail", () => {
       vendor.query(api.scores.listScoreHistory, { projectId: seeded.projectAId }),
     ).rejects.toThrow("Project access denied");
   });
+
+  test("vendors can score before the deadline, score changes lock after the deadline, and admins can amend with a stored reason", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-301", text: "Vendor portal uptime", type: "nfr", priority: 9 }],
+      confirm: true,
+    });
+
+    await admin.mutation(api.deadlines.upsertProjectDeadline, {
+      projectId: seeded.projectBId,
+      targetType: "vendor",
+      targetUserId: "northwind-vendor",
+      dueAt: Date.now() + 60 * 60 * 1000,
+    });
+
+    await vendor.mutation(api.scores.submitScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-301",
+      score: 1,
+      comment: "Ready for review",
+    });
+
+    const progressBefore = await vendor.query(api.scores.getVendorScoringStatus, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+    expect(progressBefore.status).toBe("in-progress");
+    expect(progressBefore.answeredCount).toBe(1);
+
+    await admin.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId,
+      targetType: "vendor",
+      targetUserId: "northwind-vendor",
+    });
+
+    await expect(
+      vendor.mutation(api.scores.submitScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-301",
+        score: 0,
+        comment: "Changed after the deadline",
+      }),
+    ).rejects.toThrow("Vendor scoring is locked after the deadline");
+
+    const amended = await admin.mutation(api.scores.amendVendorScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-301",
+      score: 0,
+      reason: "Updated after final review",
+    });
+
+    expect(amended.originalScore).toBe(1);
+    expect(amended.newScore).toBe(0);
+    expect(amended.amendedByDisplayName).toBe("Beta Admin");
+
+    const history = await admin.query(api.scores.listScoreAmendments, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+
+    expect(history).toHaveLength(1);
+    expect(history[0].reason).toBe("Updated after final review");
+    expect(history[0].originalScore).toBe(1);
+    expect(history[0].newScore).toBe(0);
+  });
 });
 
