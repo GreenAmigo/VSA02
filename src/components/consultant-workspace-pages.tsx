@@ -61,6 +61,7 @@ type ProjectDetailProject = {
   description?: string | null;
   vendorDeadline?: number | null;
   scorerDeadline?: number | null;
+  scorerCanSeePeerScores?: boolean;
   status: "draft" | "active";
   isArchived?: boolean;
   createdAt?: number;
@@ -78,6 +79,7 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
     description: "",
     vendorDeadline: "",
     scorerDeadline: "",
+    scorerCanSeePeerScores: false,
   });
 
   useEffect(() => {
@@ -86,8 +88,9 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
       description: project.description ?? "",
       vendorDeadline: toDateInputValue(project.vendorDeadline),
       scorerDeadline: toDateInputValue(project.scorerDeadline),
+      scorerCanSeePeerScores: Boolean(project.scorerCanSeePeerScores),
     });
-  }, [project.name, project.description, project.vendorDeadline, project.scorerDeadline]);
+  }, [project.name, project.description, project.vendorDeadline, project.scorerDeadline, project.scorerCanSeePeerScores]);
 
   const handleSaveProject = async () => {
     const trimmedName = projectDraft.name.trim();
@@ -114,6 +117,7 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
         description: projectDraft.description.trim() || undefined,
         vendorDeadline,
         scorerDeadline,
+        scorerCanSeePeerScores: projectDraft.scorerCanSeePeerScores,
       });
       setProjectNotice({ kind: "success", message: "Project details updated." });
       setIsEditingProject(false);
@@ -218,6 +222,15 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
             />
           </label>
 
+          <label className="flex items-center gap-2 text-sm text-slate-300 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={projectDraft.scorerCanSeePeerScores}
+              onChange={(event) => setProjectDraft((current) => ({ ...current, scorerCanSeePeerScores: event.target.checked }))}
+            />
+            Allow scorers to see each other&apos;s scores for this project
+          </label>
+
           <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
             <div className="flex gap-2">
               <button
@@ -236,6 +249,7 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
                     description: project.description ?? "",
                     vendorDeadline: toDateInputValue(project.vendorDeadline),
                     scorerDeadline: toDateInputValue(project.scorerDeadline),
+                    scorerCanSeePeerScores: Boolean(project.scorerCanSeePeerScores),
                   });
                   setProjectNotice(null);
                 }}
@@ -632,6 +646,272 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function ScorerScoringPanel({ projectId }: { projectId: string }) {
+  const [selectedScopeKey, setSelectedScopeKey] = useState("");
+  const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busyKey, setBusyKey] = useState("");
+
+  const workboard = useQuery(
+    (api as any).scores.getScorerWorkboard,
+    { projectId: projectId as any, scopeKey: selectedScopeKey || undefined },
+  ) as
+    | {
+      projectId: string;
+      scorerCanSeePeerScores: boolean;
+      scorerScopes: Array<{ scopeKey: string; scopeType: "individual" | "department"; label: string }>;
+      activeScopeKey: string;
+      vendors: Array<{
+        vendorId: string;
+        vendorName: string;
+        vendorUserId: string;
+        vendorContactName: string | null;
+        answeredCount: number;
+        totalRequirements: number;
+        status: "not-started" | "in-progress" | "completed";
+        completedAt: number | null;
+        lastScoredAt: number | null;
+      }>;
+    }
+    | undefined;
+
+  useEffect(() => {
+    if (!workboard) {
+      return;
+    }
+
+    if (!selectedScopeKey || !workboard.scorerScopes.some((scope) => scope.scopeKey === selectedScopeKey)) {
+      setSelectedScopeKey(workboard.activeScopeKey);
+    }
+
+    if (!selectedVendorUserId || !workboard.vendors.some((vendor) => vendor.vendorUserId === selectedVendorUserId)) {
+      setSelectedVendorUserId(workboard.vendors[0]?.vendorUserId ?? "");
+    }
+  }, [workboard, selectedScopeKey, selectedVendorUserId]);
+
+  const grid = useQuery(
+    (api as any).scores.getScorerVendorGrid,
+    workboard && selectedVendorUserId
+      ? { projectId: projectId as any, vendorUserId: selectedVendorUserId, scopeKey: selectedScopeKey || undefined }
+      : "skip",
+  ) as
+    | {
+      projectId: string;
+      vendorUserId: string;
+      vendorName: string;
+      vendorContactName: string | null;
+      scorerScope: { scopeKey: string; scopeType: "individual" | "department"; label: string };
+      canSeePeerScores: boolean;
+      isCompleted: boolean;
+      completedAt: number | null;
+      rows: Array<{
+        requirementId: string;
+        text: string;
+        type: "user-story" | "nfr";
+        ownScore: 0 | 1 | null;
+        ownComment: string;
+        ownEnteredByDisplayName: string | null;
+        ownEnteredAt: number | null;
+        vendorScore: 0 | 1 | null;
+        vendorComment: string | null;
+        peerScores: Array<{ scopeKey: string; scopeLabel: string; score: 0 | 1; comment: string; enteredByDisplayName: string; enteredAt: number }>;
+      }>;
+    }
+    | undefined;
+
+  const saveScorerScore = useMutation((api as any).scores.saveScorerScore);
+  const completeScorerVendor = useMutation((api as any).scores.completeScorerVendor);
+
+  const saveScore = async (payload: { requirementId: string; score: 0 | 1; comment: string }) => {
+    if (!selectedVendorUserId || !selectedScopeKey) {
+      return;
+    }
+
+    const requestKey = `${payload.requirementId}:${payload.score}:${payload.comment}`;
+    setBusyKey(requestKey);
+    setNotice(null);
+    try {
+      await saveScorerScore({
+        projectId: projectId as any,
+        vendorUserId: selectedVendorUserId,
+        requirementId: payload.requirementId,
+        score: payload.score,
+        comment: payload.comment.trim() || undefined,
+        scopeKey: selectedScopeKey,
+      });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to save scorer value." });
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const markComplete = async () => {
+    if (!selectedVendorUserId || !selectedScopeKey) {
+      return;
+    }
+
+    setNotice(null);
+    setBusyKey("complete");
+    try {
+      await completeScorerVendor({
+        projectId: projectId as any,
+        vendorUserId: selectedVendorUserId,
+        scopeKey: selectedScopeKey,
+      });
+      setNotice({ kind: "success", message: "Scoring marked complete for this vendor. Vendor responses are now visible for comparison." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to mark scorer completion." });
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-white">Scorer scoring</h3>
+      </div>
+
+      {workboard === undefined ? (
+        <p className="text-sm text-slate-400">Loading scorer workboard...</p>
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <label className="text-sm text-slate-300">
+              <span className="mb-1 block text-xs uppercase tracking-[0.14em] text-slate-400">Scorer column</span>
+              <select
+                value={selectedScopeKey}
+                onChange={(event) => setSelectedScopeKey(event.target.value)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+              >
+                {workboard.scorerScopes.map((scope) => (
+                  <option key={scope.scopeKey} value={scope.scopeKey}>{scope.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            {workboard.vendors.map((vendor) => (
+              <button
+                key={vendor.vendorUserId}
+                type="button"
+                onClick={() => setSelectedVendorUserId(vendor.vendorUserId)}
+                className={`w-full rounded-xl border p-3 text-left ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/50 bg-sky-500/10" : "border-slate-800 bg-slate-950/60 hover:border-slate-600"}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-white">{vendor.vendorName}</p>
+                    <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName || "Unknown"}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill label={vendor.status === "not-started" ? "Not started" : vendor.status === "in-progress" ? "In progress" : "Completed"} className="border-slate-700 bg-slate-900 text-slate-100" />
+                    <StatusPill label={`${vendor.answeredCount} / ${vendor.totalRequirements}`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {notice ? (
+            <div className={`mt-4 rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+              {notice.message}
+            </div>
+          ) : null}
+
+          {grid ? (
+            <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-base font-semibold text-white">Scoring {grid.vendorName}</p>
+                  <p className="text-xs text-slate-400">Own scorer column: {grid.scorerScope.label}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void markComplete()}
+                  disabled={busyKey === "complete"}
+                  className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                >
+                  Mark complete
+                </button>
+              </div>
+
+              {!grid.isCompleted ? (
+                <p className="mb-3 text-xs text-slate-400">Vendor self-scores and comments appear only after you mark this vendor as complete.</p>
+              ) : null}
+
+              {grid.canSeePeerScores ? (
+                <p className="mb-3 text-xs text-slate-400">Peer scorer columns are enabled for this project.</p>
+              ) : null}
+
+              <div className="space-y-3">
+                {grid.rows.map((row) => (
+                  <div key={row.requirementId} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                    <div className="mb-2">
+                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                      <p className="text-sm text-slate-100">{row.text}</p>
+                      <p className="text-xs text-slate-400">Type: {row.type}</p>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-sm text-slate-300">
+                        <span className="mb-1 block">Your score</span>
+                        <select
+                          value={row.ownScore ?? ""}
+                          onChange={(event) => void saveScore({ requirementId: row.requirementId, score: Number(event.target.value) as 0 | 1, comment: row.ownComment })}
+                          disabled={busyKey.startsWith(`${row.requirementId}:`)}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                        >
+                          <option value="">Choose</option>
+                          <option value={0}>0</option>
+                          <option value={1}>1</option>
+                        </select>
+                      </label>
+
+                      <label className="text-sm text-slate-300">
+                        <span className="mb-1 block">Your comment</span>
+                        <textarea
+                          defaultValue={row.ownComment}
+                          onBlur={(event) => {
+                            if (row.ownScore === null) {
+                              setNotice({ kind: "error", message: "Choose 0 or 1 before saving a scorer comment." });
+                              return;
+                            }
+
+                            void saveScore({ requirementId: row.requirementId, score: row.ownScore, comment: event.target.value });
+                          }}
+                          rows={2}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                        />
+                      </label>
+                    </div>
+
+                    {grid.isCompleted ? (
+                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-200">
+                        <p>Vendor score: {row.vendorScore === null ? "-" : row.vendorScore}</p>
+                        <p className="mt-1 truncate" title={row.vendorComment ?? ""}>Vendor comment: {row.vendorComment || "(none)"}</p>
+                      </div>
+                    ) : null}
+
+                    {grid.canSeePeerScores && row.peerScores.length > 0 ? (
+                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+                        {row.peerScores.map((peer) => (
+                          <p key={`${row.requirementId}-${peer.scopeKey}`}>{peer.scopeLabel}: {peer.score} ({peer.enteredByDisplayName})</p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -1976,6 +2256,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
   const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
+  const isScorerView = access.role === "company-scorer";
   const workspacePeopleList = canManageWorkspace ? (workspacePeople ?? []) : [];
   const departmentsList = canManageWorkspace ? (departments ?? []) : [];
   const workspaceVendorsList = canManageWorkspace ? (workspaceVendors ?? []) : [];
@@ -2099,6 +2380,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
 
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
+
+      {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} /> : null}
 
       {isVendorView ? (
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">

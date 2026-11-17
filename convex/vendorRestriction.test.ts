@@ -170,5 +170,48 @@ describe("Vendor restrictions", () => {
       }),
     ).rejects.toThrow("Only consultants and company admins can review vendor responses");
   });
+
+  test("vendors cannot use scorer scoring APIs", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-920", text: "Scorer-only API row", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await expect(
+      vendor.query((api as any).scores.getScorerWorkboard, { projectId: seeded.projectBId }),
+    ).rejects.toThrow("Only assigned scorers can score this project");
+
+    await expect(
+      vendor.query((api as any).scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" }),
+    ).rejects.toThrow("Only assigned scorers can score this project");
+
+    await expect(
+      vendor.mutation((api as any).scores.saveScorerScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-920",
+        score: 1,
+      }),
+    ).rejects.toThrow("Only assigned scorers can score this project");
+
+    await expect(
+      vendor.mutation((api as any).scores.completeScorerVendor, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+      }),
+    ).rejects.toThrow("Only assigned scorers can score this project");
+  });
 });
 

@@ -92,6 +92,7 @@ export default defineSchema({
     description: v.optional(v.string()),
     vendorDeadline: v.optional(v.number()),
     scorerDeadline: v.optional(v.number()),
+    scorerCanSeePeerScores: v.optional(v.boolean()),
     createdBy: v.string(),
     createdAt: v.number(),
     status: v.union(v.literal("draft"), v.literal("active")),
@@ -161,6 +162,43 @@ export default defineSchema({
     amendmentReason: v.optional(v.string()),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_requirement", ["projectId", "requirementId"]),
+
+  scorerScores: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    vendorUserId: v.string(),
+    scorerScopeKey: v.string(),
+    scorerScopeLabel: v.string(),
+    scorerScopeType: v.union(v.literal("individual"), v.literal("department")),
+    requirementId: v.string(),
+    score: v.union(v.literal(0), v.literal(1)),
+    comment: v.optional(v.string()),
+    enteredByUserId: v.string(),
+    enteredByDisplayName: v.string(),
+    enteredAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project_vendor", ["projectId", "vendorUserId"])
+    .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"])
+    .index("by_project_vendor_scope_requirement", ["projectId", "vendorUserId", "scorerScopeKey", "requirementId"]),
+
+  scorerCompletions: defineTable({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    vendorUserId: v.string(),
+    scorerScopeKey: v.string(),
+    scorerScopeLabel: v.string(),
+    scorerScopeType: v.union(v.literal("individual"), v.literal("department")),
+    status: v.union(v.literal("not-started"), v.literal("in-progress"), v.literal("completed")),
+    answeredCount: v.number(),
+    totalRequirements: v.number(),
+    lastScoredAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    updatedByUserId: v.string(),
+    updatedByDisplayName: v.string(),
+    updatedAt: v.number(),
+  }).index("by_project_vendor", ["projectId", "vendorUserId"])
+    .index("by_project_scope", ["projectId", "scorerScopeKey"])
+    .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"]),
 
   scoreAmendments: defineTable({
     companyId: v.id("companies"),

@@ -300,6 +300,58 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Vendor responses");
   });
 
+  test("company scorer project detail shows scorer scoring panel", () => {
+    useQueryMock.mockReset();
+    useQueryMock.mockImplementationOnce(() => ({
+      email: "scorer@beta.example",
+      tokenIdentifier: "beta-scorer",
+      role: "company-scorer",
+      isConsultant: false,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      _id: "project-1",
+      companyId: "company-1",
+      name: "Supply Chain",
+      description: "Scorer view",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+      scorerDeadline: Date.now() + 7200_000,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "member-1", projectId: "project-1", userId: "beta-scorer", role: "company-scorer", displayName: "Beta Scorer", isActive: true }]);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "req-1", requirementId: "REQ-1", text: "Requirement", status: "active" }]);
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => ({
+      projectId: "project-1",
+      scorerCanSeePeerScores: false,
+      scorerScopes: [{ scopeKey: "individual:beta-scorer", scopeType: "individual", label: "Beta Scorer" }],
+      activeScopeKey: "individual:beta-scorer",
+      vendors: [{
+        vendorId: "ven-1",
+        vendorName: "Northwind Labs",
+        vendorUserId: "northwind-vendor",
+        vendorContactName: "Northwind Contact",
+        answeredCount: 1,
+        totalRequirements: 10,
+        status: "in-progress",
+        completedAt: null,
+        lastScoredAt: Date.now(),
+      }],
+    }));
+    useQueryMock.mockImplementationOnce(() => undefined);
+
+    const html = renderToStaticMarkup(
+      <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
+    );
+
+    expect(html).toContain("Scorer scoring");
+    expect(html).not.toContain("Vendor responses");
+    expect(html).not.toContain("Edit project");
+  });
+
   test("project detail renders for loading, consultant, company admin, scorer, and vendor without errors", () => {
     useQueryMock.mockReset();
     useAuthMock.mockReturnValue({ user: null, loading: true });

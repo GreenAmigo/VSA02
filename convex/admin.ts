@@ -2219,6 +2219,7 @@ export const createProject = mutation({
     description: v.optional(v.string()),
     vendorDeadline: v.optional(v.number()),
     scorerDeadline: v.optional(v.number()),
+    scorerCanSeePeerScores: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
@@ -2249,6 +2250,7 @@ export const createProject = mutation({
       description,
       vendorDeadline: args.vendorDeadline ?? undefined,
       scorerDeadline: args.scorerDeadline ?? undefined,
+      scorerCanSeePeerScores: args.scorerCanSeePeerScores ?? false,
       createdBy: canonicalUserId,
       createdAt: Date.now(),
       status: "active",
@@ -2274,6 +2276,7 @@ export const createProject = mutation({
       description,
       vendorDeadline: args.vendorDeadline ?? null,
       scorerDeadline: args.scorerDeadline ?? null,
+      scorerCanSeePeerScores: args.scorerCanSeePeerScores ?? false,
     };
   },
 });
@@ -2286,6 +2289,7 @@ export const updateProject = mutation({
     description: v.optional(v.string()),
     vendorDeadline: v.optional(v.union(v.number(), v.null())),
     scorerDeadline: v.optional(v.union(v.number(), v.null())),
+    scorerCanSeePeerScores: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const identity = await assertCompanyAdmin(ctx, args.companyId);
@@ -2302,6 +2306,7 @@ export const updateProject = mutation({
     const nextDescription = args.description?.trim() || undefined;
     const nextVendorDeadline = args.vendorDeadline ?? undefined;
     const nextScorerDeadline = args.scorerDeadline ?? undefined;
+    const nextScorerCanSeePeerScores = args.scorerCanSeePeerScores ?? Boolean(project.scorerCanSeePeerScores);
 
     if (
       typeof nextVendorDeadline === "number"
@@ -2315,12 +2320,14 @@ export const updateProject = mutation({
     const beforeDescription = project.description ?? null;
     const beforeVendorDeadline = project.vendorDeadline ?? null;
     const beforeScorerDeadline = project.scorerDeadline ?? null;
+    const beforeScorerCanSeePeerScores = Boolean(project.scorerCanSeePeerScores);
 
     await ctx.db.patch(args.projectId, {
       name: nextName,
       description: nextDescription,
       vendorDeadline: nextVendorDeadline,
       scorerDeadline: nextScorerDeadline,
+      scorerCanSeePeerScores: nextScorerCanSeePeerScores,
     });
 
     if (typeof nextVendorDeadline === "number") {
@@ -2348,6 +2355,7 @@ export const updateProject = mutation({
         `Description: ${beforeDescription ?? "none"} -> ${nextDescription ?? "none"}`,
         `Vendor deadline: ${beforeVendorDeadline ?? "none"} -> ${nextVendorDeadline ?? "none"}`,
         `Scorer deadline: ${beforeScorerDeadline ?? "none"} -> ${nextScorerDeadline ?? "none"}`,
+        `Scorer peer visibility: ${beforeScorerCanSeePeerScores ? "on" : "off"} -> ${nextScorerCanSeePeerScores ? "on" : "off"}`,
       ].join(" "),
       workspaceName: "workspace",
       companyId: args.companyId,
@@ -2361,6 +2369,7 @@ export const updateProject = mutation({
       description: nextDescription ?? null,
       vendorDeadline: nextVendorDeadline ?? null,
       scorerDeadline: nextScorerDeadline ?? null,
+      scorerCanSeePeerScores: nextScorerCanSeePeerScores,
     };
   },
 });
