@@ -715,10 +715,14 @@ function RequirementsPage({ projectId }: { projectId: string }) {
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading ? "skip" : { projectId: projectId as any }) as RequirementItem[] | undefined;
   const previewImport = useMutation(api.requirements.previewRequirementImport);
   const applyImport = useMutation(api.requirements.applyRequirementImport);
+  const updateRequirementPriority = useMutation(api.requirements.updateRequirementPriority);
   const [preview, setPreview] = useState<any>(null);
   const [rows, setRows] = useState<RequirementRecord[]>([]);
   const [importIssues, setImportIssues] = useState<RequirementImportIssue[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
+  const [selectedRequirementIds, setSelectedRequirementIds] = useState<string[]>([]);
+  const [bulkPriority, setBulkPriority] = useState<9 | 3 | 1 | 0>(3);
   const [isDragging, setIsDragging] = useState(false);
 
   if (isProtectedLoading) {
@@ -734,6 +738,50 @@ function RequirementsPage({ projectId }: { projectId: string }) {
 
   const canSeePriority = Boolean(access && (access.isConsultant || access.role === "company-admin"));
   const canSeeType = Boolean(access && (access.isConsultant || access.role === "company-admin" || access.role === "company-scorer"));
+
+  const handlePriorityUpdate = async (requirementId: string, nextPriority: 9 | 3 | 1 | 0) => {
+    if (!canSeePriority) {
+      setPriorityError("Only consultants and company admins can change requirement priorities.");
+      return;
+    }
+
+    try {
+      setPriorityError(null);
+      await updateRequirementPriority({
+        projectId: projectId as any,
+        requirementId,
+        priority: nextPriority,
+      });
+    } catch (error) {
+      setPriorityError(error instanceof Error ? error.message : "We couldn’t update that requirement priority.");
+    }
+  };
+
+  const handleBulkPriorityUpdate = async () => {
+    if (!canSeePriority) {
+      setPriorityError("Only consultants and company admins can change requirement priorities.");
+      return;
+    }
+
+    if (selectedRequirementIds.length === 0) {
+      setPriorityError("Select at least one requirement before updating the priority.");
+      return;
+    }
+
+    try {
+      setPriorityError(null);
+      for (const requirementId of selectedRequirementIds) {
+        await updateRequirementPriority({
+          projectId: projectId as any,
+          requirementId,
+          priority: bulkPriority,
+        });
+      }
+      setSelectedRequirementIds([]);
+    } catch (error) {
+      setPriorityError(error instanceof Error ? error.message : "We couldn’t update the selected requirement priorities.");
+    }
+  };
 
   const buildDownloadTemplate = () => {
     const workbook = buildRequirementTemplateWorkbook();
@@ -939,31 +987,101 @@ function RequirementsPage({ projectId }: { projectId: string }) {
           </div>
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <h2 className="mb-4 text-lg font-semibold text-white">Requirement queue</h2>
-            <div className="space-y-3">
-              {requirements.map((row) => (
-                <div key={row._id} className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</span>
-                      {canSeeType ? (
-                        <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-slate-300">
-                          {row.type}
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-base font-medium text-white">{row.text}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {canSeePriority ? (
-                      <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-sky-200">
-                        {row.priority}
-                      </span>
-                    ) : null}
-                    <StatusPill label={row.status === "active" ? "Active" : "Withdrawn"} />
-                  </div>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">Requirement queue</h2>
+              {canSeePriority ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={bulkPriority}
+                    onChange={(event) => setBulkPriority(Number(event.target.value) as 9 | 3 | 1 | 0)}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+                  >
+                    <option value={9}>Priority 9</option>
+                    <option value={3}>Priority 3</option>
+                    <option value={1}>Priority 1</option>
+                    <option value={0}>Out of scope</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkPriorityUpdate()}
+                    disabled={selectedRequirementIds.length === 0}
+                    className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply to selected
+                  </button>
                 </div>
-              ))}
+              ) : null}
+            </div>
+
+            {priorityError ? (
+              <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+                {priorityError}
+              </div>
+            ) : null}
+
+            <div className="space-y-3">
+              {requirements.map((row) => {
+                const priorityLabel = row.priority === 0 ? "Out of scope" : String(row.priority ?? "-");
+                const isSelected = selectedRequirementIds.includes(row.requirementId);
+
+                return (
+                  <div key={row._id} className={`flex items-start justify-between gap-3 rounded-xl border p-4 ${row.priority === 0 ? "border-slate-700 bg-slate-950/40 opacity-75" : "border-slate-800 bg-slate-950/60"}`}>
+                    <div className="flex items-start gap-3">
+                      {canSeePriority ? (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(event) => {
+                            setSelectedRequirementIds((current) =>
+                              event.target.checked
+                                ? [...current, row.requirementId]
+                                : current.filter((id) => id !== row.requirementId),
+                            );
+                          }}
+                          className="mt-1 h-4 w-4 accent-sky-500"
+                        />
+                      ) : null}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</span>
+                          {canSeeType ? (
+                            <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-slate-300">
+                              {row.type}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-base font-medium text-white">{row.text}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {canSeePriority ? (
+                        <label className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-2 py-1.5">
+                          <span className={`text-[10px] font-medium uppercase tracking-[0.14em] ${row.priority === 0 ? "text-slate-300" : "text-sky-200"}`}>
+                            {row.priority === 0 ? "Priority" : "Priority"}
+                          </span>
+                          <select
+                            value={row.priority ?? 3}
+                            onChange={(event) => {
+                              void handlePriorityUpdate(row.requirementId, Number(event.target.value) as 9 | 3 | 1 | 0);
+                            }}
+                            className={`rounded-md border bg-slate-950 px-2 py-1 text-xs font-medium outline-none ${row.priority === 0 ? "border-slate-600 text-slate-300" : "border-sky-500/40 text-sky-100"}`}
+                          >
+                            <option value={9}>9</option>
+                            <option value={3}>3</option>
+                            <option value={1}>1</option>
+                            <option value={0}>Out of scope</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${row.priority === 0 ? "border-slate-600 bg-slate-800 text-slate-300" : "border-sky-500/30 bg-sky-500/10 text-sky-200"}`}>
+                          {priorityLabel}
+                        </span>
+                      )}
+                      <StatusPill label={row.status === "active" ? "Active" : "Withdrawn"} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

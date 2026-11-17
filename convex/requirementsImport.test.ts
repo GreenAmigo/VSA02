@@ -161,5 +161,66 @@ describe("Phase 4 requirement import preview and confirm", () => {
     });
     expect("priority" in priorityUpdated[0]).toBe(false);
   });
+
+  test("consultant and admin users can update requirement priority, scorers and vendors are rejected, and invalid values are refused", async () => {
+    const t = convexTest({ schema, modules });
+
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-500", text: "Central audit logging", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+
+    const updated = await admin.mutation(api.requirements.updateRequirementPriority, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-500",
+      priority: 0,
+    });
+
+    expect(updated.priority).toBe(0);
+    expect(updated.requirementId).toBe("REQ-500");
+
+    await expect(
+      scorer.mutation(api.requirements.updateRequirementPriority, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-500",
+        priority: 3,
+      }),
+    ).rejects.toThrow("Only consultants and company admins can change priorities");
+
+    await expect(
+      vendor.mutation(api.requirements.updateRequirementPriority, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-500",
+        priority: 1,
+      }),
+    ).rejects.toThrow("Only consultants and company admins can change priorities");
+
+    await expect(
+      admin.mutation(api.requirements.updateRequirementPriority, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-500",
+        priority: 2 as any,
+      }),
+    ).rejects.toThrow("Priority must be one of 9, 3, 1, or 0");
+
+    const vendorView = await vendor.query(api.access.listProjectRequirements, {
+      projectId: seeded.projectBId,
+    });
+
+    expect(vendorView[0]).toMatchObject({ requirementId: "REQ-500", text: "Central audit logging" });
+    expect("priority" in vendorView[0]).toBe(false);
+  });
 });
 

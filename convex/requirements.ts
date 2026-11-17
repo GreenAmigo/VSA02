@@ -285,3 +285,102 @@ export const applyRequirementImport = mutation({
     };
   },
 });
+
+export const updateRequirementPriority = mutation({
+  args: {
+    projectId: v.id("projects"),
+    requirementId: v.string(),
+    priority: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const project = await ctx.db.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const userIds = getIdentityUserIds(identity);
+    const projectMembership = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("displayName"), identity.name?.trim() ?? identity.email.trim().toLowerCase())] : []),
+      ))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    const companyMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    const consultantRecord = await ctx.db
+      .query("consultants")
+      .filter((q: any) => q.or(
+        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    const canManagePriority = Boolean(
+      consultantRecord ||
+      (projectMembership && projectMembership.role === "company-admin") ||
+      (companyMembership && companyMembership.role === "company-admin"),
+    );
+
+    if (!canManagePriority) {
+      throw new Error("Only consultants and company admins can change priorities");
+    }
+
+    const requirement = await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
+      .first();
+
+    if (!requirement) {
+      throw new Error("Requirement not found");
+    }
+
+    if (![9, 3, 1, 0].includes(args.priority)) {
+      throw new Error("Priority must be one of 9, 3, 1, or 0");
+    }
+
+    const normalizedPriority = args.priority as 9 | 3 | 1 | 0;
+    const previousPriority = requirement.priority;
+    if (previousPriority === normalizedPriority) {
+      return { _id: requirement._id, requirementId: requirement.requirementId, priority: requirement.priority, previousPriority };
+    }
+
+    await ctx.db.patch(requirement._id, { priority: normalizedPriority });
+
+    await ctx.db.insert("activityLogs", {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "update_requirement_priority",
+      details: `Requirement ${requirement.requirementId} priority changed from ${previousPriority} to ${normalizedPriority}.`,
+      companyId: project.companyId,
+      projectId: args.projectId,
+      createdAt: Date.now(),
+    });
+
+    return {
+      _id: requirement._id,
+      requirementId: requirement.requirementId,
+      priority: normalizedPriority,
+      previousPriority,
+    };
+  },
+});
