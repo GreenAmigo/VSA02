@@ -408,5 +408,126 @@ describe("Phase 5 score audit trail", () => {
       comment: "Editable again after extension",
     });
   });
+
+  test("consultants and company admins can review vendor responses, amend after lock with a reason, and reopen a vendor window", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "beta-admin@example.com" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor", name: "Northwind Labs", email: "vendor@northwind.example" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [
+        { id: "REQ-701", text: "Vendor evidence", type: "user-story", priority: 9, status: "active" },
+        { id: "REQ-702", text: "Availability", type: "nfr", priority: 3, status: "active" },
+      ],
+      confirm: true,
+    });
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() + 1000 * 60 * 60,
+    });
+
+    await vendor.mutation((api as any).scores.saveVendorAnswer, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-701",
+      score: 0,
+      comment: "Initial vendor answer",
+    });
+
+    const responseRows = await admin.query((api as any).scores.listProjectVendorResponses, {
+      projectId: seeded.projectBId,
+    });
+    const northwindRow = responseRows.find((row: { vendorName: string }) => row.vendorName === "Northwind Labs");
+    expect(northwindRow?.answeredCount).toBe(1);
+    expect(northwindRow?.status).toBe("in-progress");
+    expect(northwindRow?.vendorUserId).toBe("northwind-vendor");
+
+    await expect(
+      admin.mutation((api as any).scores.amendVendorScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-701",
+        score: 1,
+        reason: "Too early",
+      }),
+    ).rejects.toThrow("Vendor score amendments are only allowed after the deadline");
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() - 1000,
+    });
+
+    await expect(
+      admin.mutation((api as any).scores.amendVendorScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-701",
+        score: 1,
+        reason: "   ",
+      }),
+    ).rejects.toThrow("A reason is required to amend a vendor score");
+
+    await admin.mutation((api as any).scores.amendVendorScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-701",
+      score: 1,
+      comment: "Admin corrected answer",
+      reason: "Evidence reviewed with vendor",
+    });
+
+    const review = await admin.query((api as any).scores.getVendorResponseReview, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+
+    expect(review.deadlineLocked).toBe(true);
+    const amendedRow = review.rows.find((row: { requirementId: string }) => row.requirementId === "REQ-701");
+    expect(amendedRow?.score).toBe(1);
+    expect(amendedRow?.comment).toBe("Admin corrected answer");
+    expect(amendedRow?.history.length).toBe(1);
+    expect(amendedRow?.history[0].originalScore).toBe(0);
+    expect(amendedRow?.history[0].newScore).toBe(1);
+    expect(amendedRow?.history[0].originalComment).toBe("Initial vendor answer");
+    expect(amendedRow?.history[0].newComment).toBe("Admin corrected answer");
+    expect(amendedRow?.history[0].reason).toBe("Evidence reviewed with vendor");
+
+    await expect(
+      vendor.mutation((api as any).scores.saveVendorAnswer, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-701",
+        score: 0,
+      }),
+    ).rejects.toThrow("Vendor scoring is locked after the deadline");
+
+    await admin.mutation((api as any).scores.reopenVendorAnswers, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      dueAt: Date.now() + 1000 * 60 * 60,
+    });
+
+    await vendor.mutation((api as any).scores.saveVendorAnswer, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-701",
+      score: 0,
+      comment: "Vendor reopened answer",
+    });
+
+    const activity = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
+    expect(activity.some((entry: { action: string }) => entry.action === "vendor_score_amend_admin")).toBe(true);
+    expect(activity.some((entry: { action: string }) => entry.action === "vendor_answers_reopened")).toBe(true);
+  });
 });
 

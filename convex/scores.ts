@@ -14,7 +14,19 @@ const scoreAmendmentValidator = v.object({
   vendorUserId: v.string(),
   requirementId: v.string(),
   score: v.union(v.literal(0), v.literal(1)),
+  comment: v.optional(v.string()),
   reason: v.string(),
+});
+
+const vendorResponseReviewValidator = v.object({
+  projectId: v.id("projects"),
+  vendorUserId: v.string(),
+});
+
+const reopenVendorAnswersValidator = v.object({
+  projectId: v.id("projects"),
+  vendorUserId: v.string(),
+  dueAt: v.number(),
 });
 
 const vendorAnswerValidator = v.object({
@@ -51,11 +63,11 @@ function isDeadlineLocked(deadline: { status?: string; dueAt?: number } | null, 
 }
 
 function getEffectiveVendorDueAt(project: { vendorDeadline?: number | null }, deadline: { dueAt?: number } | null) {
-  if (typeof project.vendorDeadline === "number") {
-    return project.vendorDeadline;
+  if (typeof deadline?.dueAt === "number") {
+    return deadline.dueAt;
   }
 
-  return typeof deadline?.dueAt === "number" ? deadline.dueAt : null;
+  return typeof project.vendorDeadline === "number" ? project.vendorDeadline : null;
 }
 
 async function recordActivity(
@@ -131,6 +143,91 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
   }
 
   return { project, identity, member };
+}
+
+async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; actorUserId: string; actorDisplayName: string }> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    throw new Error("Not signed in");
+  }
+
+  const project: any = await ctx.db.get(projectId as any);
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  const userIds = getIdentityUserIds(identity);
+  if (userIds.length === 0) {
+    throw new Error("Only consultants and company admins can review vendor responses");
+  }
+
+  const companyAdmin = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.eq(q.field("role"), "company-admin"))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
+    .first();
+
+  const consultant = await ctx.db
+    .query("consultants")
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+    ))
+    .first();
+
+  if (!companyAdmin && !consultant) {
+    throw new Error("Only consultants and company admins can review vendor responses");
+  }
+
+  const actorUserId = identity.subject ?? identity.tokenIdentifier ?? companyAdmin?.userId ?? consultant?.userId ?? "system";
+  const actorDisplayName = identity.name?.trim() || companyAdmin?.displayName || consultant?.displayName || "Admin";
+
+  return { project, identity, actorUserId, actorDisplayName };
+}
+
+async function resolveVendorReviewContext(ctx: any, project: any, vendorUserId: string) {
+  const trimmedVendorUserId = vendorUserId.trim();
+  if (!trimmedVendorUserId) {
+    throw new Error("Select a vendor before opening vendor responses");
+  }
+
+  const companyVendorMembership = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.eq(q.field("role"), "vendor"))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.eq(q.field("userId"), trimmedVendorUserId))
+    .first();
+
+  if (!companyVendorMembership?.vendorId) {
+    throw new Error("Vendor not assigned to this workspace");
+  }
+
+  const projectVendor = await ctx.db
+    .query("projectVendors")
+    .filter((q: any) => q.eq(q.field("projectId"), project._id))
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.eq(q.field("vendorId"), companyVendorMembership.vendorId))
+    .first();
+
+  if (!projectVendor) {
+    throw new Error("Vendor not assigned to this project");
+  }
+
+  const vendorOrg = await ctx.db.get(projectVendor.vendorId);
+  return {
+    vendorUserId: trimmedVendorUserId,
+    vendorId: projectVendor.vendorId,
+    vendorName: vendorOrg?.name ?? companyVendorMembership.displayName ?? "Vendor",
+    vendorDisplayName: companyVendorMembership.displayName ?? vendorOrg?.name ?? "Vendor",
+  };
 }
 
 export const listScoreHistory = query({
@@ -455,6 +552,156 @@ export const getVendorScoringStatus = query({
   },
 });
 
+export const listProjectVendorResponses = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+
+    const allRequirements = await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .collect();
+    const totalRequirements = allRequirements.filter((row) => row.status === "active" && row.priority !== 0).length;
+
+    const assignments = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .collect();
+
+    const rows = await Promise.all(assignments.map(async (assignment) => {
+      const vendorOrg = await ctx.db.get(assignment.vendorId);
+      const contacts = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+        .filter((q: any) => q.eq(q.field("role"), "vendor"))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .filter((q: any) => q.eq(q.field("vendorId"), assignment.vendorId))
+        .collect();
+
+      const sortedContacts = contacts.sort((a, b) => a.createdAt - b.createdAt);
+      const selectedContact = sortedContacts[0] ?? null;
+      const vendorUserIds = sortedContacts.map((contact) => contact.userId);
+      const scoresByVendor = await Promise.all(vendorUserIds.map((vendorUserId) =>
+        ctx.db
+          .query("scores")
+          .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorUserId))
+          .collect(),
+      ));
+      const answeredRequirementIds = new Set(scoresByVendor.flat().map((scoreRow) => scoreRow.requirementId));
+
+      const deadlines = await Promise.all(vendorUserIds.map((vendorUserId) =>
+        ctx.db
+          .query("projectDeadlines")
+          .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", "vendor").eq("targetUserId", vendorUserId))
+          .first(),
+      ));
+      const submittedRows = deadlines.filter((deadline) => deadline?.status === "submitted" && typeof deadline.submittedAt === "number");
+      const submittedAt = submittedRows.length > 0 ? Math.max(...submittedRows.map((deadline) => deadline!.submittedAt as number)) : null;
+      const latestDueAt = deadlines
+        .map((deadline) => deadline?.dueAt)
+        .filter((value): value is number => typeof value === "number")
+        .sort((a, b) => b - a)[0];
+      const deadlineAt = typeof latestDueAt === "number" ? latestDueAt : (project.vendorDeadline ?? null);
+      const answeredCount = answeredRequirementIds.size;
+      const status = submittedAt
+        ? "submitted"
+        : answeredCount > 0
+          ? "in-progress"
+          : "not-started";
+
+      return {
+        vendorId: assignment.vendorId,
+        vendorName: vendorOrg?.name ?? "Vendor",
+        vendorUserId: selectedContact?.userId ?? null,
+        vendorContactName: selectedContact?.displayName ?? null,
+        answeredCount,
+        totalRequirements,
+        status,
+        submittedAt,
+        deadlineAt,
+      };
+    }));
+
+    return rows.sort((a, b) => a.vendorName.localeCompare(b.vendorName));
+  },
+});
+
+export const getVendorResponseReview = query({
+  args: vendorResponseReviewValidator,
+  handler: async (ctx, args) => {
+    const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+    const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+
+    const requirements = await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .collect();
+    const requirementRows = requirements
+      .filter((row) => row.status === "active" && row.priority !== 0)
+      .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
+
+    const scoreRows = await ctx.db
+      .query("scores")
+      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
+      .collect();
+    const scoreByRequirementId = new Map(scoreRows.map((row) => [row.requirementId, row]));
+
+    const amendments = await ctx.db
+      .query("scoreAmendments")
+      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
+      .collect();
+
+    const amendmentsByRequirementId = new Map<string, Array<any>>();
+    for (const amendment of amendments) {
+      const current = amendmentsByRequirementId.get(amendment.requirementId) ?? [];
+      current.push(amendment);
+      amendmentsByRequirementId.set(amendment.requirementId, current);
+    }
+
+    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, vendorContext.vendorUserId);
+    const deadlineAt = getEffectiveVendorDueAt(project, deadline);
+    const deadlineLocked = isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null);
+
+    const rows = requirementRows.map((requirement) => {
+      const score = scoreByRequirementId.get(requirement.requirementId);
+      const history = (amendmentsByRequirementId.get(requirement.requirementId) ?? [])
+        .sort((a, b) => b.amendedAt - a.amendedAt)
+        .map((entry) => ({
+          originalScore: entry.originalScore,
+          newScore: entry.newScore,
+          originalComment: entry.originalComment ?? "",
+          newComment: entry.newComment ?? "",
+          amendedByDisplayName: entry.amendedByDisplayName,
+          amendedAt: entry.amendedAt,
+          reason: entry.reason,
+        }));
+
+      return {
+        requirementId: requirement.requirementId,
+        text: requirement.text,
+        type: requirement.type,
+        priority: requirement.priority,
+        score: score?.score ?? null,
+        comment: score?.comment ?? "",
+        amendedByDisplayName: score?.amendedByDisplayName ?? null,
+        amendedAt: score?.amendedAt ?? null,
+        history,
+      };
+    });
+
+    return {
+      projectId: args.projectId,
+      vendorUserId: vendorContext.vendorUserId,
+      vendorName: vendorContext.vendorName,
+      vendorContactName: vendorContext.vendorDisplayName,
+      deadlineAt,
+      deadlineLocked,
+      rows,
+    };
+  },
+});
+
 export const submitScore = mutation({
   args: scoreRowValidator,
   handler: async (ctx, args) => {
@@ -567,55 +814,8 @@ export const listScoreAmendments = query({
 export const amendVendorScore = mutation({
   args: scoreAmendmentValidator,
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
-
-    const project: any = await ctx.db.get(args.projectId as any);
-    if (!project) {
-      throw new Error("Project not found");
-    }
-
-    const userIds = [identity.subject, identity.tokenIdentifier].filter(Boolean) as string[];
-    const projectMember = await ctx.db
-      .query("projectMembers")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.or(
-        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    const companyMember = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.or(
-        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    const consultant = await ctx.db
-      .query("consultants")
-      .filter((q: any) => q.or(
-        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    const isAdmin = Boolean(
-      consultant ||
-      (projectMember && projectMember.role === "company-admin") ||
-      (companyMember && companyMember.role === "company-admin"),
-    );
-
-    if (!isAdmin) {
-      throw new Error("Only consultants and company admins can amend vendor scores");
-    }
+    const { project, identity, actorUserId, actorDisplayName } = await assertVendorReviewAccess(ctx, args.projectId);
+    await resolveVendorReviewContext(ctx, project, args.vendorUserId);
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
@@ -649,7 +849,7 @@ export const amendVendorScore = mutation({
       throw new Error("A reason is required to amend a vendor score");
     }
 
-    const amendedByDisplayName = identity.name?.trim() || companyMember?.displayName || projectMember?.displayName || "Admin";
+    const updatedComment = args.comment?.trim() ?? "";
     const amendmentRecord = {
       companyId: project.companyId,
       projectId: args.projectId,
@@ -657,8 +857,10 @@ export const amendVendorScore = mutation({
       requirementId: args.requirementId,
       originalScore: existing.score,
       newScore: args.score,
-      amendedByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
-      amendedByDisplayName,
+      originalComment: existing.comment ?? "",
+      newComment: updatedComment,
+      amendedByUserId: actorUserId,
+      amendedByDisplayName: actorDisplayName,
       reason,
       amendedAt: Date.now(),
     };
@@ -666,10 +868,20 @@ export const amendVendorScore = mutation({
     await ctx.db.insert("scoreAmendments", amendmentRecord);
     await ctx.db.patch(existing._id, {
       score: args.score,
+      comment: updatedComment || undefined,
       amendedByUserId: amendmentRecord.amendedByUserId,
       amendedByDisplayName: amendmentRecord.amendedByDisplayName,
       amendedAt: amendmentRecord.amendedAt,
       amendmentReason: amendmentRecord.reason,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "vendor_score_amend_admin",
+      details: `Amended ${args.requirementId} for vendor ${args.vendorUserId}: ${existing.score} -> ${args.score}. Reason: ${reason}`,
+      companyId: project.companyId,
+      projectId: args.projectId,
     });
 
     return {
@@ -679,9 +891,62 @@ export const amendVendorScore = mutation({
       requirementId: args.requirementId,
       originalScore: existing.score,
       newScore: args.score,
-      amendedByDisplayName,
+      originalComment: existing.comment ?? "",
+      newComment: updatedComment,
+      amendedByDisplayName: actorDisplayName,
       amendedAt: amendmentRecord.amendedAt,
       reason,
+    };
+  },
+});
+
+export const reopenVendorAnswers = mutation({
+  args: reopenVendorAnswersValidator,
+  handler: async (ctx, args) => {
+    const { project, identity, actorUserId } = await assertVendorReviewAccess(ctx, args.projectId);
+    await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+
+    if (!Number.isFinite(args.dueAt) || args.dueAt <= Date.now()) {
+      throw new Error("Choose a future date to reopen this vendor response window");
+    }
+
+    const existingDeadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+    const now = Date.now();
+
+    if (existingDeadline) {
+      await ctx.db.patch(existingDeadline._id, {
+        dueAt: args.dueAt,
+        status: "in-progress",
+        submittedAt: undefined,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("projectDeadlines", {
+        companyId: project.companyId,
+        projectId: args.projectId,
+        targetType: "vendor",
+        targetUserId: args.vendorUserId,
+        dueAt: args.dueAt,
+        status: "in-progress",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "vendor_answers_reopened",
+      details: `Reopened vendor responses for ${args.vendorUserId} until ${new Date(args.dueAt).toISOString()}.`,
+      companyId: project.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      vendorUserId: args.vendorUserId,
+      deadlineAt: args.dueAt,
+      status: "in-progress" as const,
     };
   },
 });

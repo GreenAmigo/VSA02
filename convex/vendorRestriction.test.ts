@@ -105,5 +105,70 @@ describe("Vendor restrictions", () => {
     await expect(vendor.mutation(api.admin.addProjectVendor, { companyId: seeded.companyBId, projectId: seeded.projectBId, displayName: "Blocked vendor" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     await expect(vendor.mutation(api.admin.addWorkspaceDepartmentMember, { companyId: seeded.companyBId, departmentId: department.departmentId, userId: "blocked-user" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
   });
+
+  test("vendors and scorers are blocked from consultant/admin vendor-response review APIs", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-901", text: "Restricted endpoint test", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await vendor.mutation((api as any).scores.saveVendorAnswer, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-901",
+      score: 1,
+      comment: "Vendor answer",
+    });
+
+    await expect(
+      vendor.query((api as any).scores.listProjectVendorResponses, { projectId: seeded.projectBId }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+    await expect(
+      scorer.query((api as any).scores.listProjectVendorResponses, { projectId: seeded.projectBId }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+
+    await expect(
+      vendor.query((api as any).scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+    await expect(
+      scorer.query((api as any).scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() - 1000,
+    });
+
+    await expect(
+      vendor.mutation((api as any).scores.amendVendorScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-901",
+        score: 0,
+        reason: "Blocked",
+      }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+    await expect(
+      scorer.mutation((api as any).scores.reopenVendorAnswers, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        dueAt: Date.now() + 1000 * 60 * 60,
+      }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+  });
 });
 

@@ -169,6 +169,8 @@ export default defineSchema({
     requirementId: v.string(),
     originalScore: v.union(v.literal(0), v.literal(1)),
     newScore: v.union(v.literal(0), v.literal(1)),
+    originalComment: v.optional(v.string()),
+    newComment: v.optional(v.string()),
     amendedByUserId: v.string(),
     amendedByDisplayName: v.string(),
     reason: v.string(),

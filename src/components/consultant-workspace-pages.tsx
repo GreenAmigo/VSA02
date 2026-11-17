@@ -272,6 +272,370 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
   );
 }
 
+function VendorResponsesPanel({ projectId }: { projectId: string }) {
+  const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
+    | Array<{
+      vendorId: string;
+      vendorName: string;
+      vendorUserId: string | null;
+      vendorContactName: string | null;
+      status: "not-started" | "in-progress" | "submitted";
+      answeredCount: number;
+      totalRequirements: number;
+      submittedAt: number | null;
+      deadlineAt: number | null;
+    }>
+    | undefined;
+
+  const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
+  const [editingRequirementId, setEditingRequirementId] = useState("");
+  const [amendDraft, setAmendDraft] = useState<{ score: 0 | 1; comment: string; reason: string }>({ score: 1, comment: "", reason: "" });
+  const [reopenDate, setReopenDate] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!vendorResponses || vendorResponses.length === 0) {
+      setSelectedVendorUserId("");
+      return;
+    }
+
+    const hasSelectedVendor = vendorResponses.some((row) => row.vendorUserId === selectedVendorUserId);
+    if (hasSelectedVendor) {
+      return;
+    }
+
+    const firstWithContact = vendorResponses.find((row) => Boolean(row.vendorUserId));
+    setSelectedVendorUserId(firstWithContact?.vendorUserId ?? "");
+  }, [vendorResponses, selectedVendorUserId]);
+
+  const selectedReview = useQuery(
+    (api as any).scores.getVendorResponseReview,
+    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+  ) as
+    | {
+      projectId: string;
+      vendorUserId: string;
+      vendorName: string;
+      vendorContactName: string;
+      deadlineAt: number | null;
+      deadlineLocked: boolean;
+      rows: Array<{
+        requirementId: string;
+        text: string;
+        type: "user-story" | "nfr";
+        priority: 9 | 3 | 1 | 0;
+        score: 0 | 1 | null;
+        comment: string;
+        amendedByDisplayName: string | null;
+        amendedAt: number | null;
+        history: Array<{
+          originalScore: 0 | 1;
+          newScore: 0 | 1;
+          originalComment: string;
+          newComment: string;
+          amendedByDisplayName: string;
+          amendedAt: number;
+          reason: string;
+        }>;
+      }>;
+    }
+    | undefined;
+
+  const amendVendorScore = useMutation((api as any).scores.amendVendorScore);
+  const reopenVendorAnswers = useMutation((api as any).scores.reopenVendorAnswers);
+
+  const beginAmend = (row: { requirementId: string; score: 0 | 1 | null; comment: string }) => {
+    if (row.score === null) {
+      setNotice({ kind: "error", message: "Only answered rows can be amended." });
+      return;
+    }
+
+    setNotice(null);
+    setEditingRequirementId(row.requirementId);
+    setAmendDraft({
+      score: row.score,
+      comment: row.comment ?? "",
+      reason: "",
+    });
+  };
+
+  const saveAmendment = async (requirementId: string) => {
+    if (!selectedVendorUserId || !selectedReview) {
+      return;
+    }
+
+    const trimmedReason = amendDraft.reason.trim();
+    if (!trimmedReason) {
+      setNotice({ kind: "error", message: "A reason is required before saving an amendment." });
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setNotice(null);
+      await amendVendorScore({
+        projectId: projectId as any,
+        vendorUserId: selectedVendorUserId,
+        requirementId,
+        score: amendDraft.score,
+        comment: amendDraft.comment.trim() || undefined,
+        reason: trimmedReason,
+      });
+      setNotice({ kind: "success", message: "Vendor answer amended and saved." });
+      setEditingRequirementId("");
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to amend this answer." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    if (!selectedVendorUserId) {
+      setNotice({ kind: "error", message: "Select a vendor contact before reopening answers." });
+      return;
+    }
+
+    const dueAt = fromDateInputValue(reopenDate);
+    if (dueAt === null) {
+      setNotice({ kind: "error", message: "Choose a reopening date." });
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setNotice(null);
+      await reopenVendorAnswers({
+        projectId: projectId as any,
+        vendorUserId: selectedVendorUserId,
+        dueAt,
+      });
+      setNotice({ kind: "success", message: "Vendor response window reopened for this contact." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to reopen vendor responses." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-white">Vendor responses</h3>
+      </div>
+
+      {vendorResponses === undefined ? (
+        <p className="text-sm text-slate-400">Loading vendor responses...</p>
+      ) : vendorResponses.length === 0 ? (
+        <p className="text-sm text-slate-400">No vendors are assigned to this project yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {vendorResponses.map((vendor) => (
+            <div key={vendor.vendorId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-white">{vendor.vendorName}</p>
+                  <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName || "No active contact linked"}</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <StatusPill label={vendor.status === "not-started" ? "Not started" : vendor.status === "in-progress" ? "In progress" : "Submitted"} className="border-slate-700 bg-slate-900 text-slate-100" />
+                  <StatusPill label={`${vendor.answeredCount} / ${vendor.totalRequirements} answered`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+                  {vendor.submittedAt ? <StatusPill label={`Submitted ${new Date(vendor.submittedAt).toLocaleDateString()}`} className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200" /> : null}
+                  {vendor.deadlineAt ? <StatusPill label={`Due ${new Date(vendor.deadlineAt).toLocaleDateString()}`} className="border-amber-500/40 bg-amber-500/10 text-amber-200" /> : null}
+                </div>
+              </div>
+
+              <div className="mt-3">
+                {vendor.vendorUserId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVendorUserId(vendor.vendorUserId as string);
+                      setEditingRequirementId("");
+                      setNotice(null);
+                      setReopenDate("");
+                    }}
+                    className={`rounded-xl border px-3 py-2 text-sm ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/60 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"}`}
+                  >
+                    View answers
+                  </button>
+                ) : (
+                  <p className="text-xs text-slate-400">Add an active vendor contact to view and amend answers.</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {notice ? (
+        <div className={`mt-4 rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+          {notice.message}
+        </div>
+      ) : null}
+
+      {selectedVendorUserId ? (
+        <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          {selectedReview === undefined ? (
+            <p className="text-sm text-slate-400">Loading selected vendor answers...</p>
+          ) : (
+            <>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-base font-semibold text-white">{selectedReview.vendorName}</h4>
+                  <p className="text-xs text-slate-400">Contact: {selectedReview.vendorContactName}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusPill label={selectedReview.deadlineLocked ? "Deadline locked" : "Read-only until deadline"} className={selectedReview.deadlineLocked ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-slate-700 bg-slate-900 text-slate-200"} />
+                  {selectedReview.deadlineAt ? <StatusPill label={`Current due ${new Date(selectedReview.deadlineAt).toLocaleDateString()}`} className="border-amber-500/40 bg-amber-500/10 text-amber-200" /> : null}
+                </div>
+              </div>
+
+              <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                <label className="text-sm text-slate-300">
+                  <span className="mb-1 block text-xs uppercase tracking-[0.14em] text-slate-400">Reopen for this vendor</span>
+                  <input
+                    type="date"
+                    value={reopenDate}
+                    onChange={(event) => setReopenDate(event.target.value)}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleReopen()}
+                  disabled={busy}
+                  className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
+                >
+                  Reopen for this vendor
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {selectedReview.rows.map((row) => {
+                  const isEditing = editingRequirementId === row.requirementId;
+
+                  return (
+                    <div key={row.requirementId} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                          <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                          <p className="mt-1 text-xs text-slate-400">Type: {row.type} | Priority: {row.priority}</p>
+                        </div>
+                        <div className="text-right text-xs text-slate-300">
+                          <p>Vendor score: {row.score === null ? "-" : row.score}</p>
+                          <p className="mt-1 max-w-xs truncate" title={row.comment || ""}>Comment: {row.comment || "(none)"}</p>
+                          {row.amendedByDisplayName && row.amendedAt ? (
+                            <p className="mt-1 text-slate-400">Amended by {row.amendedByDisplayName} on {new Date(row.amendedAt).toLocaleString()}</p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {selectedReview.deadlineLocked ? (
+                        <div className="mt-3">
+                          {row.score === null ? (
+                            <p className="text-xs text-slate-400">No vendor answer to amend yet.</p>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => beginAmend(row)}
+                                className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 hover:border-amber-400"
+                              >
+                                Amend
+                              </button>
+
+                              {isEditing ? (
+                                <div className="mt-3 grid gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 md:grid-cols-2">
+                                  <label className="text-sm text-slate-300">
+                                    <span className="mb-1 block">New score</span>
+                                    <select
+                                      value={amendDraft.score}
+                                      onChange={(event) => setAmendDraft((current) => ({ ...current, score: Number(event.target.value) as 0 | 1 }))}
+                                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                                    >
+                                      <option value={0}>0</option>
+                                      <option value={1}>1</option>
+                                    </select>
+                                  </label>
+
+                                  <label className="text-sm text-slate-300 md:col-span-2">
+                                    <span className="mb-1 block">New comment</span>
+                                    <textarea
+                                      value={amendDraft.comment}
+                                      onChange={(event) => setAmendDraft((current) => ({ ...current, comment: event.target.value }))}
+                                      rows={2}
+                                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                                    />
+                                  </label>
+
+                                  <label className="text-sm text-slate-300 md:col-span-2">
+                                    <span className="mb-1 block">Reason for amendment</span>
+                                    <textarea
+                                      value={amendDraft.reason}
+                                      onChange={(event) => setAmendDraft((current) => ({ ...current, reason: event.target.value }))}
+                                      rows={2}
+                                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                                    />
+                                  </label>
+
+                                  <div className="md:col-span-2 flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => void saveAmendment(row.requirementId)}
+                                      disabled={busy}
+                                      className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                                    >
+                                      Save amendment
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingRequirementId("")}
+                                      disabled={busy}
+                                      className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-60"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-xs text-slate-400">Amendments unlock only after the vendor deadline.</p>
+                      )}
+
+                      {row.history.length > 0 ? (
+                        <details className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                          <summary className="cursor-pointer text-xs uppercase tracking-[0.14em] text-slate-300">Amendment history ({row.history.length})</summary>
+                          <div className="mt-3 space-y-2 text-xs text-slate-300">
+                            {row.history.map((entry, index) => (
+                              <div key={`${row.requirementId}-${index}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                                <p>Score: {entry.originalScore}{" -> "}{entry.newScore}</p>
+                                <p>Comment: {entry.originalComment || "(none)"}{" -> "}{entry.newComment || "(none)"}</p>
+                                <p>By: {entry.amendedByDisplayName} on {new Date(entry.amendedAt).toLocaleString()}</p>
+                                <p>Reason: {entry.reason}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function LongValue({ value, wrap = false, className = "" }: { value: string; wrap?: boolean; className?: string }) {
   const wrapClass = wrap ? "break-all" : "truncate";
   return (
@@ -1733,6 +2097,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       </section>
 
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
+
+      {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
 
       {isVendorView ? (
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">

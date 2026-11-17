@@ -235,13 +235,69 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     useQueryMock.mockImplementationOnce(() => [{ id: "person-1", userId: "beta-admin", name: "Beta Admin", email: "admin@beta.example", role: "company-admin", status: "active", source: "member" }]);
     useQueryMock.mockImplementationOnce(() => [{ departmentId: "dep-1", name: "Operations", members: [] }]);
     useQueryMock.mockImplementationOnce(() => [{ vendorId: "ven-1", name: "Northwind Labs", status: "active", contactEmail: "vendor@northwind.example", contactCount: 1 }]);
+    useQueryMock.mockImplementationOnce(() => [{
+      vendorId: "ven-1",
+      vendorName: "Northwind Labs",
+      vendorUserId: "northwind-vendor",
+      vendorContactName: "Northwind Contact",
+      status: "submitted",
+      answeredCount: 12,
+      totalRequirements: 16,
+      submittedAt: Date.now(),
+      deadlineAt: Date.now() - 1,
+    }]);
+    useQueryMock.mockImplementationOnce(() => undefined);
 
     const html = renderToStaticMarkup(
       <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
     );
 
     expect(html).toContain("Edit project");
+    expect(html).toContain("Vendor responses");
     expect(html).toContain("Assign scorers");
+  });
+
+  test("company admin project detail also shows Vendor responses section", () => {
+    useQueryMock.mockReset();
+    useQueryMock.mockImplementationOnce(() => ({
+      email: "admin@beta.example",
+      tokenIdentifier: "beta-admin",
+      role: "company-admin",
+      isConsultant: false,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      _id: "project-1",
+      companyId: "company-1",
+      name: "Supply Chain",
+      description: "Admin view",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+      scorerDeadline: Date.now() + 7200_000,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "member-1", projectId: "project-1", userId: "beta-admin", role: "company-admin", displayName: "Beta Admin", isActive: true }]);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "req-1", requirementId: "REQ-1", text: "Requirement", status: "active" }]);
+    useQueryMock.mockImplementationOnce(() => [{ id: "person-1", userId: "beta-admin", name: "Beta Admin", email: "admin@beta.example", role: "company-admin", status: "active", source: "member" }]);
+    useQueryMock.mockImplementationOnce(() => [{ departmentId: "dep-1", name: "Operations", members: [] }]);
+    useQueryMock.mockImplementationOnce(() => [{ vendorId: "ven-1", name: "Northwind Labs", status: "active", contactEmail: "vendor@northwind.example", contactCount: 1 }]);
+    useQueryMock.mockImplementationOnce(() => [{
+      vendorId: "ven-1",
+      vendorName: "Northwind Labs",
+      vendorUserId: "northwind-vendor",
+      vendorContactName: "Northwind Contact",
+      status: "in-progress",
+      answeredCount: 2,
+      totalRequirements: 16,
+      submittedAt: null,
+      deadlineAt: Date.now() + 3600_000,
+    }]);
+    useQueryMock.mockImplementationOnce(() => undefined);
+
+    const html = renderToStaticMarkup(
+      <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
+    );
+
+    expect(html).toContain("Vendor responses");
   });
 
   test("project detail renders for loading, consultant, company admin, scorer, and vendor without errors", () => {
