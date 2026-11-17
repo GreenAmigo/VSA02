@@ -95,6 +95,7 @@ export default defineSchema({
     createdBy: v.string(),
     createdAt: v.number(),
     status: v.union(v.literal("draft"), v.literal("active")),
+    isArchived: v.optional(v.boolean()),
     isTestData: v.optional(v.boolean()),
   }).index("by_company", ["companyId"]),
 

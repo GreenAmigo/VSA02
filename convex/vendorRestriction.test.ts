@@ -97,6 +97,9 @@ describe("Vendor restrictions", () => {
 
     await expect(vendor.query(api.admin.listCompanyMembers, { companyId: seeded.companyBId })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     await expect(vendor.mutation(api.admin.createProject, { companyId: seeded.companyBId, name: "Blocked project" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+    await expect(vendor.mutation((api as any).admin.updateProject, { companyId: seeded.companyBId, projectId: seeded.projectBId, name: "Blocked rename" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+    await expect(vendor.mutation((api as any).admin.archiveProject, { companyId: seeded.companyBId, projectId: seeded.projectBId })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+    await expect(vendor.mutation((api as any).admin.restoreProject, { companyId: seeded.companyBId, projectId: seeded.projectBId })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     await expect(vendor.mutation(api.admin.inviteWorkspacePerson, { companyId: seeded.companyBId, name: "Blocked person", email: "blocked@example.com", role: "company-scorer" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     await expect(vendor.mutation(api.admin.addProjectScorer, { companyId: seeded.companyBId, projectId: seeded.projectBId, displayName: "Blocked scorer", email: "blocked@example.com", role: "individual" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
     await expect(vendor.mutation(api.admin.addProjectVendor, { companyId: seeded.companyBId, projectId: seeded.projectBId, displayName: "Blocked vendor" })).rejects.toThrow("Only company admins or VS Consultants can manage this company");

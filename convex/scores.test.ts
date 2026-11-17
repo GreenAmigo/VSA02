@@ -346,5 +346,67 @@ describe("Phase 5 score audit trail", () => {
       }),
     ).rejects.toThrow("This requirement is not active for scoring");
   });
+
+  test("editing project vendor deadline immediately locks and unlocks vendor answers", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor", name: "Northwind Labs" });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-601", text: "Lock test", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() + 1000 * 60 * 30,
+    });
+
+    await vendor.mutation((api as any).scores.saveVendorAnswer, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-601",
+      score: 1,
+      comment: "Editable before lock",
+    });
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() - 1000,
+    });
+
+    await expect(
+      vendor.mutation((api as any).scores.saveVendorAnswer, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-601",
+        score: 0,
+      }),
+    ).rejects.toThrow("Vendor scoring is locked after the deadline");
+
+    await admin.mutation((api as any).admin.updateProject, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      name: "Supply Chain",
+      vendorDeadline: Date.now() + 1000 * 60 * 60,
+    });
+
+    await vendor.mutation((api as any).scores.saveVendorAnswer, {
+      projectId: seeded.projectBId,
+      requirementId: "REQ-601",
+      score: 0,
+      comment: "Editable again after extension",
+    });
+  });
 });
 

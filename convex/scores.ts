@@ -50,6 +50,14 @@ function isDeadlineLocked(deadline: { status?: string; dueAt?: number } | null, 
   return typeof deadline.dueAt === "number" && deadline.dueAt <= now;
 }
 
+function getEffectiveVendorDueAt(project: { vendorDeadline?: number | null }, deadline: { dueAt?: number } | null) {
+  if (typeof project.vendorDeadline === "number") {
+    return project.vendorDeadline;
+  }
+
+  return typeof deadline?.dueAt === "number" ? deadline.dueAt : null;
+}
+
 async function recordActivity(
   ctx: any,
   payload: {
@@ -199,7 +207,8 @@ export const listVendorAnswerRequirements = query({
     const scoreByRequirementId = new Map(vendorScores.map((row) => [row.requirementId, row]));
     const answeredCount = visibleRequirements.filter((row) => scoreByRequirementId.has(row.requirementId)).length;
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
-    const deadlineLocked = isDeadlineLocked(deadline);
+    const deadlineAt = getEffectiveVendorDueAt(project, deadline);
+    const deadlineLocked = isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null);
 
     let status: "not-started" | "in-progress" | "submitted" = "not-started";
     if (deadline?.status === "submitted") {
@@ -216,7 +225,7 @@ export const listVendorAnswerRequirements = query({
       projectDescription: project.description ?? null,
       vendorOrganizationName: vendorOrganization?.name ?? companyMembership?.displayName ?? "Vendor organisation",
       vendorUserId: member.userId,
-      deadlineAt: deadline?.dueAt ?? project.vendorDeadline ?? null,
+      deadlineAt,
       deadlineLocked,
       submittedAt: deadline?.submittedAt ?? null,
       status,
@@ -247,7 +256,8 @@ export const saveVendorAnswer = mutation({
     }
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
-    if (isDeadlineLocked(deadline)) {
+    const effectiveDueAt = getEffectiveVendorDueAt(project, deadline);
+    if (isDeadlineLocked(effectiveDueAt ? { dueAt: effectiveDueAt } : null)) {
       throw new Error("Vendor scoring is locked after the deadline");
     }
 
@@ -348,7 +358,8 @@ export const submitVendorAnswers = mutation({
     }
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
-    if (isDeadlineLocked(deadline)) {
+    const effectiveDueAt = getEffectiveVendorDueAt(project, deadline);
+    if (isDeadlineLocked(effectiveDueAt ? { dueAt: effectiveDueAt } : null)) {
       throw new Error("Vendor scoring is locked after the deadline");
     }
 
@@ -422,6 +433,7 @@ export const getVendorScoringStatus = query({
     const answeredIds = new Set(answeredRows.map((row) => row.requirementId));
     const answeredCount = eligibleRequirements.filter((row) => answeredIds.has(row.requirementId)).length;
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+    const deadlineAt = getEffectiveVendorDueAt(project, deadline);
     const hasSubmitted = deadline?.status === "submitted";
 
     let status: "not-started" | "in-progress" | "submitted" = "not-started";
@@ -438,7 +450,7 @@ export const getVendorScoringStatus = query({
       answeredCount,
       totalRequirements: eligibleRequirements.length,
       submittedAt: deadline?.submittedAt ?? null,
-      deadlineAt: deadline?.dueAt ?? null,
+      deadlineAt,
     };
   },
 });
@@ -454,7 +466,8 @@ export const submitScore = mutation({
       }
 
       const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
-      if (isDeadlineLocked(deadline)) {
+      const deadlineAt = getEffectiveVendorDueAt(project, deadline);
+      if (isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null)) {
         throw new Error("Vendor scoring is locked after the deadline");
       }
     }
@@ -605,7 +618,8 @@ export const amendVendorScore = mutation({
     }
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
-    if (!isDeadlineLocked(deadline)) {
+    const deadlineAt = getEffectiveVendorDueAt(project, deadline);
+    if (!isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null)) {
       throw new Error("Vendor score amendments are only allowed after the deadline");
     }
 

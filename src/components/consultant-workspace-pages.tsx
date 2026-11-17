@@ -35,6 +35,25 @@ function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-sla
   );
 }
 
+function toDateInputValue(timestamp?: number | null) {
+  if (!timestamp) {
+    return "";
+  }
+
+  const date = new Date(timestamp);
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function fromDateInputValue(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  return new Date(value).getTime();
+}
+
 function LongValue({ value, wrap = false, className = "" }: { value: string; wrap?: boolean; className?: string }) {
   const wrapClass = wrap ? "break-all" : "truncate";
   return (
@@ -1330,7 +1349,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const isVendorView = Boolean(access?.isVendor || access?.role === "vendor");
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
-    | { _id: string; companyId: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }
+    | { _id: string; companyId: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; isArchived?: boolean; createdAt?: number }
     | undefined;
   const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
@@ -1364,10 +1383,21 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     | undefined;
   const addProjectScorer = useMutation(api.admin.addProjectScorer);
   const addProjectVendor = useMutation(api.admin.addProjectVendor);
+  const updateProject = useMutation((api as any).admin.updateProject);
+  const archiveProject = useMutation((api as any).admin.archiveProject);
+  const restoreProject = useMutation((api as any).admin.restoreProject);
   const [scorerDraft, setScorerDraft] = useState({ selectedUserId: "", role: "individual" as "individual" | "department", departmentName: "" });
   const [vendorDraft, setVendorDraft] = useState({ selectedVendorId: "" });
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
+  const [projectNotice, setProjectNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [isEditingProject, setIsEditingProject] = useState(false);
+  const [projectDraft, setProjectDraft] = useState({
+    name: "",
+    description: "",
+    vendorDeadline: "",
+    scorerDeadline: "",
+  });
 
   if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -1382,6 +1412,20 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const assignableVendors = workspaceVendorsList.filter((vendor) => vendor.status === "active");
   const selectedScorer = assignableScorers.find((person) => person.id === scorerDraft.selectedUserId) ?? null;
   const selectedVendor = assignableVendors.find((vendor) => vendor.vendorId === vendorDraft.selectedVendorId) ?? null;
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    setProjectDraft({
+      name: project.name,
+      description: project.description ?? "",
+      vendorDeadline: toDateInputValue(project.vendorDeadline),
+      scorerDeadline: toDateInputValue(project.scorerDeadline),
+    });
+  }, [project?.name, project?.description, project?.vendorDeadline, project?.scorerDeadline]);
+
   if (!company || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
   }
@@ -1448,6 +1492,71 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     }
   };
 
+  const handleSaveProject = async () => {
+    const trimmedName = projectDraft.name.trim();
+    const vendorDeadline = fromDateInputValue(projectDraft.vendorDeadline);
+    const scorerDeadline = fromDateInputValue(projectDraft.scorerDeadline);
+
+    if (!trimmedName) {
+      setProjectNotice({ kind: "error", message: "Project name is required." });
+      return;
+    }
+
+    if (vendorDeadline !== null && scorerDeadline !== null && scorerDeadline < vendorDeadline) {
+      setProjectNotice({ kind: "error", message: "Scorer deadline can't be before the vendor deadline." });
+      return;
+    }
+
+    setBusy(true);
+    setProjectNotice(null);
+    try {
+      await updateProject({
+        companyId: companyId as any,
+        projectId: projectId as any,
+        name: trimmedName,
+        description: projectDraft.description.trim() || undefined,
+        vendorDeadline,
+        scorerDeadline,
+      });
+      setProjectNotice({ kind: "success", message: "Project details updated." });
+      setIsEditingProject(false);
+    } catch (error) {
+      setProjectNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to update this project." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleArchiveProject = async () => {
+    if (!window.confirm("Archive this project? You can restore it later.")) {
+      return;
+    }
+
+    setBusy(true);
+    setProjectNotice(null);
+    try {
+      await archiveProject({ companyId: companyId as any, projectId: projectId as any });
+      setProjectNotice({ kind: "success", message: "Project archived." });
+    } catch (error) {
+      setProjectNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to archive this project." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestoreProject = async () => {
+    setBusy(true);
+    setProjectNotice(null);
+    try {
+      await restoreProject({ companyId: companyId as any, projectId: projectId as any });
+      setProjectNotice({ kind: "success", message: "Project restored." });
+    } catch (error) {
+      setProjectNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to restore this project." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <WorkspaceShell
       workspace={{
@@ -1482,6 +1591,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+            {project.isArchived ? <StatusPill label="Archived" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
             {(isVendorView ? vendorScoringPanel?.deadlineAt : project.vendorDeadline)
               ? <StatusPill label={`Vendor due ${new Date((isVendorView ? vendorScoringPanel?.deadlineAt : project.vendorDeadline) as number).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
               : null}
@@ -1491,6 +1601,123 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
         <p className="text-sm text-slate-300">{(isVendorView ? vendorScoringPanel?.projectDescription : project.description) || "No description for this project yet."}</p>
       </section>
+
+      {!isVendorView && canManageProjects ? (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-white">Edit project</h3>
+            <button
+              type="button"
+              onClick={() => setIsEditingProject((current) => !current)}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
+            >
+              {isEditingProject ? "Close editor" : "Edit project"}
+            </button>
+          </div>
+
+          <p className="mb-4 text-sm text-slate-400">
+            Rules applied: project name is required, and scorer deadline can't be before the vendor deadline.
+          </p>
+
+          {projectNotice ? (
+            <div className={`mb-4 rounded-xl border px-3 py-2 text-sm ${projectNotice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+              {projectNotice.message}
+            </div>
+          ) : null}
+
+          {isEditingProject ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block text-sm text-slate-300 md:col-span-2">
+                <span className="mb-2 block">Project name</span>
+                <input
+                  value={projectDraft.name}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, name: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                />
+              </label>
+
+              <label className="block text-sm text-slate-300 md:col-span-2">
+                <span className="mb-2 block">Description</span>
+                <textarea
+                  value={projectDraft.description}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, description: event.target.value }))}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                />
+              </label>
+
+              <label className="block text-sm text-slate-300">
+                <span className="mb-2 block">Vendor deadline</span>
+                <input
+                  type="date"
+                  value={projectDraft.vendorDeadline}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, vendorDeadline: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                />
+              </label>
+
+              <label className="block text-sm text-slate-300">
+                <span className="mb-2 block">Scorer deadline</span>
+                <input
+                  type="date"
+                  value={projectDraft.scorerDeadline}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, scorerDeadline: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                />
+              </label>
+
+              <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveProject()}
+                    disabled={busy}
+                    className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                  >
+                    Save changes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectDraft({
+                        name: project.name,
+                        description: project.description ?? "",
+                        vendorDeadline: toDateInputValue(project.vendorDeadline),
+                        scorerDeadline: toDateInputValue(project.scorerDeadline),
+                      });
+                      setProjectNotice(null);
+                    }}
+                    disabled={busy}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-60"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                {project.isArchived ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleRestoreProject()}
+                    disabled={busy}
+                    className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200 hover:border-emerald-400 disabled:opacity-60"
+                  >
+                    Restore project
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleArchiveProject()}
+                    disabled={busy}
+                    className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
+                  >
+                    Archive project
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {isVendorView ? (
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">

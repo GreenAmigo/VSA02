@@ -319,6 +319,102 @@ describe("admin console actions", () => {
     });
   });
 
+  test("company admins can edit project details, archive and restore, with activity log entries", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "edit-project-admin", "edit.project.admin@example.com", "Edit Project Admin");
+
+      const admin = t.withIdentity({ tokenIdentifier: "edit-project-admin" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Project Edit Workspace",
+        ssoProvider: "google-workspace",
+      });
+
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Initial Name",
+        description: "Initial description",
+        vendorDeadline: Date.now() + 1000 * 60 * 60,
+        scorerDeadline: Date.now() + 1000 * 60 * 60 * 2,
+      });
+
+      await expect(admin.mutation((api as any).admin.updateProject, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        name: "Updated Name",
+        description: "Updated description",
+        vendorDeadline: Date.now() + 1000 * 60 * 60 * 3,
+        scorerDeadline: Date.now() + 1000 * 60 * 60,
+      })).rejects.toThrow("Scorer deadline can't be before the vendor deadline");
+
+      const updated = await admin.mutation((api as any).admin.updateProject, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        name: "Updated Name",
+        description: "Updated description",
+        vendorDeadline: Date.now() + 1000 * 60 * 60,
+        scorerDeadline: Date.now() + 1000 * 60 * 60 * 4,
+      });
+
+      expect(updated.name).toBe("Updated Name");
+      expect(updated.description).toBe("Updated description");
+
+      const archived = await admin.mutation((api as any).admin.archiveProject, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+      });
+      expect(archived.isArchived).toBe(true);
+
+      const restored = await admin.mutation((api as any).admin.restoreProject, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+      });
+      expect(restored.isArchived).toBe(false);
+
+      const logs = await admin.query(api.admin.listActivityLogs, { companyId: company.companyId });
+      expect(logs.some((entry: { action: string }) => entry.action === "update_project")).toBe(true);
+      expect(logs.some((entry: { action: string }) => entry.action === "archive_project")).toBe(true);
+      expect(logs.some((entry: { action: string }) => entry.action === "restore_project")).toBe(true);
+    });
+  });
+
+  test("scorers and vendors are rejected from project edit and archive actions", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      const seeded = await t.mutation(internal.access.seedScenario, {
+        companyAName: "Acme Health",
+        companyBName: "Beta Logistics",
+        projectAName: "HR Platform",
+        projectBName: "Supply Chain",
+      });
+
+      const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", email: "scorer@beta.example", name: "Beta Scorer", emailVerified: true });
+      const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor", email: "vendor@northwind.example", name: "Northwind Labs", emailVerified: true });
+
+      await expect(scorer.mutation((api as any).admin.updateProject, {
+        companyId: seeded.companyBId,
+        projectId: seeded.projectBId,
+        name: "Blocked scorer edit",
+      })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+
+      await expect(vendor.mutation((api as any).admin.updateProject, {
+        companyId: seeded.companyBId,
+        projectId: seeded.projectBId,
+        name: "Blocked vendor edit",
+      })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+
+      await expect(scorer.mutation((api as any).admin.archiveProject, {
+        companyId: seeded.companyBId,
+        projectId: seeded.projectBId,
+      })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+
+      await expect(vendor.mutation((api as any).admin.restoreProject, {
+        companyId: seeded.companyBId,
+        projectId: seeded.projectBId,
+      })).rejects.toThrow("Only company admins or VS Consultants can manage this company");
+    });
+  });
+
   test("re-importing a workspace by the same stable id does not create duplicate companies", async () => {
     const t = convexTest({ schema, modules });
     const workspace = {

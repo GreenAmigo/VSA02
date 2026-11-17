@@ -172,7 +172,40 @@ describe("ConsultantWorkspaceProjectsPage", () => {
 
     expect(html).toContain("3 of 16 answered");
     expect(html).toContain("Answer requirements");
+    expect(html).not.toContain("Edit project");
     expect(html).not.toContain("Open import / requirements");
     expect(html).not.toContain("Assigned members");
+  });
+
+  test("consultant project detail shows Edit project controls", () => {
+    useQueryMock.mockReset();
+    useQueryMock.mockImplementationOnce(() => ({
+      email: "frazer@maxwellknight.co.uk",
+      tokenIdentifier: "consultant-1",
+      role: "consultant",
+      isConsultant: true,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      _id: "project-1",
+      companyId: "company-1",
+      name: "Supply Chain",
+      description: "Admin editable project",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+      scorerDeadline: Date.now() + 7200_000,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "member-1", projectId: "project-1", userId: "beta-admin", role: "company-admin", displayName: "Beta Admin", isActive: true }]);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "req-1", requirementId: "REQ-1", text: "Requirement", status: "active" }]);
+    useQueryMock.mockImplementationOnce(() => [{ id: "person-1", userId: "beta-admin", name: "Beta Admin", email: "admin@beta.example", role: "company-admin", status: "active", source: "member" }]);
+    useQueryMock.mockImplementationOnce(() => [{ departmentId: "dep-1", name: "Operations", members: [] }]);
+    useQueryMock.mockImplementationOnce(() => [{ vendorId: "ven-1", name: "Northwind Labs", status: "active", contactEmail: "vendor@northwind.example", contactCount: 1 }]);
+
+    const html = renderToStaticMarkup(
+      <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
+    );
+
+    expect(html).toContain("Edit project");
+    expect(html).toContain("Assign scorers");
   });
 });

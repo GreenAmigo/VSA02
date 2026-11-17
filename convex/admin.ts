@@ -2233,6 +2233,14 @@ export const createProject = mutation({
       throw new Error("Project name is required");
     }
 
+    if (
+      typeof args.vendorDeadline === "number"
+      && typeof args.scorerDeadline === "number"
+      && args.scorerDeadline < args.vendorDeadline
+    ) {
+      throw new Error("Scorer deadline can't be before the vendor deadline");
+    }
+
     const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
     const description = args.description?.trim() || undefined;
     const projectId = await ctx.db.insert("projects", {
@@ -2244,6 +2252,7 @@ export const createProject = mutation({
       createdBy: canonicalUserId,
       createdAt: Date.now(),
       status: "active",
+      isArchived: false,
       isTestData: false,
     });
 
@@ -2266,6 +2275,149 @@ export const createProject = mutation({
       vendorDeadline: args.vendorDeadline ?? null,
       scorerDeadline: args.scorerDeadline ?? null,
     };
+  },
+});
+
+export const updateProject = mutation({
+  args: {
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    name: v.string(),
+    description: v.optional(v.string()),
+    vendorDeadline: v.optional(v.union(v.number(), v.null())),
+    scorerDeadline: v.optional(v.union(v.number(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const identity = await assertCompanyAdmin(ctx, args.companyId);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.companyId !== args.companyId) {
+      throw new Error("Project not found");
+    }
+
+    const nextName = args.name.trim();
+    if (!nextName) {
+      throw new Error("Project name is required");
+    }
+
+    const nextDescription = args.description?.trim() || undefined;
+    const nextVendorDeadline = args.vendorDeadline ?? undefined;
+    const nextScorerDeadline = args.scorerDeadline ?? undefined;
+
+    if (
+      typeof nextVendorDeadline === "number"
+      && typeof nextScorerDeadline === "number"
+      && nextScorerDeadline < nextVendorDeadline
+    ) {
+      throw new Error("Scorer deadline can't be before the vendor deadline");
+    }
+
+    const beforeName = project.name;
+    const beforeDescription = project.description ?? null;
+    const beforeVendorDeadline = project.vendorDeadline ?? null;
+    const beforeScorerDeadline = project.scorerDeadline ?? null;
+
+    await ctx.db.patch(args.projectId, {
+      name: nextName,
+      description: nextDescription,
+      vendorDeadline: nextVendorDeadline,
+      scorerDeadline: nextScorerDeadline,
+    });
+
+    if (typeof nextVendorDeadline === "number") {
+      const vendorDeadlineRows = await ctx.db
+        .query("projectDeadlines")
+        .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+        .filter((q: any) => q.eq(q.field("targetType"), "vendor"))
+        .collect();
+
+      for (const row of vendorDeadlineRows) {
+        await ctx.db.patch(row._id, {
+          dueAt: nextVendorDeadline,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "update_project",
+      details: [
+        `Updated project ${beforeName}.`,
+        `Name: ${beforeName} -> ${nextName}`,
+        `Description: ${beforeDescription ?? "none"} -> ${nextDescription ?? "none"}`,
+        `Vendor deadline: ${beforeVendorDeadline ?? "none"} -> ${nextVendorDeadline ?? "none"}`,
+        `Scorer deadline: ${beforeScorerDeadline ?? "none"} -> ${nextScorerDeadline ?? "none"}`,
+      ].join(" "),
+      workspaceName: "workspace",
+      companyId: args.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      companyId: args.companyId,
+      name: nextName,
+      description: nextDescription ?? null,
+      vendorDeadline: nextVendorDeadline ?? null,
+      scorerDeadline: nextScorerDeadline ?? null,
+    };
+  },
+});
+
+export const archiveProject = mutation({
+  args: {
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await assertCompanyAdmin(ctx, args.companyId);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.companyId !== args.companyId) {
+      throw new Error("Project not found");
+    }
+
+    await ctx.db.patch(args.projectId, { isArchived: true });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "archive_project",
+      details: `Archived project ${project.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+      projectId: args.projectId,
+    });
+
+    return { projectId: args.projectId, companyId: args.companyId, isArchived: true };
+  },
+});
+
+export const restoreProject = mutation({
+  args: {
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await assertCompanyAdmin(ctx, args.companyId);
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.companyId !== args.companyId) {
+      throw new Error("Project not found");
+    }
+
+    await ctx.db.patch(args.projectId, { isArchived: false });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "restore_project",
+      details: `Restored project ${project.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+      projectId: args.projectId,
+    });
+
+    return { projectId: args.projectId, companyId: args.companyId, isArchived: false };
   },
 });
 
