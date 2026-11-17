@@ -1,10 +1,5 @@
-import { AuthGate } from "@/components/auth-gate";
-import { RequirementsPage } from "@/components/project-workflow-ui";
+import { redirect } from "next/navigation";
 
 export default function ProjectRequirementsRoute() {
-  return (
-    <AuthGate>
-      <RequirementsPage projectId="hr-platform" />
-    </AuthGate>
-  );
+  redirect("/workspaces");
 }

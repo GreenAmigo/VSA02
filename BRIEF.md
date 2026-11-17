@@ -124,13 +124,13 @@ The app uses a single canonical consultant home route for the workspace director
 | /workspaces/[companyId]/vendors/[vendorId]/contacts | `src/app/workspaces/[companyId]/vendors/[vendorId]/contacts/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorContactsPage` | Vendor contact invitations, status, and reactivation |
 | /workspaces/[companyId]/requirements | `src/app/workspaces/[companyId]/requirements/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceRequirementsPage` | Requirements and imports |
 | /workspaces/[companyId]/scoring | `src/app/workspaces/[companyId]/scoring/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceScoringPage` | Scoring dashboard and views |
-| /projects | `src/app/projects/page.tsx` -> `AuthGate` -> project dashboard shell | Project-level app screens |
-| /projects/new | `src/app/projects/new/page.tsx` -> `AuthGate` -> project creation flow | New project entry |
-| /projects/[id] | `src/app/projects/[id]/page.tsx` -> `AuthGate` -> project detail shell | Project overview |
-| /projects/[id]/people | `src/app/projects/[id]/people/page.tsx` -> `AuthGate` -> project people screen | Project people and assignments |
-| /projects/[id]/requirements | `src/app/projects/[id]/requirements/page.tsx` -> `AuthGate` -> project requirements screen | Requirement management |
-| /projects/[id]/scoring | `src/app/projects/[id]/scoring/page.tsx` -> `AuthGate` -> project scoring screen | Scoring workflow |
-| /projects/[id]/decision | `src/app/projects/[id]/decision/page.tsx` -> `AuthGate` -> decision screen | Recommendation and decision output |
+| /projects | Legacy route; now redirects to `/workspaces` | Removed from the canonical app shell; no legacy PM/BA UI remains |
+| /projects/new | Legacy route; now redirects to `/workspaces` | Removed from the canonical app shell; project creation is handled through workspace-managed flows |
+| /projects/[id] | Legacy route; now redirects to `/workspaces` | Removed from the canonical app shell; all project detail access is routed through the shared workspace pages |
+| /projects/[id]/people | Legacy route; now redirects to `/workspaces` | Removed; people management now lives under the company workspace screens |
+| /projects/[id]/requirements | Legacy route; now redirects to `/workspaces` | Removed; requirement management now lives under the shared workspace flow |
+| /projects/[id]/scoring | Legacy route; now redirects to `/workspaces` | Deprecated PM/BA legacy screen. The scoring logic itself still exists, but the old route is no longer mounted |
+| /projects/[id]/decision | Legacy route; now redirects to `/workspaces` | Deprecated PM/BA legacy screen |
 
 ## Deployment to-do
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.

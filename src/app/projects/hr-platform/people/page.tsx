@@ -1,10 +1,5 @@
-import { AuthGate } from "@/components/auth-gate";
-import { PeoplePage } from "@/components/project-workflow-ui";
+import { redirect } from "next/navigation";
 
 export default function ProjectPeopleRoute() {
-  return (
-    <AuthGate>
-      <PeoplePage projectId="hr-platform" />
-    </AuthGate>
-  );
+  redirect("/workspaces");
 }

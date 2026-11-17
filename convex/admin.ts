@@ -2331,7 +2331,7 @@ export const listProjectMembers = query({
     }
 
     const userIds = getIdentityUserIds(identity);
-    const hasCompanyAdminAccess = await ctx.db
+    const companyMemberships = await ctx.db
       .query("companyMembers")
       .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
       .filter((q: any) => q.or(
@@ -2340,10 +2340,13 @@ export const listProjectMembers = query({
         ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
-      .filter((q: any) => q.eq(q.field("role"), "company-admin"))
-      .first();
+      .collect();
 
-    const hasProjectAccess = await ctx.db
+    const hasCompanyAdminAccess = companyMemberships.some((member) => member.role === "company-admin");
+    const vendorMembership = companyMemberships.find((member) => member.role === "vendor") ?? null;
+    const consultantAccess = await getActiveConsultantRow(ctx, userIds);
+
+    const projectMemberships = await ctx.db
       .query("projectMembers")
       .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
       .filter((q: any) => q.eq(q.field("isActive"), true))
@@ -2351,11 +2354,40 @@ export const listProjectMembers = query({
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
         ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
-      .first();
+      .collect();
 
-    const consultantAccess = await getActiveConsultantRow(ctx, userIds);
+    const hasProjectAccess = projectMemberships.length > 0;
     if (!hasCompanyAdminAccess && !hasProjectAccess && !consultantAccess) {
       throw new Error("Project access denied");
+    }
+
+    if (vendorMembership && !hasCompanyAdminAccess && !consultantAccess) {
+      const matchingProjectMembership = projectMemberships.find((member) => member.role === "vendor") ?? null;
+      const vendorProjectAssignment = vendorMembership.vendorId
+        ? await ctx.db
+            .query("projectVendors")
+            .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+            .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+            .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
+            .first()
+        : null;
+
+      if (!matchingProjectMembership && !vendorProjectAssignment) {
+        throw new Error("Project access denied");
+      }
+
+      const allowedVendorMemberships = await ctx.db
+        .query("projectMembers")
+        .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+        .filter((q: any) => q.eq(q.field("role"), "vendor"))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .filter((q: any) => q.or(
+          ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+          ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+        ))
+        .collect();
+
+      return allowedVendorMemberships.filter((member) => !isLegacyGeneratedUserId(member.userId));
     }
 
     const members = await ctx.db

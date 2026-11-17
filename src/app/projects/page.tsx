@@ -1,10 +1,5 @@
-import { AuthGate } from "@/components/auth-gate";
-import { ProjectListPage } from "@/components/project-workflow-ui";
+import { redirect } from "next/navigation";
 
 export default function ProjectsPage() {
-  return (
-    <AuthGate>
-      <ProjectListPage />
-    </AuthGate>
-  );
+  redirect("/workspaces");
 }

@@ -1,10 +1,5 @@
-import { AuthGate } from "@/components/auth-gate";
-import { DecisionPage } from "@/components/project-workflow-ui";
+import { redirect } from "next/navigation";
 
 export default function ProjectDecisionRoute() {
-  return (
-    <AuthGate>
-      <DecisionPage projectId="hr-platform" />
-    </AuthGate>
-  );
+  redirect("/workspaces");
 }
