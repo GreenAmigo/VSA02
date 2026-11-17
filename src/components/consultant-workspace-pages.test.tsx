@@ -52,6 +52,41 @@ describe("ConsultantHomeHeader", () => {
 });
 
 describe("ConsultantWorkspaceProjectsPage", () => {
+  const queueProjectDetailQueries = (access: any) => {
+    useQueryMock.mockImplementationOnce(() => access);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      _id: "project-1",
+      companyId: "company-1",
+      name: "Supply Chain",
+      description: "Project detail",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+      scorerDeadline: Date.now() + 7200_000,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "member-1", projectId: "project-1", userId: "beta-admin", role: "company-admin", displayName: "Beta Admin", isActive: true }]);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "req-1", requirementId: "REQ-1", text: "Requirement", status: "active" }]);
+
+    if (access?.isVendor || access?.role === "vendor") {
+      useQueryMock.mockImplementationOnce(() => ({
+        vendorOrganizationName: "Northwind Labs",
+        projectName: "Supply Chain",
+        projectDescription: "Vendor scoring project",
+        deadlineAt: Date.now() + 3600_000,
+        deadlineLocked: false,
+        status: "in-progress",
+        answeredCount: 3,
+        totalRequirements: 16,
+      }));
+    } else {
+      useQueryMock.mockImplementationOnce(() => undefined);
+    }
+
+    useQueryMock.mockImplementationOnce(() => [{ id: "person-1", userId: "beta-admin", name: "Beta Admin", email: "admin@beta.example", role: "company-admin", status: "active", source: "member" }]);
+    useQueryMock.mockImplementationOnce(() => [{ departmentId: "dep-1", name: "Operations", members: [] }]);
+    useQueryMock.mockImplementationOnce(() => [{ vendorId: "ven-1", name: "Northwind Labs", status: "active", contactEmail: "vendor@northwind.example", contactCount: 1 }]);
+  };
+
   beforeEach(() => {
     useAuthMock.mockReturnValue({
       user: { email: "frazer@maxwellknight.co.uk" },
@@ -207,5 +242,36 @@ describe("ConsultantWorkspaceProjectsPage", () => {
 
     expect(html).toContain("Edit project");
     expect(html).toContain("Assign scorers");
+  });
+
+  test("project detail renders for loading, consultant, company admin, scorer, and vendor without errors", () => {
+    useQueryMock.mockReset();
+    useAuthMock.mockReturnValue({ user: null, loading: true });
+    useConvexAuthMock.mockReturnValue({ isLoading: true, isAuthenticated: false });
+    useQueryMock.mockImplementation(() => undefined);
+
+    const loadingHtml = renderToStaticMarkup(
+      <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
+    );
+    expect(loadingHtml).toContain("Checking access");
+
+    useAuthMock.mockReturnValue({ user: { email: "consultant@vs.example" }, loading: false });
+    useConvexAuthMock.mockReturnValue({ isLoading: false, isAuthenticated: true });
+
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "consultant@vs.example", tokenIdentifier: "consultant-1", role: "consultant", isConsultant: true });
+    expect(() => renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />)).not.toThrow();
+
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "admin@beta.example", tokenIdentifier: "admin-1", role: "company-admin", isConsultant: false });
+    expect(() => renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />)).not.toThrow();
+
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "scorer@beta.example", tokenIdentifier: "scorer-1", role: "company-scorer", isConsultant: false });
+    expect(() => renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />)).not.toThrow();
+
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "vendor@northwind.example", tokenIdentifier: "vendor-1", role: "vendor", isVendor: true, isConsultant: false });
+    expect(() => renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />)).not.toThrow();
   });
 });

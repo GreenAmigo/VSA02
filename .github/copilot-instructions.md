@@ -13,6 +13,8 @@
 - Diagnose the cause and explain it before changing code when something fails.
 - Every error a user can trigger must be shown on screen in plain English; never fail silently.
 - Never loosen a permission check to make a test pass. If a test fails on permissions, explain it to me and ask before changing who is allowed to do what.
+- Hooks must never be called conditionally, after an early return, or inside role/loading branches; call hooks unconditionally at the top of the component.
+- Role-specific UI logic (for example consultant/admin-only editors) must live in child components rather than conditional hook blocks in shared parent components.
 
 ## Working expectations
 - Keep the existing WorkOS login, Convex backend, access checks and company isolation intact unless the task specifically requires a change there.
