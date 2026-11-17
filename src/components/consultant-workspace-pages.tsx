@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
@@ -76,12 +76,24 @@ function WorkspaceBreadcrumbs({ items }: { items: WorkspaceBreadcrumb[] }) {
   );
 }
 
+function shouldShowPreviewDebugLine() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const environment = process.env.NEXT_PUBLIC_APP_ENVIRONMENT?.trim().toLowerCase() ?? "";
+  const hostname = window.location.hostname.toLowerCase();
+  return environment === "preview" || hostname.includes("preview") || hostname.includes("vspreview");
+}
+
 function WorkspaceShell({
   workspace,
   activeTab,
   breadcrumbs,
   role = "consultant",
   userEmail,
+  serverRole,
+  serverLookupId,
   showConsultantLinks = true,
   children,
 }: {
@@ -90,6 +102,8 @@ function WorkspaceShell({
   breadcrumbs?: WorkspaceBreadcrumb[];
   role?: WorkspaceRole;
   userEmail?: string | null;
+  serverRole?: string | null;
+  serverLookupId?: string | null;
   showConsultantLinks?: boolean;
   children: React.ReactNode;
 }) {
@@ -116,10 +130,15 @@ function WorkspaceShell({
   const tabs = tabsByRole[role ?? "consultant"] ?? tabsByRole.consultant;
   const roleLabel =
     role === "consultant" ? "VS Consultant" : role === "company-admin" ? "Company admin" : role === "company-scorer" ? "Company scorer" : "Vendor";
+  const isVendorShell = role === "vendor";
+  const sanitizedBreadcrumbs = isVendorShell
+    ? (breadcrumbs ?? []).filter((item) => item.label !== "All workspaces")
+    : breadcrumbs;
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-100">
-      <aside className="w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5">
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {isVendorShell ? null : (
+      <aside className="fixed inset-y-0 left-0 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5">
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
           <h2 className="mt-3 text-xl font-semibold text-white">Workspace directory</h2>
@@ -165,12 +184,13 @@ function WorkspaceShell({
           </div>
         ) : null}
       </aside>
+      )}
 
-      <main className="flex-1">
+      <main className={isVendorShell ? "min-h-screen" : "ml-80 min-h-screen"}>
         <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0 flex-1">
-              {breadcrumbs && breadcrumbs.length > 0 ? <WorkspaceBreadcrumbs items={breadcrumbs} /> : null}
+              {sanitizedBreadcrumbs && sanitizedBreadcrumbs.length > 0 ? <WorkspaceBreadcrumbs items={sanitizedBreadcrumbs} /> : null}
               <div className="flex items-center gap-3">
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
@@ -183,6 +203,11 @@ function WorkspaceShell({
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
               <p className="truncate text-sm font-medium text-white" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
               <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
+              {shouldShowPreviewDebugLine() ? (
+                <p className="text-[10px] text-slate-400">
+                  Preview debug: role {serverRole ?? roleLabel}, lookup {serverLookupId ?? "unknown"}
+                </p>
+              ) : null}
             </div>
           </div>
         </header>
@@ -712,6 +737,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     scores: [],
   };
   const canManageWorkspace = Boolean(access.isConsultant || access.role === "company-admin");
+  const isVendorView = Boolean(access.isVendor);
   const visibleProjects = projects.slice().sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   const upcomingDeadlines = visibleProjects
     .map((project) => ({
@@ -727,94 +753,168 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     <WorkspaceShell
       workspace={workspace}
       activeTab="overview"
-      breadcrumbs={[
-        { label: "All workspaces", href: "/workspaces" },
-        { label: workspace.name },
-      ]}
+      breadcrumbs={isVendorView
+        ? [{ label: workspace.name }]
+        : [
+            { label: "All workspaces", href: "/workspaces" },
+            { label: workspace.name },
+          ]}
       role={access.isConsultant ? "consultant" : access.isVendor ? "vendor" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "company-admin"}
       userEmail={access.email ?? user?.email ?? "Unknown"}
+      serverRole={access.isConsultant ? "vs-consultant" : access.role ?? "none"}
+      serverLookupId={access.subject ?? access.tokenIdentifier ?? "unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Company" value={workspace.name} helper="Visible via Convex access" />
-        <StatCard label="Role" value={access.isConsultant ? "VS Consultant" : access.role ?? "User"} helper="Server role" />
-        <StatCard label="Email" value={access.email ?? user?.email ?? "Unknown"} helper="Signed-in user" />
-        <StatCard label="Company ID" value={workspace.id} helper="Authorized workspace" />
-      </section>
+      {isVendorView ? (
+        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <div className="mb-4">
+              <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">{access.displayName ?? "Vendor organisation"}</h2>
+              <p className="mt-2 text-sm text-slate-300">Working with {workspace.name}</p>
+            </div>
 
-      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">My projects</h2>
-            {canManageWorkspace ? (
-              <Link href={`/workspaces/${workspace.slug}/projects`} className="text-sm text-sky-300 hover:text-sky-200">
-                View all projects
-              </Link>
-            ) : null}
-          </div>
-
-          <div className="space-y-3">
-            {visibleProjects.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
-                No projects assigned yet.
-              </div>
-            ) : (
-              visibleProjects.map((project) => {
-                const nextDeadline = project.vendorDeadline && project.scorerDeadline
-                  ? Math.min(project.vendorDeadline, project.scorerDeadline)
-                  : project.vendorDeadline ?? project.scorerDeadline ?? null;
-
-                return (
-                  <Link
-                    key={project._id}
-                    href={`/workspaces/${workspace.slug}/projects/${project._id}`}
-                    className="block rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-sky-500/50 hover:bg-slate-950"
-                  >
+            <div className="space-y-3">
+              {visibleProjects.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                  No projects assigned yet.
+                </div>
+              ) : (
+                visibleProjects.map((project) => (
+                  <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-base font-medium text-white">{project.name}</p>
                         <p className="mt-1 text-sm text-slate-400">{project.description || "No description added yet."}</p>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
-                        {nextDeadline ? (
-                          <StatusPill label={`Due ${new Date(nextDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
-                        ) : null}
-                      </div>
+                      {project.vendorDeadline ? (
+                        <StatusPill label={`Vendor due ${new Date(project.vendorDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
+                      ) : null}
                     </div>
-                  </Link>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-          <h2 className="text-lg font-semibold text-white">What needs action</h2>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            {upcomingDeadlines.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
-                No project deadlines are set yet.
-              </div>
-            ) : (
-              upcomingDeadlines.map((project) => (
-                <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium text-white">{project.name}</p>
-                    <StatusPill label={project.status === "active" ? "Open" : "Draft"} />
+                    <div className="mt-3 flex gap-3">
+                      <Link href={`/workspaces/${workspace.slug}/projects/${project._id}`} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                        Open project
+                      </Link>
+                      <Link href={`/workspaces/${workspace.slug}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
+                        Answer requirements
+                      </Link>
+                    </div>
                   </div>
-                  {project.nextDeadline ? (
-                    <p className="mt-2 text-xs text-slate-400">Next deadline: {new Date(project.nextDeadline).toLocaleDateString()}</p>
-                  ) : null}
-                  <Link href={`/workspaces/${workspace.slug}/projects/${project._id}`} className="mt-3 inline-block text-sm text-sky-300 hover:text-sky-200">
-                    Open project
-                  </Link>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
-        </div>
-      </section>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="text-lg font-semibold text-white">What needs action</h2>
+            <div className="mt-4 space-y-3 text-sm text-slate-300">
+              {upcomingDeadlines.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                  No project deadlines are set yet.
+                </div>
+              ) : (
+                upcomingDeadlines.map((project) => (
+                  <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-white">{project.name}</p>
+                      <StatusPill label={project.status === "active" ? "Open" : "Draft"} />
+                    </div>
+                    {project.nextDeadline ? (
+                      <p className="mt-2 text-xs text-slate-400">Next deadline: {new Date(project.nextDeadline).toLocaleDateString()}</p>
+                    ) : null}
+                    <Link href={`/workspaces/${workspace.slug}/projects/${project._id}/answer-requirements`} className="mt-3 inline-block text-sm text-sky-300 hover:text-sky-200">
+                      Answer requirements
+                    </Link>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Company" value={workspace.name} helper="Visible via Convex access" />
+            <StatCard label="Role" value={access.isConsultant ? "VS Consultant" : access.role ?? "User"} helper="Server role" />
+            <StatCard label="Email" value={access.email ?? user?.email ?? "Unknown"} helper="Signed-in user" />
+            <StatCard label="Company ID" value={workspace.id} helper="Authorized workspace" />
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-white">My projects</h2>
+                {canManageWorkspace ? (
+                  <Link href={`/workspaces/${workspace.slug}/projects`} className="text-sm text-sky-300 hover:text-sky-200">
+                    View all projects
+                  </Link>
+                ) : null}
+              </div>
+
+              <div className="space-y-3">
+                {visibleProjects.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                    No projects assigned yet.
+                  </div>
+                ) : (
+                  visibleProjects.map((project) => {
+                    const nextDeadline = project.vendorDeadline && project.scorerDeadline
+                      ? Math.min(project.vendorDeadline, project.scorerDeadline)
+                      : project.vendorDeadline ?? project.scorerDeadline ?? null;
+
+                    return (
+                      <Link
+                        key={project._id}
+                        href={`/workspaces/${workspace.slug}/projects/${project._id}`}
+                        className="block rounded-xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-sky-500/50 hover:bg-slate-950"
+                      >
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-base font-medium text-white">{project.name}</p>
+                            <p className="mt-1 text-sm text-slate-400">{project.description || "No description added yet."}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
+                            {nextDeadline ? (
+                              <StatusPill label={`Due ${new Date(nextDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
+                            ) : null}
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h2 className="text-lg font-semibold text-white">What needs action</h2>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                {upcomingDeadlines.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                    No project deadlines are set yet.
+                  </div>
+                ) : (
+                  upcomingDeadlines.map((project) => (
+                    <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-white">{project.name}</p>
+                        <StatusPill label={project.status === "active" ? "Open" : "Draft"} />
+                      </div>
+                      {project.nextDeadline ? (
+                        <p className="mt-2 text-xs text-slate-400">Next deadline: {new Date(project.nextDeadline).toLocaleDateString()}</p>
+                      ) : null}
+                      <Link href={`/workspaces/${workspace.slug}/projects/${project._id}`} className="mt-3 inline-block text-sm text-sky-300 hover:text-sky-200">
+                        Open project
+                      </Link>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
     </WorkspaceShell>
   );
 }
@@ -823,9 +923,7 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
-  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
-    | undefined;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
@@ -1227,10 +1325,9 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
-  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as
-    | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
-    | undefined;
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const canManageWorkspace = Boolean(access && (access.isConsultant || access.role === "company-admin"));
+  const isVendorView = Boolean(access?.isVendor || access?.role === "vendor");
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | { _id: string; companyId: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }
@@ -1240,6 +1337,21 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     | undefined;
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; requirementId: string; text: string; type?: string; priority?: number; status: "active" | "withdrawn" }>
+    | undefined;
+  const vendorScoringPanel = useQuery(
+    (api as any).scores.listVendorAnswerRequirements,
+    isProtectedLoading || !projectId || !isVendorView ? "skip" : { projectId: projectId as any },
+  ) as
+    | {
+      vendorOrganizationName: string;
+      projectName: string;
+      projectDescription?: string | null;
+      deadlineAt?: number | null;
+      deadlineLocked: boolean;
+      status: "not-started" | "in-progress" | "submitted";
+      answeredCount: number;
+      totalRequirements: number;
+    }
     | undefined;
   const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
@@ -1257,7 +1369,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -1358,23 +1470,59 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       ]}
       role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
       userEmail={access.email ?? user?.email ?? "Unknown"}
+      serverRole={access.isConsultant ? "vs-consultant" : access.role ?? "none"}
+      serverLookupId={access.subject ?? access.tokenIdentifier ?? "unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Project</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">{project.name}</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{isVendorView ? (vendorScoringPanel?.projectName ?? project.name) : project.name}</h2>
           </div>
           <div className="flex flex-wrap gap-2">
             <StatusPill label={project.status === "active" ? "Active" : "Draft"} />
-            {project.vendorDeadline ? <StatusPill label={`Vendor due ${new Date(project.vendorDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" /> : null}
-            {project.scorerDeadline ? <StatusPill label={`Scorer due ${new Date(project.scorerDeadline).toLocaleDateString()}`} className="border-violet-500/50 bg-violet-500/10 text-violet-200" /> : null}
+            {(isVendorView ? vendorScoringPanel?.deadlineAt : project.vendorDeadline)
+              ? <StatusPill label={`Vendor due ${new Date((isVendorView ? vendorScoringPanel?.deadlineAt : project.vendorDeadline) as number).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
+              : null}
+            {!isVendorView && project.scorerDeadline ? <StatusPill label={`Scorer due ${new Date(project.scorerDeadline).toLocaleDateString()}`} className="border-violet-500/50 bg-violet-500/10 text-violet-200" /> : null}
           </div>
         </div>
 
-        <p className="text-sm text-slate-300">{project.description || "No description for this project yet."}</p>
+        <p className="text-sm text-slate-300">{(isVendorView ? vendorScoringPanel?.projectDescription : project.description) || "No description for this project yet."}</p>
       </section>
+
+      {isVendorView ? (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Vendor organisation</p>
+              <p className="mt-2 text-lg font-semibold text-white">{vendorScoringPanel?.vendorOrganizationName ?? access.displayName ?? "Vendor"}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Progress</p>
+              <p className="mt-2 text-lg font-semibold text-white">{vendorScoringPanel?.answeredCount ?? 0} of {vendorScoringPanel?.totalRequirements ?? 0} answered</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-400">Status: {(vendorScoringPanel?.status ?? "not-started").replace("-", " ")}</p>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Deadline</p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                {vendorScoringPanel?.deadlineAt ? new Date(vendorScoringPanel.deadlineAt).toLocaleDateString() : "Not set"}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">Vendor deadline only</p>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <Link
+              href={`/workspaces/${companyId}/projects/${projectId}/answer-requirements`}
+              className="inline-flex rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
+            >
+              Answer requirements
+            </Link>
+          </div>
+        </section>
+      ) : null}
 
       {canManageProjects ? (
         <>
@@ -1448,10 +1596,11 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </>
       ) : null}
 
+      {!isVendorView ? (
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-white">Requirements</h3>
-          <Link href={`/projects/${projectId}/requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
+          <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
             Open import / requirements
           </Link>
         </div>
@@ -1471,7 +1620,9 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </div>
         <p className="mt-3 text-sm text-slate-400">The canonical import flow is in the project requirements screen and remains restricted to consultants and company admins.</p>
       </section>
+      ) : null}
 
+      {!isVendorView ? (
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <h3 className="text-lg font-semibold text-white">Assigned members</h3>
         <div className="mt-4 space-y-3">
@@ -1489,6 +1640,253 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             ))
           )}
         </div>
+      </section>
+      ) : null}
+    </WorkspaceShell>
+  );
+}
+
+export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { companyId: string; projectId: string }) {
+  const { user, loading: workosLoading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
+
+  const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
+  const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const panel = useQuery((api as any).scores.listVendorAnswerRequirements, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
+    | {
+      companyName: string;
+      projectName: string;
+      projectDescription?: string | null;
+      vendorOrganizationName: string;
+      deadlineAt?: number | null;
+      deadlineLocked: boolean;
+      submittedAt?: number | null;
+      status: "not-started" | "in-progress" | "submitted";
+      answeredCount: number;
+      totalRequirements: number;
+      rows: Array<{
+        requirementId: string;
+        text: string;
+        score: 0 | 1 | null;
+        comment: string;
+        amendedByDisplayName?: string | null;
+        amendedAt?: number | null;
+      }>;
+    }
+    | undefined;
+
+  const saveVendorAnswer = useMutation((api as any).scores.saveVendorAnswer);
+  const submitVendorAnswers = useMutation((api as any).scores.submitVendorAnswers);
+
+  const [drafts, setDrafts] = useState<Record<string, { score: 0 | 1 | null; comment: string }>>({});
+  const [saveState, setSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    if (!panel) {
+      return;
+    }
+
+    const nextDrafts: Record<string, { score: 0 | 1 | null; comment: string }> = {};
+    for (const row of panel.rows) {
+      nextDrafts[row.requirementId] = {
+        score: row.score,
+        comment: row.comment ?? "",
+      };
+    }
+    setDrafts(nextDrafts);
+  }, [panel]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(saveTimers.current)) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  if (isProtectedLoading || access === undefined || companies === undefined || panel === undefined) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
+  }
+
+  if (!access.isVendor) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">No access.</div>;
+  }
+
+  const company = companies.find((item) => item._id === companyId);
+  if (!company) {
+    return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">No access.</div>;
+  }
+
+  const saveRow = (requirementId: string, nextDraft: { score: 0 | 1 | null; comment: string }) => {
+    setDrafts((current) => ({ ...current, [requirementId]: nextDraft }));
+    setNotice(null);
+
+    if (panel.deadlineLocked || nextDraft.score === null) {
+      return;
+    }
+
+    setSaveState((current) => ({ ...current, [requirementId]: "saving" }));
+    if (saveTimers.current[requirementId]) {
+      clearTimeout(saveTimers.current[requirementId]);
+    }
+
+    saveTimers.current[requirementId] = setTimeout(() => {
+      void saveVendorAnswer({
+        projectId: projectId as any,
+        requirementId,
+        score: nextDraft.score as 0 | 1,
+        comment: nextDraft.comment.trim() || undefined,
+      })
+        .then(() => {
+          setSaveState((current) => ({ ...current, [requirementId]: "saved" }));
+        })
+        .catch((error: unknown) => {
+          setSaveState((current) => ({ ...current, [requirementId]: "error" }));
+          setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to save this answer." });
+        });
+    }, 450);
+  };
+
+  const handleSubmit = async () => {
+    if (panel.deadlineLocked) {
+      return;
+    }
+
+    const confirmed = window.confirm("Submit your answers now? You can keep editing them until the vendor deadline.");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await submitVendorAnswers({ projectId: projectId as any, confirm: true });
+      setNotice({ kind: "success", message: "Answers submitted. You can keep editing until the deadline." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to submit answers." });
+    }
+  };
+
+  return (
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company.name,
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="projects"
+      breadcrumbs={[
+        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: panel.projectName, href: `/workspaces/${companyId}/projects/${projectId}` },
+        { label: "Answer requirements" },
+      ]}
+      role="vendor"
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      serverRole={access.role ?? "vendor"}
+      serverLookupId={access.subject ?? access.tokenIdentifier ?? "unknown"}
+      showConsultantLinks={false}
+    >
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor scoring</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{panel.projectName}</h2>
+            <p className="mt-2 text-sm text-slate-300">{panel.projectDescription || "No description for this project yet."}</p>
+          </div>
+          <div className="space-y-2 text-right text-sm text-slate-300">
+            <p>{panel.answeredCount} of {panel.totalRequirements} answered</p>
+            <p className="uppercase tracking-[0.14em] text-slate-400">Status: {panel.status.replace("-", " ")}</p>
+            <p>Vendor due: {panel.deadlineAt ? new Date(panel.deadlineAt).toLocaleDateString() : "Not set"}</p>
+          </div>
+        </div>
+
+        {panel.deadlineLocked ? (
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+            This scoring window is now read-only because the vendor deadline has passed.
+          </div>
+        ) : null}
+
+        {notice ? (
+          <div className={`mt-4 rounded-xl border p-3 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
+            {notice.message}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="space-y-3">
+        {panel.rows.map((row) => {
+          const draft = drafts[row.requirementId] ?? { score: row.score, comment: row.comment ?? "" };
+          const unanswered = draft.score === null;
+          const state = saveState[row.requirementId] ?? "idle";
+
+          return (
+            <div key={row.requirementId} className={`rounded-2xl border p-4 ${unanswered ? "border-amber-500/40 bg-amber-500/5" : "border-slate-800 bg-slate-900"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                  <p className="mt-2 text-sm text-slate-100">{row.text}</p>
+                </div>
+                <div className="text-xs text-slate-400">
+                  {state === "saving" ? "Saving..." : state === "saved" ? "Saved" : state === "error" ? "Save failed" : unanswered ? "Unanswered" : "Ready"}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-200">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`score-${row.requirementId}`}
+                    checked={draft.score === 0}
+                    disabled={panel.deadlineLocked}
+                    onChange={() => saveRow(row.requirementId, { ...draft, score: 0 })}
+                  />
+                  0
+                </label>
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`score-${row.requirementId}`}
+                    checked={draft.score === 1}
+                    disabled={panel.deadlineLocked}
+                    onChange={() => saveRow(row.requirementId, { ...draft, score: 1 })}
+                  />
+                  1
+                </label>
+              </div>
+
+              <textarea
+                value={draft.comment}
+                onChange={(event) => saveRow(row.requirementId, { ...draft, comment: event.target.value })}
+                disabled={panel.deadlineLocked}
+                rows={2}
+                placeholder="Optional comment"
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-70"
+              />
+
+              {panel.deadlineLocked && row.amendedByDisplayName ? (
+                <p className="mt-2 text-xs text-slate-400">Amended by {row.amendedByDisplayName}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </section>
+
+      <section className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={panel.deadlineLocked}
+          className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+        >
+          Submit
+        </button>
       </section>
     </WorkspaceShell>
   );
@@ -2001,6 +2399,10 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !(canManage || showVendorHome) ? "skip" : { companyId }) as
     | Array<{ vendorId: string; name: string; contactEmail: string | null; status: string; contactCount: number }>
     | undefined;
+  const vendorProjects = useQuery(
+    api.access.listProjectsForCompany,
+    isProtectedLoading || !companyId || !showVendorHome ? "skip" : { companyId: companyId as any },
+  ) as Array<{ _id: string; name: string; description?: string | null; vendorDeadline?: number | null; status: "draft" | "active" }> | undefined;
 
   const createVendor = useMutation((api as any).admin.addWorkspaceVendor);
   const updateVendor = useMutation((api as any).admin.updateWorkspaceVendor);
@@ -2011,7 +2413,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || (showVendorHome && vendorProjects === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -2046,11 +2448,40 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
         userEmail={access.email ?? user?.email ?? "Unknown"}
         showConsultantLinks={false}
       >
-        <div className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-slate-800 bg-slate-900 p-6">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl" title={vendorNameText}>{vendorNameText}</h1>
-          <p className="mt-4 text-base text-slate-300">Workspace: {companyName}</p>
-          <p className="mt-2 text-lg text-slate-200">No projects assigned yet.</p>
+          <p className="mt-2 text-base text-slate-300">Working with {companyName}</p>
+
+          <div className="mt-6 space-y-3">
+            {vendorProjects && vendorProjects.length > 0 ? (
+              vendorProjects.map((project) => (
+                <div key={project._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium text-white">{project.name}</p>
+                      <p className="text-sm text-slate-400">{project.description || "No description added yet."}</p>
+                    </div>
+                    {project.vendorDeadline ? (
+                      <StatusPill label={`Vendor due ${new Date(project.vendorDeadline).toLocaleDateString()}`} className="border-amber-500/50 bg-amber-500/10 text-amber-200" />
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex gap-3">
+                    <Link href={`/workspaces/${companyId}/projects/${project._id}`} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                      Open project
+                    </Link>
+                    <Link href={`/workspaces/${companyId}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
+                      Answer requirements
+                    </Link>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-400">
+                No projects assigned yet.
+              </div>
+            )}
+          </div>
         </div>
       </WorkspaceShell>
     );

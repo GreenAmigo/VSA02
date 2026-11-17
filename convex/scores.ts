@@ -17,6 +17,22 @@ const scoreAmendmentValidator = v.object({
   reason: v.string(),
 });
 
+const vendorAnswerValidator = v.object({
+  projectId: v.id("projects"),
+  requirementId: v.string(),
+  score: v.union(v.literal(0), v.literal(1)),
+  comment: v.optional(v.string()),
+});
+
+const vendorSubmitValidator = v.object({
+  projectId: v.id("projects"),
+  confirm: v.boolean(),
+});
+
+function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
+  return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
+}
+
 async function getProjectDeadlineForVendor(ctx: any, projectId: string, vendorUserId: string) {
   return await ctx.db
     .query("projectDeadlines")
@@ -31,7 +47,30 @@ function isDeadlineLocked(deadline: { status?: string; dueAt?: number } | null, 
     return false;
   }
 
-  return deadline.status === "submitted" || (typeof deadline.dueAt === "number" && deadline.dueAt <= now);
+  return typeof deadline.dueAt === "number" && deadline.dueAt <= now;
+}
+
+async function recordActivity(
+  ctx: any,
+  payload: {
+    actorUserId: string;
+    actorEmail?: string;
+    action: string;
+    details: string;
+    companyId: string;
+    projectId: string;
+  },
+) {
+  await ctx.db.insert("activityLogs", {
+    actorUserId: payload.actorUserId,
+    actorEmail: payload.actorEmail,
+    action: payload.action,
+    details: payload.details,
+    workspaceName: "workspace",
+    companyId: payload.companyId,
+    projectId: payload.projectId,
+    createdAt: Date.now(),
+  });
 }
 
 function isAllowedAdminOrConsultant(ctx: any, identity: any, companyId: string) {
@@ -64,11 +103,15 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     throw new Error("Project not found");
   }
 
+  const userIds = getIdentityUserIds(identity);
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
     .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+    ))
     .first();
 
   if (!member || (member.role !== "company-admin" && member.role !== "company-scorer" && member.role !== "vendor")) {
@@ -90,14 +133,18 @@ export const listScoreHistory = query({
       return [] as const;
     }
 
-    await assertScoringAccess(ctx, args.projectId);
+    const { member } = await assertScoringAccess(ctx, args.projectId);
 
     const rows = await ctx.db
       .query("scores")
       .withIndex("by_project_requirement", (q) => q.eq("projectId", args.projectId))
       .take(200);
 
-    return rows.map((row) => ({
+    const visibleRows = member.role === "vendor"
+      ? rows.filter((row) => row.vendorUserId === member.userId)
+      : rows;
+
+    return visibleRows.map((row) => ({
       _id: row._id,
       projectId: row.projectId,
       vendorUserId: row.vendorUserId,
@@ -111,6 +158,236 @@ export const listScoreHistory = query({
       amendedAt: row.amendedAt,
       amendmentReason: row.amendmentReason,
     }));
+  },
+});
+
+export const listVendorAnswerRequirements = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { project, member } = await assertScoringAccess(ctx, args.projectId);
+    if (member.role !== "vendor") {
+      throw new Error("Project access denied");
+    }
+
+    const company = await ctx.db.get(project.companyId) as { name?: string } | null;
+    const companyMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), member.userId))
+      .filter((q: any) => q.eq(q.field("role"), "vendor"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    const vendorOrganization = companyMembership?.vendorId
+      ? await ctx.db.get(companyMembership.vendorId)
+      : null;
+
+    const allRequirements = await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .collect();
+
+    const visibleRequirements = allRequirements
+      .filter((row) => row.status === "active" && row.priority !== 0)
+      .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
+
+    const vendorScores = await ctx.db
+      .query("scores")
+      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", member.userId))
+      .collect();
+
+    const scoreByRequirementId = new Map(vendorScores.map((row) => [row.requirementId, row]));
+    const answeredCount = visibleRequirements.filter((row) => scoreByRequirementId.has(row.requirementId)).length;
+    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    const deadlineLocked = isDeadlineLocked(deadline);
+
+    let status: "not-started" | "in-progress" | "submitted" = "not-started";
+    if (deadline?.status === "submitted") {
+      status = "submitted";
+    } else if (answeredCount > 0) {
+      status = "in-progress";
+    }
+
+    return {
+      projectId: args.projectId,
+      companyId: project.companyId,
+      companyName: company?.name ?? "Workspace",
+      projectName: project.name,
+      projectDescription: project.description ?? null,
+      vendorOrganizationName: vendorOrganization?.name ?? companyMembership?.displayName ?? "Vendor organisation",
+      vendorUserId: member.userId,
+      deadlineAt: deadline?.dueAt ?? project.vendorDeadline ?? null,
+      deadlineLocked,
+      submittedAt: deadline?.submittedAt ?? null,
+      status,
+      answeredCount,
+      totalRequirements: visibleRequirements.length,
+      rows: visibleRequirements.map((requirement) => {
+        const answer = scoreByRequirementId.get(requirement.requirementId);
+        return {
+          requirementId: requirement.requirementId,
+          text: requirement.text,
+          score: answer?.score ?? null,
+          comment: answer?.comment ?? "",
+          enteredAt: answer?.enteredAt ?? null,
+          amendedByDisplayName: answer?.amendedByDisplayName ?? null,
+          amendedAt: answer?.amendedAt ?? null,
+        };
+      }),
+    };
+  },
+});
+
+export const saveVendorAnswer = mutation({
+  args: vendorAnswerValidator,
+  handler: async (ctx, args) => {
+    const { project, identity, member } = await assertScoringAccess(ctx, args.projectId);
+    if (member.role !== "vendor") {
+      throw new Error("Project access denied");
+    }
+
+    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    if (isDeadlineLocked(deadline)) {
+      throw new Error("Vendor scoring is locked after the deadline");
+    }
+
+    const requirement = await ctx.db
+      .query("requirements")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
+      .first();
+
+    if (!requirement) {
+      throw new Error("Requirement not found in project");
+    }
+
+    if (requirement.status === "withdrawn" || requirement.priority === 0) {
+      throw new Error("This requirement is not active for scoring");
+    }
+
+    const existing = await ctx.db
+      .query("scores")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("vendorUserId"), member.userId))
+      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
+      .first();
+
+    const now = Date.now();
+    const scoreRecord = {
+      companyId: project.companyId,
+      projectId: args.projectId,
+      vendorUserId: member.userId,
+      requirementId: args.requirementId,
+      score: args.score,
+      comment: args.comment?.trim() || undefined,
+      enteredBy: identity.tokenIdentifier,
+      enteredAt: now,
+      amendedByUserId: existing?.amendedByUserId,
+      amendedByDisplayName: existing?.amendedByDisplayName,
+      amendedAt: existing?.amendedAt,
+      amendmentReason: existing?.amendmentReason,
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, scoreRecord);
+    } else {
+      await ctx.db.insert("scores", scoreRecord);
+    }
+
+    if (deadline) {
+      if (deadline.status !== "submitted") {
+        await ctx.db.patch(deadline._id, {
+          status: "in-progress",
+          updatedAt: now,
+        });
+      }
+    } else {
+      await ctx.db.insert("projectDeadlines", {
+        companyId: project.companyId,
+        projectId: args.projectId,
+        targetType: "vendor",
+        targetUserId: member.userId,
+        dueAt: project.vendorDeadline ?? now,
+        status: "in-progress",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? member.userId,
+      actorEmail: identity.email ?? undefined,
+      action: "vendor_score_edit",
+      details: `Saved vendor score for ${args.requirementId} as ${args.score}.`,
+      companyId: project.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      vendorUserId: member.userId,
+      requirementId: args.requirementId,
+      score: args.score,
+      comment: scoreRecord.comment ?? "",
+      savedAt: now,
+      updated: Boolean(existing),
+    };
+  },
+});
+
+export const submitVendorAnswers = mutation({
+  args: vendorSubmitValidator,
+  handler: async (ctx, args) => {
+    if (!args.confirm) {
+      throw new Error("Please confirm before submitting your answers");
+    }
+
+    const { project, identity, member } = await assertScoringAccess(ctx, args.projectId);
+    if (member.role !== "vendor") {
+      throw new Error("Project access denied");
+    }
+
+    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    if (isDeadlineLocked(deadline)) {
+      throw new Error("Vendor scoring is locked after the deadline");
+    }
+
+    const now = Date.now();
+    if (deadline) {
+      await ctx.db.patch(deadline._id, {
+        status: "submitted",
+        submittedAt: now,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("projectDeadlines", {
+        companyId: project.companyId,
+        projectId: args.projectId,
+        targetType: "vendor",
+        targetUserId: member.userId,
+        dueAt: project.vendorDeadline ?? now,
+        status: "submitted",
+        submittedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? member.userId,
+      actorEmail: identity.email ?? undefined,
+      action: "vendor_score_submit",
+      details: "Submitted vendor requirement answers.",
+      companyId: project.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      vendorUserId: member.userId,
+      submittedAt: now,
+      status: "submitted" as const,
+    };
   },
 });
 

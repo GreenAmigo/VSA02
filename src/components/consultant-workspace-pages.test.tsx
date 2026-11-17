@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
-import { ConsultantWorkspaceProjectsPage } from "./consultant-workspace-pages";
+import { ConsultantWorkspaceOverviewPage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage } from "./consultant-workspace-pages";
 
 const { useQueryMock, useMutationMock, useAuthMock, useConvexAuthMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -96,5 +96,83 @@ describe("ConsultantWorkspaceProjectsPage", () => {
 
     expect(html).toContain("New project");
     expect(html).toContain("ERP RFP");
+  });
+
+  test("renders vendor home in the new frame without developer cards or consultant breadcrumb", () => {
+    useQueryMock.mockReset();
+    useQueryMock.mockImplementationOnce(() => ({
+      email: "vendor@northwind.example",
+      displayName: "Northwind Labs",
+      tokenIdentifier: "northwind-vendor",
+      role: "vendor",
+      isVendor: true,
+      isConsultant: false,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => [{
+      _id: "project-1",
+      name: "Supply Chain",
+      description: "Vendor scoring project",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+      companyId: "company-1",
+      createdAt: Date.now(),
+    }]);
+    useQueryMock.mockImplementationOnce(() => undefined);
+
+    const html = renderToStaticMarkup(
+      <ConsultantWorkspaceOverviewPage companyId="company-1" />,
+    );
+
+    expect(html).toContain("Vendor home");
+    expect(html).toContain("Answer requirements");
+    expect(html).not.toContain("All workspaces");
+    expect(html).not.toContain("Company ID");
+    expect(html).not.toContain("Workspace directory");
+  });
+
+  test("vendor project detail shows progress and answer CTA without import cards or assigned members", () => {
+    useQueryMock.mockReset();
+    useQueryMock.mockImplementationOnce(() => ({
+      email: "vendor@northwind.example",
+      displayName: "Northwind Labs",
+      tokenIdentifier: "northwind-vendor",
+      role: "vendor",
+      isVendor: true,
+      isConsultant: false,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      _id: "project-1",
+      companyId: "company-1",
+      name: "Supply Chain",
+      description: "Vendor scoring project",
+      status: "active",
+      vendorDeadline: Date.now() + 3600_000,
+    }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "vendor-row", projectId: "project-1", userId: "northwind-vendor", role: "vendor", displayName: "Northwind Labs", isActive: true }]);
+    useQueryMock.mockImplementationOnce(() => [{ _id: "req-1", requirementId: "REQ-1", text: "Requirement", status: "active" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      vendorOrganizationName: "Northwind Labs",
+      projectName: "Supply Chain",
+      projectDescription: "Vendor scoring project",
+      deadlineAt: Date.now() + 3600_000,
+      deadlineLocked: false,
+      status: "in-progress",
+      answeredCount: 3,
+      totalRequirements: 16,
+    }));
+    useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => []);
+
+    const html = renderToStaticMarkup(
+      <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
+    );
+
+    expect(html).toContain("3 of 16 answered");
+    expect(html).toContain("Answer requirements");
+    expect(html).not.toContain("Open import / requirements");
+    expect(html).not.toContain("Assigned members");
   });
 });
