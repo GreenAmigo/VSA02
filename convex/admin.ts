@@ -211,6 +211,60 @@ function isLegacyGeneratedUserId(userId: string | null | undefined): boolean {
   return normalized.length > 0 && /^(vendor-|scorer-)/i.test(normalized);
 }
 
+function roleRequiresDepartment(role: "company-admin" | "company-scorer" | "vendor") {
+  return role === "company-admin" || role === "company-scorer";
+}
+
+async function getActiveDepartmentOrThrow(ctx: any, companyId: Id<"companies">, departmentId: Id<"workspaceDepartments">) {
+  const department = await ctx.db.get(departmentId);
+  if (!department || department.companyId !== companyId || department.isActive === false) {
+    throw new Error("Department not found");
+  }
+  return department;
+}
+
+async function syncDepartmentMembership(
+  ctx: any,
+  args: {
+    companyId: Id<"companies">;
+    userId: string;
+    email?: string;
+    displayName: string;
+    role: "company-admin" | "company-scorer";
+    departmentId: Id<"workspaceDepartments">;
+  },
+) {
+  const existingAssignments = await ctx.db
+    .query("departmentMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+    .filter((q: any) => q.eq(q.field("userId"), args.userId))
+    .collect();
+
+  for (const assignment of existingAssignments) {
+    const shouldBeActive = assignment.departmentId === args.departmentId;
+    await ctx.db.patch(assignment._id, {
+      email: args.email,
+      displayName: args.displayName,
+      role: args.role,
+      isActive: shouldBeActive,
+    });
+  }
+
+  const activeTarget = existingAssignments.find((row: any) => row.departmentId === args.departmentId);
+  if (!activeTarget) {
+    await ctx.db.insert("departmentMembers", {
+      companyId: args.companyId,
+      departmentId: args.departmentId,
+      userId: args.userId,
+      email: args.email,
+      displayName: args.displayName,
+      role: args.role,
+      createdAt: Date.now(),
+      isActive: true,
+    });
+  }
+}
+
 async function assertProjectAccess(ctx: any, projectId: string, companyId: string) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
@@ -276,13 +330,23 @@ export const createCompany = mutation({
 
     const canonicalUserId = identity.subject ?? identity.tokenIdentifier ?? "system";
     const workspaceName = args.name.trim();
+    const now = Date.now();
     const companyId = await ctx.db.insert("companies", {
       name: workspaceName,
       slug: slugify(args.name),
       createdBy: canonicalUserId,
-      createdAt: Date.now(),
+      createdAt: now,
       isActive: true,
       ssoProvider: args.ssoProvider,
+      isTestData: false,
+    });
+
+    const defaultDepartmentId = await ctx.db.insert("workspaceDepartments", {
+      companyId,
+      name: "General",
+      createdByUserId: canonicalUserId,
+      createdAt: now,
+      isActive: true,
       isTestData: false,
     });
 
@@ -292,9 +356,21 @@ export const createCompany = mutation({
       email: identity.email ?? undefined,
       displayName: identity.name ?? "Admin",
       role: companyAdminRole,
+      departmentId: defaultDepartmentId,
       isActive: true,
-      createdAt: Date.now(),
+      createdAt: now,
       isTestData: false,
+    });
+
+    await ctx.db.insert("departmentMembers", {
+      companyId,
+      departmentId: defaultDepartmentId,
+      userId: canonicalUserId,
+      email: identity.email ?? undefined,
+      displayName: identity.name ?? "Admin",
+      role: companyAdminRole,
+      createdAt: now,
+      isActive: true,
     });
 
     await recordActivity(ctx, {
@@ -1541,6 +1617,7 @@ export const inviteWorkspacePerson = mutation({
     name: v.string(),
     email: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    departmentId: v.optional(v.id("workspaceDepartments")),
   },
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
@@ -1554,6 +1631,14 @@ export const inviteWorkspacePerson = mutation({
     const normalizedEmail = args.email.trim().toLowerCase();
     const displayName = args.name.trim() || normalizedEmail;
 
+    if (roleRequiresDepartment(args.role) && !args.departmentId) {
+      throw new Error("Select a department before inviting a company admin or scorer.");
+    }
+
+    const selectedDepartment = roleRequiresDepartment(args.role)
+      ? await getActiveDepartmentOrThrow(ctx, args.companyId, args.departmentId as Id<"workspaceDepartments">)
+      : null;
+
     const existingMember = await ctx.db
       .query("companyMembers")
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
@@ -1565,14 +1650,39 @@ export const inviteWorkspacePerson = mutation({
       await ctx.db.patch(existingMember._id, {
         displayName,
         role: args.role,
+        departmentId: roleRequiresDepartment(args.role) ? args.departmentId : undefined,
         isActive: true,
       });
+
+      if (roleRequiresDepartment(args.role)) {
+        await syncDepartmentMembership(ctx, {
+          companyId: args.companyId,
+          userId: existingMember.userId,
+          email: normalizedEmail,
+          displayName,
+          role: args.role,
+          departmentId: args.departmentId as Id<"workspaceDepartments">,
+        });
+      } else {
+        const departmentAssignments = await ctx.db
+          .query("departmentMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("userId"), existingMember.userId))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .collect();
+
+        for (const assignment of departmentAssignments) {
+          await ctx.db.patch(assignment._id, { isActive: false });
+        }
+      }
 
       await recordActivity(ctx, {
         actorUserId: canonicalUserId,
         actorEmail: identity.email ?? undefined,
         action: "update_workspace_person_role",
-        details: `Updated ${displayName} (${normalizedEmail}) to ${args.role} in this workspace.`,
+        details: roleRequiresDepartment(args.role)
+          ? `Updated ${displayName} (${normalizedEmail}) to ${args.role} in this workspace and set department to ${selectedDepartment?.name}.`
+          : `Updated ${displayName} (${normalizedEmail}) to ${args.role} in this workspace.`,
         workspaceName: "workspace",
         companyId: args.companyId,
       });
@@ -1598,6 +1708,7 @@ export const inviteWorkspacePerson = mutation({
       await ctx.db.patch(existingInvite._id, {
         displayName,
         role: args.role,
+        departmentId: roleRequiresDepartment(args.role) ? args.departmentId : undefined,
         status: "invited",
         invitedByUserId: canonicalUserId,
         invitedAt: Date.now(),
@@ -1613,6 +1724,7 @@ export const inviteWorkspacePerson = mutation({
         email: normalizedEmail,
         displayName,
         role: args.role,
+        departmentId: roleRequiresDepartment(args.role) ? args.departmentId : undefined,
         status: "invited",
         invitedByUserId: canonicalUserId,
         invitedAt: Date.now(),
@@ -1625,7 +1737,9 @@ export const inviteWorkspacePerson = mutation({
       actorUserId: canonicalUserId,
       actorEmail: identity.email ?? undefined,
       action: "invite_workspace_person",
-      details: `Invited ${displayName} (${normalizedEmail}) as ${args.role} to this workspace.`,
+      details: roleRequiresDepartment(args.role)
+        ? `Invited ${displayName} (${normalizedEmail}) as ${args.role} to this workspace in department ${selectedDepartment?.name}.`
+        : `Invited ${displayName} (${normalizedEmail}) as ${args.role} to this workspace.`,
       workspaceName: "workspace",
       companyId: args.companyId,
     });
@@ -1634,6 +1748,7 @@ export const inviteWorkspacePerson = mutation({
       email: normalizedEmail,
       displayName,
       role: args.role,
+      departmentId: roleRequiresDepartment(args.role) ? args.departmentId ?? null : null,
       status: "invited",
       inviteId,
     };
@@ -1655,6 +1770,12 @@ export const listWorkspacePeople = query({
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
       .collect();
 
+    const departments = await ctx.db
+      .query("workspaceDepartments")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+    const departmentNameById = new Map(departments.map((department) => [String(department._id), department.name]));
+
     const canonicalMembers = new Map<string, any>();
     for (const member of members) {
       const key = `${member.userId}::${member.email ?? ""}`.toLowerCase();
@@ -1670,6 +1791,8 @@ export const listWorkspacePeople = query({
       name: member.displayName,
       email: member.email ?? "",
       role: member.role,
+      departmentId: member.departmentId ?? null,
+      departmentName: member.departmentId ? (departmentNameById.get(String(member.departmentId)) ?? "Unknown department") : null,
       status: member.isActive ? ("active" as const) : ("deactivated" as const),
       source: "member" as const,
     }));
@@ -1689,6 +1812,8 @@ export const listWorkspacePeople = query({
         name: invite.displayName,
         email: invite.email,
         role: invite.role,
+        departmentId: invite.departmentId ?? null,
+        departmentName: invite.departmentId ? (departmentNameById.get(String(invite.departmentId)) ?? "Unknown department") : null,
         status: invite.status,
         source: "invite" as const,
       }));
@@ -1877,6 +2002,167 @@ export const createWorkspaceDepartment = mutation({
   },
 });
 
+export const renameWorkspaceDepartment = mutation({
+  args: {
+    companyId: v.id("companies"),
+    departmentId: v.id("workspaceDepartments"),
+    name: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const department = await getActiveDepartmentOrThrow(ctx, args.companyId, args.departmentId);
+    const nextName = args.name.trim();
+    if (!nextName) {
+      throw new Error("Department name is required");
+    }
+
+    const duplicate = await ctx.db
+      .query("workspaceDepartments")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("name"), nextName))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (duplicate && duplicate._id !== args.departmentId) {
+      throw new Error("A department with that name already exists");
+    }
+
+    await ctx.db.patch(args.departmentId, { name: nextName });
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "rename_workspace_department",
+      details: `Renamed department ${department.name} to ${nextName}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { departmentId: args.departmentId, name: nextName };
+  },
+});
+
+export const deactivateWorkspaceDepartment = mutation({
+  args: {
+    companyId: v.id("companies"),
+    departmentId: v.id("workspaceDepartments"),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const department = await getActiveDepartmentOrThrow(ctx, args.companyId, args.departmentId);
+
+    const linkedPeople = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .filter((q: any) => q.or(q.eq(q.field("role"), "company-admin"), q.eq(q.field("role"), "company-scorer")))
+      .collect();
+
+    if (linkedPeople.length > 0) {
+      throw new Error("Move people to another department before deactivating this department.");
+    }
+
+    await ctx.db.patch(args.departmentId, { isActive: false });
+
+    const activeDeptMemberships = await ctx.db
+      .query("departmentMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+    for (const row of activeDeptMemberships) {
+      await ctx.db.patch(row._id, { isActive: false });
+    }
+
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "deactivate_workspace_department",
+      details: `Deactivated department ${department.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return { departmentId: args.departmentId, isActive: false };
+  },
+});
+
+export const updateWorkspacePersonDepartment = mutation({
+  args: {
+    companyId: v.id("companies"),
+    userId: v.string(),
+    departmentId: v.id("workspaceDepartments"),
+  },
+  handler: async (ctx, args) => {
+    await assertCompanyAdmin(ctx, args.companyId);
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+
+    const department = await getActiveDepartmentOrThrow(ctx, args.companyId, args.departmentId);
+
+    const member = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), args.userId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!member) {
+      throw new Error("Workspace person not found");
+    }
+    if (member.role === "vendor") {
+      throw new Error("Vendors do not belong to workspace departments.");
+    }
+
+    const beforeDepartmentId = member.departmentId;
+
+    await ctx.db.patch(member._id, {
+      departmentId: args.departmentId,
+    });
+
+    await syncDepartmentMembership(ctx, {
+      companyId: args.companyId,
+      userId: member.userId,
+      email: member.email ?? undefined,
+      displayName: member.displayName,
+      role: member.role,
+      departmentId: args.departmentId,
+    });
+
+    const beforeDepartment = beforeDepartmentId ? await ctx.db.get(beforeDepartmentId) : null;
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "update_workspace_person_department",
+      details: `Moved ${member.displayName} from ${beforeDepartment?.name ?? "none"} to ${department.name}.`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+
+    return {
+      userId: member.userId,
+      departmentId: args.departmentId,
+      departmentName: department.name,
+    };
+  },
+});
+
 export const addWorkspaceDepartmentMember = mutation({
   args: {
     companyId: v.id("companies"),
@@ -1896,7 +2182,6 @@ export const addWorkspaceDepartmentMember = mutation({
       throw new Error("Not signed in");
     }
 
-    const identityUserIds = new Set(getIdentityUserIds(identity));
     const member = await ctx.db
       .query("companyMembers")
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
@@ -1904,59 +2189,28 @@ export const addWorkspaceDepartmentMember = mutation({
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();
 
-    if (!member && !identityUserIds.has(args.userId)) {
-      const consultantRecord = await getActiveConsultantRow(ctx, args.userId);
-      if (!consultantRecord) {
-        throw new Error("User is not a member of this workspace");
-      }
+    if (!member) {
+      throw new Error("User is not a member of this workspace");
+    }
+    if (member.role === "vendor") {
+      throw new Error("Vendors do not belong to workspace departments.");
     }
 
-    const resolvedMember = member ?? {
-      _id: "system" as any,
-      userId: args.userId,
-      email: identity.email ?? undefined,
-      displayName: identity.name ?? args.userId,
-      role: "company-admin" as const,
-    };
-
-    const existingAssignment = await ctx.db
-      .query("departmentMembers")
-      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
-      .filter((q: any) => q.eq(q.field("userId"), args.userId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    if (existingAssignment) {
-      await ctx.db.patch(existingAssignment._id, {
-        email: resolvedMember.email,
-        displayName: resolvedMember.displayName,
-        role: resolvedMember.role,
-      });
-
-      return {
-        companyId: args.companyId,
-        departmentId: args.departmentId,
-        userId: args.userId,
-        displayName: resolvedMember.displayName,
-      };
-    }
-
-    await ctx.db.insert("departmentMembers", {
+    await ctx.db.patch(member._id, { departmentId: args.departmentId });
+    await syncDepartmentMembership(ctx, {
       companyId: args.companyId,
+      userId: member.userId,
+      email: member.email ?? undefined,
+      displayName: member.displayName,
+      role: member.role,
       departmentId: args.departmentId,
-      userId: args.userId,
-      email: resolvedMember.email,
-      displayName: resolvedMember.displayName,
-      role: resolvedMember.role,
-      createdAt: Date.now(),
-      isActive: true,
     });
 
     await recordActivity(ctx, {
       actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
       actorEmail: identity.email ?? undefined,
       action: "add_department_member",
-      details: `Added ${resolvedMember.displayName} (${resolvedMember.email ?? args.userId}) to the ${department.name} department.`,
+      details: `Set ${member.displayName} (${member.email ?? args.userId}) to the ${department.name} department.`,
       workspaceName: "workspace",
       companyId: args.companyId,
     });
@@ -1965,7 +2219,7 @@ export const addWorkspaceDepartmentMember = mutation({
       companyId: args.companyId,
       departmentId: args.departmentId,
       userId: args.userId,
-      displayName: resolvedMember.displayName,
+      displayName: member.displayName,
     };
   },
 });
@@ -1984,46 +2238,7 @@ export const removeWorkspaceDepartmentMember = mutation({
       throw new Error("Department not found");
     }
 
-    const assignment = await ctx.db
-      .query("departmentMembers")
-      .filter((q: any) => q.eq(q.field("departmentId"), args.departmentId))
-      .filter((q: any) => q.eq(q.field("userId"), args.userId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    if (!assignment) {
-      return {
-        companyId: args.companyId,
-        departmentId: args.departmentId,
-        userId: args.userId,
-        removed: false,
-      };
-    }
-
-    await ctx.db.patch(assignment._id, {
-      isActive: false,
-    });
-
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not signed in");
-    }
-
-    await recordActivity(ctx, {
-      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
-      actorEmail: identity.email ?? undefined,
-      action: "remove_department_member",
-      details: `Removed ${assignment.displayName} from the ${department.name} department.`,
-      workspaceName: "workspace",
-      companyId: args.companyId,
-    });
-
-    return {
-      companyId: args.companyId,
-      departmentId: args.departmentId,
-      userId: args.userId,
-      removed: true,
-    };
+    throw new Error(`Cannot remove ${args.userId} from ${department.name} without assigning a new department. Use updateWorkspacePersonDepartment.`);
   },
 });
 
@@ -2040,25 +2255,28 @@ export const listWorkspaceDepartments = query({
     const departments = await ctx.db
       .query("workspaceDepartments")
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
       .collect();
 
     const rows = await Promise.all(departments.map(async (department) => {
       const members = await ctx.db
-        .query("departmentMembers")
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
         .filter((q: any) => q.eq(q.field("departmentId"), department._id))
         .filter((q: any) => q.eq(q.field("isActive"), true))
+        .filter((q: any) => q.or(q.eq(q.field("role"), "company-admin"), q.eq(q.field("role"), "company-scorer")))
         .collect();
 
       return {
         departmentId: department._id,
         name: department.name,
+        isActive: department.isActive !== false,
         createdAt: department.createdAt,
+        memberCount: members.length,
         members: members.map((member) => ({
           userId: member.userId,
           displayName: member.displayName,
           email: member.email ?? null,
-          role: member.role ?? "company-scorer",
+          role: member.role,
         })),
       };
     }));
@@ -2478,6 +2696,264 @@ export const cleanupLegacyGeneratedProjectMembers = internalMutation({
   },
 });
 
+export const migrateDepartmentModelStep1 = internalMutation({
+  args: {
+    secret: v.string(),
+    companyId: v.optional(v.id("companies")),
+    fallbackDepartmentName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Department model migration is disabled in production");
+    }
+
+    const expectedSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
+    if (!expectedSecret) {
+      throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET before running department model migration");
+    }
+    if (args.secret !== expectedSecret) {
+      throw new Error("Invalid migration secret");
+    }
+
+    const fallbackDepartmentName = args.fallbackDepartmentName?.trim() || "Unassigned (migrated)";
+    const companies = args.companyId
+      ? [await ctx.db.get(args.companyId)].filter((company): company is NonNullable<typeof company> => Boolean(company))
+      : await ctx.db.query("companies").collect();
+
+    const summary = {
+      companiesProcessed: 0,
+      companyPeopleUpdated: 0,
+      invitesUpdated: 0,
+      legacyDepartmentProjectAssignmentsReplaced: 0,
+      projectScorersAdded: 0,
+      scorerScoreScopesConverted: 0,
+      scorerCompletionScopesConverted: 0,
+      scorerSnapshotsBackfilled: 0,
+      testDataPeopleUpdated: 0,
+    };
+
+    for (const company of companies) {
+      summary.companiesProcessed += 1;
+
+      let fallbackDepartment = await ctx.db
+        .query("workspaceDepartments")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .filter((q: any) => q.eq(q.field("name"), fallbackDepartmentName))
+        .first();
+
+      if (!fallbackDepartment) {
+        const fallbackDepartmentId = await ctx.db.insert("workspaceDepartments", {
+          companyId: company._id,
+          name: fallbackDepartmentName,
+          createdByUserId: "migration",
+          createdAt: Date.now(),
+          isActive: true,
+          isTestData: company.isTestData ?? false,
+        });
+        fallbackDepartment = await ctx.db.get(fallbackDepartmentId);
+      } else if (fallbackDepartment.isActive === false) {
+        await ctx.db.patch(fallbackDepartment._id, { isActive: true });
+      }
+
+      const people = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .filter((q: any) => q.or(q.eq(q.field("role"), "company-admin"), q.eq(q.field("role"), "company-scorer")))
+        .collect();
+
+      for (const person of people) {
+        let targetDepartmentId = person.departmentId as Id<"workspaceDepartments"> | undefined;
+        if (targetDepartmentId) {
+          const existingDepartment = await ctx.db.get(targetDepartmentId);
+          if (!existingDepartment || existingDepartment.companyId !== company._id || existingDepartment.isActive === false) {
+            targetDepartmentId = undefined;
+          }
+        }
+
+        if (!targetDepartmentId) {
+          targetDepartmentId = fallbackDepartment!._id;
+          await ctx.db.patch(person._id, { departmentId: targetDepartmentId });
+          summary.companyPeopleUpdated += 1;
+          if (company.isTestData) {
+            summary.testDataPeopleUpdated += 1;
+          }
+        }
+
+        await syncDepartmentMembership(ctx, {
+          companyId: company._id,
+          userId: person.userId,
+          email: person.email ?? undefined,
+          displayName: person.displayName,
+          role: person.role === "company-admin" ? "company-admin" : "company-scorer",
+          departmentId: targetDepartmentId,
+        });
+      }
+
+      const invites = await ctx.db
+        .query("workspaceInvites")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .filter((q: any) => q.or(q.eq(q.field("role"), "company-admin"), q.eq(q.field("role"), "company-scorer")))
+        .collect();
+
+      for (const invite of invites) {
+        let targetDepartmentId = invite.departmentId as Id<"workspaceDepartments"> | undefined;
+        if (targetDepartmentId) {
+          const existingDepartment = await ctx.db.get(targetDepartmentId);
+          if (!existingDepartment || existingDepartment.companyId !== company._id || existingDepartment.isActive === false) {
+            targetDepartmentId = undefined;
+          }
+        }
+        if (!targetDepartmentId) {
+          await ctx.db.patch(invite._id, { departmentId: fallbackDepartment!._id });
+          summary.invitesUpdated += 1;
+        }
+      }
+
+      const projects = await ctx.db
+        .query("projects")
+        .withIndex("by_company", (q) => q.eq("companyId", company._id))
+        .collect();
+
+      for (const project of projects) {
+        const projectScorers = await ctx.db
+          .query("projectMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), company._id))
+          .filter((q: any) => q.eq(q.field("projectId"), project._id))
+          .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .collect();
+
+        const legacyDepartmentScorers = projectScorers.filter((row) => Boolean(row.departmentId || row.departmentName || row.userId.startsWith("department:")));
+        for (const legacy of legacyDepartmentScorers) {
+          const departmentId = legacy.departmentId
+            ?? (legacy.userId.startsWith("department:") ? (legacy.userId.slice("department:".length) as Id<"workspaceDepartments">) : undefined);
+
+          if (!departmentId) {
+            await ctx.db.patch(legacy._id, { isActive: false });
+            summary.legacyDepartmentProjectAssignmentsReplaced += 1;
+            continue;
+          }
+
+          const deptPeople = await ctx.db
+            .query("companyMembers")
+            .filter((q: any) => q.eq(q.field("companyId"), company._id))
+            .filter((q: any) => q.eq(q.field("departmentId"), departmentId as any))
+            .filter((q: any) => q.eq(q.field("isActive"), true))
+            .filter((q: any) => q.or(q.eq(q.field("role"), "company-admin"), q.eq(q.field("role"), "company-scorer")))
+            .collect();
+
+          let activeScorerCount = projectScorers.filter((row) => !Boolean(row.departmentId || row.departmentName || row.userId.startsWith("department:"))).length;
+          for (const person of deptPeople) {
+            const existingIndividual = await ctx.db
+              .query("projectMembers")
+              .filter((q: any) => q.eq(q.field("companyId"), company._id))
+              .filter((q: any) => q.eq(q.field("projectId"), project._id))
+              .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+              .filter((q: any) => q.eq(q.field("userId"), person.userId))
+              .filter((q: any) => q.eq(q.field("isActive"), true))
+              .first();
+
+            if (existingIndividual) {
+              continue;
+            }
+
+            if (activeScorerCount >= 20) {
+              break;
+            }
+
+            await ctx.db.insert("projectMembers", {
+              companyId: company._id,
+              projectId: project._id,
+              userId: person.userId,
+              role: "company-scorer",
+              displayName: person.displayName,
+              isActive: true,
+              createdAt: Date.now(),
+            });
+            activeScorerCount += 1;
+            summary.projectScorersAdded += 1;
+          }
+
+          await ctx.db.patch(legacy._id, {
+            isActive: false,
+          });
+          summary.legacyDepartmentProjectAssignmentsReplaced += 1;
+        }
+      }
+
+      const scorerRows = await ctx.db
+        .query("scorerScores")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .collect();
+
+      for (const row of scorerRows) {
+        const wasDepartmentScope = row.scorerScopeType === "department";
+        const nextScopeKey = wasDepartmentScope ? `individual:${row.enteredByUserId}` : row.scorerScopeKey;
+        const nextScopeLabel = wasDepartmentScope ? row.enteredByDisplayName : row.scorerScopeLabel;
+
+        const member = await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), company._id))
+          .filter((q: any) => q.eq(q.field("userId"), row.enteredByUserId))
+          .first();
+
+        const memberDepartment = member?.departmentId ? await ctx.db.get(member.departmentId) : null;
+        const snapshotDepartmentId = row.scorerDepartmentId ?? member?.departmentId;
+        const snapshotDepartmentName = row.scorerDepartmentName
+          ?? (wasDepartmentScope ? row.scorerScopeLabel : (memberDepartment?.name ?? undefined));
+
+        if (wasDepartmentScope) {
+          summary.scorerScoreScopesConverted += 1;
+        }
+        if (!row.scorerDepartmentName || !row.scorerDepartmentId) {
+          summary.scorerSnapshotsBackfilled += 1;
+        }
+
+        await ctx.db.patch(row._id, {
+          scorerScopeKey: nextScopeKey,
+          scorerScopeLabel: nextScopeLabel,
+          scorerScopeType: "individual",
+          scorerDepartmentId: snapshotDepartmentId,
+          scorerDepartmentName: snapshotDepartmentName,
+        });
+      }
+
+      const completionRows = await ctx.db
+        .query("scorerCompletions")
+        .filter((q: any) => q.eq(q.field("companyId"), company._id))
+        .collect();
+
+      for (const row of completionRows) {
+        const wasDepartmentScope = row.scorerScopeType === "department";
+        const nextScopeKey = wasDepartmentScope ? `individual:${row.updatedByUserId}` : row.scorerScopeKey;
+        const nextScopeLabel = wasDepartmentScope ? row.updatedByDisplayName : row.scorerScopeLabel;
+
+        const member = await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), company._id))
+          .filter((q: any) => q.eq(q.field("userId"), row.updatedByUserId))
+          .first();
+        const memberDepartment = member?.departmentId ? await ctx.db.get(member.departmentId) : null;
+
+        if (wasDepartmentScope) {
+          summary.scorerCompletionScopesConverted += 1;
+        }
+
+        await ctx.db.patch(row._id, {
+          scorerScopeKey: nextScopeKey,
+          scorerScopeLabel: nextScopeLabel,
+          scorerScopeType: "individual",
+          scorerDepartmentId: row.scorerDepartmentId ?? member?.departmentId,
+          scorerDepartmentName: row.scorerDepartmentName ?? memberDepartment?.name,
+        });
+      }
+    }
+
+    return summary;
+  },
+});
+
 export const listProjectMembers = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -2682,9 +3158,6 @@ export const addProjectScorer = mutation({
     userId: v.optional(v.string()),
     displayName: v.optional(v.string()),
     email: v.optional(v.string()),
-    role: v.union(v.literal("individual"), v.literal("department")),
-    departmentId: v.optional(v.id("workspaceDepartments")),
-    departmentName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await assertCompanyAdmin(ctx, args.companyId);
@@ -2704,38 +3177,18 @@ export const addProjectScorer = mutation({
     let selectedUserId = args.userId?.trim() ?? "";
     let selectedDisplayName = args.displayName?.trim() ?? "";
     let selectedEmail = args.email?.trim().toLowerCase() ?? "";
-    let departmentId = args.departmentId;
-    let departmentName = args.departmentName?.trim() ?? "";
-
-    if (args.role === "individual") {
-      if (!selectedUserId) {
-        if (!selectedDisplayName && !selectedEmail) {
-          throw new Error("Select a workspace person before assigning them as a scorer.");
-        }
-
-        const member = await ctx.db
-          .query("companyMembers")
-          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-          .filter((q: any) => q.or(
-            ...(selectedEmail ? [q.eq(q.field("email"), selectedEmail)] : []),
-            ...(selectedDisplayName ? [q.eq(q.field("displayName"), selectedDisplayName)] : []),
-          ))
-          .filter((q: any) => q.eq(q.field("isActive"), true))
-          .first();
-
-        if (!member) {
-          throw new Error("Workspace person not found");
-        }
-
-        selectedUserId = member.userId;
-        selectedDisplayName = member.displayName;
-        selectedEmail = member.email ?? selectedEmail;
+    if (!selectedUserId) {
+      if (!selectedDisplayName && !selectedEmail) {
+        throw new Error("Select a workspace person before assigning them as a scorer.");
       }
 
       const member = await ctx.db
         .query("companyMembers")
         .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-        .filter((q: any) => q.eq(q.field("userId"), selectedUserId))
+        .filter((q: any) => q.or(
+          ...(selectedEmail ? [q.eq(q.field("email"), selectedEmail)] : []),
+          ...(selectedDisplayName ? [q.eq(q.field("displayName"), selectedDisplayName)] : []),
+        ))
         .filter((q: any) => q.eq(q.field("isActive"), true))
         .first();
 
@@ -2743,35 +3196,34 @@ export const addProjectScorer = mutation({
         throw new Error("Workspace person not found");
       }
 
-      if (await isLegacyGeneratedUserId(selectedUserId)) {
-        throw new Error("Scorer assignments must use a real workspace person userId or department.");
-      }
-
+      selectedUserId = member.userId;
       selectedDisplayName = member.displayName;
       selectedEmail = member.email ?? selectedEmail;
-    } else {
-      if (!departmentId && !departmentName) {
-        throw new Error("Department name is required for department scorers");
-      }
-
-      const department = (departmentId
-        ? await ctx.db.get(departmentId as any)
-        : await ctx.db
-            .query("workspaceDepartments")
-            .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-            .filter((q: any) => q.eq(q.field("name"), departmentName))
-            .filter((q: any) => q.eq(q.field("isActive"), true))
-            .first()) as any;
-
-      if (!department || department.companyId !== args.companyId || department.isActive === false) {
-        throw new Error("Department not found");
-      }
-
-      departmentId = department._id;
-      departmentName = department.name;
-      selectedDisplayName = department.name;
-      selectedUserId = `department:${department._id}`;
     }
+
+    const member = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), selectedUserId))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .first();
+
+    if (!member) {
+      throw new Error("Workspace person not found");
+    }
+    if (member.role !== "company-scorer" && member.role !== "company-admin") {
+      throw new Error("Only active company admins or scorers can be assigned as project scorers.");
+    }
+    if (!member.departmentId) {
+      throw new Error("Assign this person to a department before adding them to a project scorer list.");
+    }
+
+    if (await isLegacyGeneratedUserId(selectedUserId)) {
+      throw new Error("Scorer assignments must use a real workspace person userId.");
+    }
+
+    selectedDisplayName = member.displayName;
+    selectedEmail = member.email ?? selectedEmail;
 
     const duplicate = await ctx.db
       .query("projectMembers")
@@ -2779,10 +3231,7 @@ export const addProjectScorer = mutation({
       .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
       .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
       .filter((q: any) => q.eq(q.field("isActive"), true))
-      .filter((q: any) => q.or(
-        q.eq(q.field("userId"), selectedUserId),
-        ...(departmentId ? [q.eq(q.field("departmentId"), departmentId)] : []),
-      ))
+      .filter((q: any) => q.eq(q.field("userId"), selectedUserId))
       .first();
 
     if (duplicate) {
@@ -2795,8 +3244,6 @@ export const addProjectScorer = mutation({
       userId: selectedUserId,
       role: "company-scorer",
       displayName: selectedDisplayName,
-      departmentId,
-      departmentName: departmentName || undefined,
       isActive: true,
       createdAt: Date.now(),
     });
@@ -2814,8 +3261,8 @@ export const addProjectScorer = mutation({
       role: "company-scorer",
       displayName: selectedDisplayName,
       email: selectedEmail,
-      scorerRole: args.role,
-      departmentName: departmentName || null,
+      scorerRole: "individual",
+      departmentName: null,
     };
   },
 });

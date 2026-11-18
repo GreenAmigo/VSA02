@@ -41,6 +41,14 @@ async function grantConsultant(t: ReturnType<typeof convexTest>, userId: string,
   });
 }
 
+async function getFirstDepartmentId(actor: any, companyId: any) {
+  const departments = await actor.query((api as any).admin.listWorkspaceDepartments, { companyId });
+  if (!departments[0]?.departmentId) {
+    throw new Error("No department found for invite setup");
+  }
+  return departments[0].departmentId;
+}
+
 const seedLegacyProjectMember = mutation({
   args: {
     companyId: v.id("companies"),
@@ -110,6 +118,7 @@ describe("admin console actions", () => {
         name: "Green Test1",
         email: "green-test-one@example.com",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(admin, company.companyId),
       });
 
       await t.mutation(internal.access.acceptPendingInvitesForUser, {
@@ -124,7 +133,6 @@ describe("admin console actions", () => {
         userId: "green-test-one",
         displayName: "Green Test1",
         email: "green-test-one@example.com",
-        role: "individual",
       });
 
       const scorer = t.withIdentity({
@@ -207,6 +215,7 @@ describe("admin console actions", () => {
         name: "Sam Lee",
         email: "sam@acme.example",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(admin, company.companyId),
       });
 
       await t.mutation(internal.access.acceptPendingInvitesForUser, {
@@ -221,13 +230,57 @@ describe("admin console actions", () => {
         userId: "sam-lee",
         displayName: "Sam Lee",
         email: "sam@acme.example",
-        role: "individual",
       });
 
       expect(vendor.displayName).toBe("Northwind Labs");
       expect(scorer.displayName).toBe("Sam Lee");
       expect(vendor.role).toBe("vendor");
       expect(scorer.role).toBe("company-scorer");
+    });
+  });
+
+  test("inviting a company admin or scorer without a department is rejected", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "invite-dept-consultant", "invite-dept@example.com", "Invite Dept Consultant");
+
+      const admin = t.withIdentity({ tokenIdentifier: "invite-dept-consultant" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "Invite Department Requirement",
+        ssoProvider: "google-workspace",
+      });
+
+      await expect(admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "No Department",
+        email: "no.department@example.com",
+        role: "company-scorer",
+      })).rejects.toThrow("Select a department before inviting a company admin or scorer.");
+    });
+  });
+
+  test("projects cannot assign department scorer rows", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "project-scorer-consultant", "project-scorer@example.com", "Project Scorer Consultant");
+
+      const admin = t.withIdentity({ tokenIdentifier: "project-scorer-consultant" });
+      const company = await admin.mutation(api.admin.createCompany, {
+        name: "No Department Scorer Rows",
+        ssoProvider: "google-workspace",
+      });
+      const project = await admin.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Scorer Assignment Project",
+      });
+
+      await expect(admin.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        userId: "department:operations",
+        displayName: "Operations",
+        email: "operations@example.com",
+      })).rejects.toThrow("Workspace person not found");
     });
   });
 
@@ -280,6 +333,7 @@ describe("admin console actions", () => {
           name: `Scorer ${index + 1}`,
           email,
           role: "company-scorer",
+          departmentId: await getFirstDepartmentId(admin, company.companyId),
         });
         await t.mutation(internal.access.acceptPendingInvitesForUser, {
           userId,
@@ -292,7 +346,6 @@ describe("admin console actions", () => {
           userId,
           displayName: `Scorer ${index + 1}`,
           email,
-          role: "individual",
         });
       }
 
@@ -301,6 +354,7 @@ describe("admin console actions", () => {
         name: "Scorer 21",
         email: "scorer21@example.com",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(admin, company.companyId),
       });
       await t.mutation(internal.access.acceptPendingInvitesForUser, {
         userId: "user-scorer-21",
@@ -314,7 +368,6 @@ describe("admin console actions", () => {
         userId: "user-scorer-21",
         displayName: "Scorer 21",
         email: "scorer21@example.com",
-        role: "individual",
       })).rejects.toThrow("Project scorer limit reached");
     });
   });
@@ -573,6 +626,7 @@ describe("admin console actions", () => {
         name: "Acme Admin",
         email: "admin@acme.example.com",
         role: "company-admin",
+        departmentId: await getFirstDepartmentId(consultant, companyA.companyId),
       });
 
       const companyAdminIdentity = t.withIdentity({ tokenIdentifier: "company-admin-user", email: "admin@acme.example.com", name: "Acme Admin" });
@@ -753,6 +807,7 @@ describe("admin console actions", () => {
         name: "Aisha Ali",
         email: "aisha@phase3a.example",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       await consultant.mutation((api as any).admin.cancelWorkspaceInvite, {
@@ -779,6 +834,20 @@ describe("admin console actions", () => {
         ssoProvider: "google-workspace",
       });
 
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Ops Member",
+        email: "ops.member@phase3b.example",
+        role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
+      });
+
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "ops-member",
+        email: "ops.member@phase3b.example",
+        displayName: "Ops Member",
+      });
+
       const department = await consultant.mutation((api as any).admin.createWorkspaceDepartment, {
         companyId: company.companyId,
         name: "Operations",
@@ -787,13 +856,16 @@ describe("admin console actions", () => {
       await consultant.mutation((api as any).admin.addWorkspaceDepartmentMember, {
         companyId: company.companyId,
         departmentId: department.departmentId,
-        userId: "phase3b-consultant",
+        userId: "ops-member",
       });
 
       const departments = await consultant.query((api as any).admin.listWorkspaceDepartments, { companyId: company.companyId });
-      expect(departments).toHaveLength(1);
-      expect(departments[0].name).toBe("Operations");
-      expect(departments[0].members.some((member: any) => member.userId === "phase3b-consultant")).toBe(true);
+      const operations = departments.find((row: any) => row.name === "Operations");
+      expect(operations).toBeDefined();
+      if (!operations) {
+        throw new Error("Operations department was not created");
+      }
+      expect(operations.members.some((member: any) => member.userId === "ops-member")).toBe(true);
     });
   });
 
@@ -813,6 +885,7 @@ describe("admin console actions", () => {
         name: "Reactivated User",
         email: "reactivate.user@example.com",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const invitedUser = t.withIdentity({
@@ -874,12 +947,14 @@ describe("admin console actions", () => {
         name: "Alpha Admin",
         email: "alpha.admin@example.com",
         role: "company-admin",
+        departmentId: await getFirstDepartmentId(consultant, companyA.companyId),
       });
       await consultant.mutation(api.admin.inviteWorkspacePerson, {
         companyId: companyB.companyId,
         name: "Beta Admin",
         email: "beta.admin@example.com",
         role: "company-admin",
+        departmentId: await getFirstDepartmentId(consultant, companyB.companyId),
       });
 
       const alphaAdmin = t.withIdentity({
@@ -935,6 +1010,7 @@ describe("admin console actions", () => {
         name: "Single Person",
         email: "single.person@example.com",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const invitedUser = t.withIdentity({
@@ -975,6 +1051,7 @@ describe("admin console actions", () => {
         name: "Aisha Ali",
         email: "aisha@phase3a.example",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const people = await consultant.query((api as any).admin.listWorkspacePeople, { companyId: company.companyId });

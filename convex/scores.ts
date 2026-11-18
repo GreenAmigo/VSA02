@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
 const scoreRowValidator = v.object({
@@ -295,52 +296,35 @@ async function resolveScorerScopes(ctx: any, project: any, identity: any, userId
     });
   }
 
-  const departmentAssignments = projectScorerMemberships.filter((row: any) => Boolean(row.departmentId || row.departmentName));
-  if (departmentAssignments.length > 0) {
-    const deptMemberships = await ctx.db
-      .query("departmentMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .filter((q: any) => q.or(
-        ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
-      ))
-      .collect();
-
-    const deptIds = new Set(deptMemberships.map((row: any) => row.departmentId));
-    const deptNames = new Set<string>();
-    for (const row of deptMemberships) {
-      const dept = await ctx.db.get(row.departmentId);
-      if (dept?.name) {
-        deptNames.add(dept.name);
-      }
-    }
-
-    for (const assignment of departmentAssignments) {
-      const assignedToDepartment = (assignment.departmentId && deptIds.has(assignment.departmentId))
-        || (assignment.departmentName && deptNames.has(assignment.departmentName));
-
-      if (!assignedToDepartment) {
-        continue;
-      }
-
-      const scopeIdentity = assignment.departmentId ? String(assignment.departmentId) : (assignment.departmentName as string);
-      const scopeKey = `department:${scopeIdentity}`;
-      scopeMap.set(scopeKey, {
-        scopeKey,
-        scopeType: "department",
-        label: assignment.departmentName || assignment.displayName,
-      });
-    }
-  }
-
   const scopes = Array.from(scopeMap.values());
   if (scopes.length === 0) {
     throw new Error("Only assigned scorers can score this project");
   }
 
   return scopes;
+}
+
+async function getScorerDepartmentSnapshot(ctx: any, companyId: Id<"companies">, scorerUserId: string) {
+  const member = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), companyId))
+    .filter((q: any) => q.eq(q.field("userId"), scorerUserId))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .first();
+
+  if (!member || !member.departmentId) {
+    throw new Error("Assign this scorer to a department before they enter scores.");
+  }
+
+  const department = await ctx.db.get(member.departmentId);
+  if (!department || department.companyId !== companyId || department.isActive === false) {
+    throw new Error("This scorer's department is not active. Reassign their department before scoring.");
+  }
+
+  return {
+    scorerDepartmentId: member.departmentId,
+    scorerDepartmentName: department.name,
+  };
 }
 
 function resolveActiveScope(scopes: Array<{ scopeKey: string; scopeType: "individual" | "department"; label: string }>, requestedScopeKey?: string) {
@@ -352,6 +336,17 @@ function resolveActiveScope(scopes: Array<{ scopeKey: string; scopeType: "indivi
   }
 
   return scopes[0];
+}
+
+function resolveScorerUserId(
+  activeScope: { scopeKey: string; scopeType: "individual" | "department" },
+  identity: { subject?: string; tokenIdentifier?: string },
+) {
+  if (activeScope.scopeType === "individual" && activeScope.scopeKey.startsWith("individual:")) {
+    return activeScope.scopeKey.slice("individual:".length);
+  }
+
+  return identity.subject ?? identity.tokenIdentifier ?? "system";
 }
 
 async function listScoringRequirements(ctx: any, project: any) {
@@ -791,6 +786,120 @@ export const listProjectVendorResponses = query({
   },
 });
 
+export const getProjectScoringProgress = query({
+  args: {
+    projectId: v.id("projects"),
+    departmentId: v.optional(v.id("workspaceDepartments")),
+  },
+  handler: async (ctx, args) => {
+    const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+
+    const vendors = await listAssignedVendorUsers(ctx, project);
+    const vendorRows = vendors.map((vendor) => ({
+      vendorUserId: vendor.vendorUserId as string,
+      vendorName: vendor.vendorName,
+      vendorContactName: vendor.vendorContactName,
+    }));
+
+    const scorerAssignments = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+
+    const scorerRows: Array<{
+      userId: string;
+      displayName: string;
+      departmentId: Id<"workspaceDepartments"> | null;
+      departmentName: string;
+      scopeKey: string;
+      completedPairs: number;
+      totalPairs: number;
+      vendors: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }>;
+    }> = [];
+
+    for (const assignment of scorerAssignments) {
+      if (assignment.userId.startsWith("department:")) {
+        continue;
+      }
+
+      const member = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+        .filter((q: any) => q.eq(q.field("userId"), assignment.userId))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .first();
+
+      const memberDepartment = member?.departmentId ? await ctx.db.get(member.departmentId) : null;
+      const departmentId = member?.departmentId ?? null;
+      const departmentName = memberDepartment?.name ?? "No department";
+
+      if (args.departmentId && departmentId !== args.departmentId) {
+        continue;
+      }
+
+      const scopeKey = `individual:${assignment.userId}`;
+      const scorerVendorRows: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }> = [];
+
+      for (const vendor of vendorRows) {
+        const completion = await ctx.db
+          .query("scorerCompletions")
+          .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId).eq("scorerScopeKey", scopeKey))
+          .first();
+
+        scorerVendorRows.push({
+          vendorUserId: vendor.vendorUserId,
+          status: completion?.status ?? "not-started",
+          answeredCount: completion?.answeredCount ?? 0,
+          totalRequirements: completion?.totalRequirements ?? 0,
+          completedAt: completion?.completedAt ?? null,
+        });
+      }
+
+      const completedPairs = scorerVendorRows.filter((row) => row.status === "completed").length;
+
+      scorerRows.push({
+        userId: assignment.userId,
+        displayName: assignment.displayName,
+        departmentId,
+        departmentName,
+        scopeKey,
+        completedPairs,
+        totalPairs: vendorRows.length,
+        vendors: scorerVendorRows,
+      });
+    }
+
+    const grouped = new Map<string, { departmentId: string | null; departmentName: string; scorers: typeof scorerRows; completedPairs: number; totalPairs: number }>();
+    for (const scorer of scorerRows) {
+      const key = scorer.departmentId ?? "none";
+      const current = grouped.get(key) ?? {
+        departmentId: scorer.departmentId,
+        departmentName: scorer.departmentName,
+        scorers: [],
+        completedPairs: 0,
+        totalPairs: 0,
+      };
+      current.scorers.push(scorer);
+      current.completedPairs += scorer.completedPairs;
+      current.totalPairs += scorer.totalPairs;
+      grouped.set(key, current);
+    }
+
+    return {
+      projectId: args.projectId,
+      vendors: vendorRows,
+      groups: Array.from(grouped.values())
+        .map((group) => ({
+          ...group,
+          scorers: group.scorers.sort((a, b) => a.displayName.localeCompare(b.displayName)),
+        }))
+        .sort((a, b) => a.departmentName.localeCompare(b.departmentName)),
+    };
+  },
+});
+
 export const getVendorResponseReview = query({
   args: vendorResponseReviewValidator,
   handler: async (ctx, args) => {
@@ -994,6 +1103,7 @@ export const getScorerVendorGrid = query({
         ownScore: own?.score ?? null,
         ownComment: own?.comment ?? "",
         ownEnteredByDisplayName: own?.enteredByDisplayName ?? null,
+        ownScorerDepartmentName: own?.scorerDepartmentName ?? null,
         ownEnteredAt: own?.enteredAt ?? null,
         vendorScore: isCompleted ? (vendorSelf?.score ?? null) : null,
         vendorComment: isCompleted ? (vendorSelf?.comment ?? "") : null,
@@ -1046,6 +1156,8 @@ export const saveScorerScore = mutation({
     }
 
     const now = Date.now();
+    const scorerUserId = resolveScorerUserId(activeScope, identity);
+    const departmentSnapshot = await getScorerDepartmentSnapshot(ctx, project.companyId, scorerUserId);
     const existing = await ctx.db
       .query("scorerScores")
       .withIndex("by_project_vendor_scope_requirement", (q) =>
@@ -1066,8 +1178,10 @@ export const saveScorerScore = mutation({
       requirementId: args.requirementId,
       score: args.score,
       comment: args.comment?.trim() || undefined,
-      enteredByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      enteredByUserId: scorerUserId,
       enteredByDisplayName: displayName,
+      scorerDepartmentId: departmentSnapshot.scorerDepartmentId,
+      scorerDepartmentName: departmentSnapshot.scorerDepartmentName,
       enteredAt: now,
       updatedAt: now,
     };
@@ -1104,6 +1218,8 @@ export const saveScorerScore = mutation({
       completedAt: completion?.completedAt,
       updatedByUserId: payload.enteredByUserId,
       updatedByDisplayName: payload.enteredByDisplayName,
+      scorerDepartmentId: departmentSnapshot.scorerDepartmentId,
+      scorerDepartmentName: departmentSnapshot.scorerDepartmentName,
       updatedAt: now,
     } as const;
 
@@ -1157,6 +1273,8 @@ export const completeScorerVendor = mutation({
     const answeredCount = new Set(scopeScores.map((row) => row.requirementId)).size;
 
     const now = Date.now();
+    const scorerUserId = resolveScorerUserId(activeScope, identity);
+    const departmentSnapshot = await getScorerDepartmentSnapshot(ctx, project.companyId, scorerUserId);
     const completion = await ctx.db
       .query("scorerCompletions")
       .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
@@ -1174,8 +1292,10 @@ export const completeScorerVendor = mutation({
       totalRequirements: requirements.length,
       lastScoredAt: completion?.lastScoredAt ?? now,
       completedAt: now,
-      updatedByUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      updatedByUserId: scorerUserId,
       updatedByDisplayName: displayName,
+      scorerDepartmentId: departmentSnapshot.scorerDepartmentId,
+      scorerDepartmentName: departmentSnapshot.scorerDepartmentName,
       updatedAt: now,
     };
 

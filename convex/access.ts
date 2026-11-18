@@ -182,7 +182,29 @@ export const seedScenario = internalMutation({
       return vendorId;
     };
 
-    const ensureCompanyMember = async (companyId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer" | "vendor", vendorId?: any) => {
+    const ensureDepartment = async (companyId: any, name: string) => {
+      const existing = await ctx.db
+        .query("workspaceDepartments")
+        .filter((q) => q.eq(q.field("companyId"), companyId))
+        .filter((q) => q.eq(q.field("name"), name))
+        .first();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, { isActive: true, isTestData: true });
+        return existing._id;
+      }
+
+      return await ctx.db.insert("workspaceDepartments", {
+        companyId,
+        name,
+        createdByUserId: "seed",
+        createdAt: Date.now(),
+        isActive: true,
+        isTestData: true,
+      });
+    };
+
+    const ensureCompanyMember = async (companyId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer" | "vendor", vendorId?: any, departmentId?: any) => {
       const existing = await ctx.db
         .query("companyMembers")
         .filter((q) => q.eq(q.field("companyId"), companyId))
@@ -194,6 +216,7 @@ export const seedScenario = internalMutation({
           email,
           displayName,
           role,
+          departmentId: departmentId ?? existing.departmentId,
           vendorId: vendorId ?? existing.vendorId,
           isActive: true,
           isTestData: true,
@@ -207,12 +230,43 @@ export const seedScenario = internalMutation({
         email,
         displayName,
         role,
+        departmentId,
         vendorId,
         isActive: true,
         createdAt: Date.now(),
         isTestData: true,
       });
       return memberId;
+    };
+
+    const ensureDepartmentMember = async (companyId: any, departmentId: any, userId: string, email: string, displayName: string, role: "company-admin" | "company-scorer") => {
+      const existing = await ctx.db
+        .query("departmentMembers")
+        .filter((q) => q.eq(q.field("companyId"), companyId))
+        .filter((q) => q.eq(q.field("userId"), userId))
+        .first();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          departmentId,
+          email,
+          displayName,
+          role,
+          isActive: true,
+        });
+        return;
+      }
+
+      await ctx.db.insert("departmentMembers", {
+        companyId,
+        departmentId,
+        userId,
+        email,
+        displayName,
+        role,
+        createdAt: Date.now(),
+        isActive: true,
+      });
     };
 
     const ensureProjectMember = async (companyId: any, projectId: any, userId: string, role: "company-admin" | "company-scorer" | "vendor", displayName: string) => {
@@ -246,13 +300,20 @@ export const seedScenario = internalMutation({
       return memberId;
     };
 
-    await ensureCompanyMember(companyA._id, "acme-admin", "acme-admin@acme.example", "ACME Admin", "company-admin");
+    const companyAGeneralDepartmentId = await ensureDepartment(companyA._id, "General");
+    const companyBGeneralDepartmentId = await ensureDepartment(companyB._id, "General");
+    const companyCGeneralDepartmentId = await ensureDepartment(companyC._id, "General");
+
+    await ensureCompanyMember(companyA._id, "acme-admin", "acme-admin@acme.example", "ACME Admin", "company-admin", undefined, companyAGeneralDepartmentId);
+    await ensureDepartmentMember(companyA._id, companyAGeneralDepartmentId, "acme-admin", "acme-admin@acme.example", "ACME Admin", "company-admin");
     await ensureProjectMember(companyA._id, companyAProjectId, "acme-admin", "company-admin", "ACME Admin");
 
-    await ensureCompanyMember(companyB._id, "beta-admin", "admin@beta.example", "Beta Admin", "company-admin");
+    await ensureCompanyMember(companyB._id, "beta-admin", "admin@beta.example", "Beta Admin", "company-admin", undefined, companyBGeneralDepartmentId);
+    await ensureDepartmentMember(companyB._id, companyBGeneralDepartmentId, "beta-admin", "admin@beta.example", "Beta Admin", "company-admin");
     await ensureProjectMember(companyB._id, companyBProjectId, "beta-admin", "company-admin", "Beta Admin");
 
-    await ensureCompanyMember(companyB._id, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer");
+    await ensureCompanyMember(companyB._id, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer", undefined, companyBGeneralDepartmentId);
+    await ensureDepartmentMember(companyB._id, companyBGeneralDepartmentId, "beta-scorer", "scorer@beta.example", "Beta Scorer", "company-scorer");
     await ensureProjectMember(companyB._id, companyBProjectId, "beta-scorer", "company-scorer", "Beta Scorer");
 
     const northwindVendorId = await ensureVendorOrganization(companyB._id, "Northwind Labs", "vendor@northwind.example");
@@ -266,7 +327,8 @@ export const seedScenario = internalMutation({
       isTestData: true,
     });
 
-    await ensureCompanyMember(companyC._id, "frazer-knight-admin", "frazerknight@hotmail.com", "Frazer Knight", "company-admin");
+    await ensureCompanyMember(companyC._id, "frazer-knight-admin", "frazerknight@hotmail.com", "Frazer Knight", "company-admin", undefined, companyCGeneralDepartmentId);
+    await ensureDepartmentMember(companyC._id, companyCGeneralDepartmentId, "frazer-knight-admin", "frazerknight@hotmail.com", "Frazer Knight", "company-admin");
 
     return { companyAId: companyA._id, companyBId: companyB._id, companyCId: companyC._id, projectAId: companyAProjectId, projectBId: companyBProjectId };
   },
@@ -359,6 +421,7 @@ export const acceptPendingInvitesForUser = internalMutation({
 
     let accepted = 0;
     for (const invite of pendingInvites) {
+      const inviteNeedsDepartment = invite.role === "company-admin" || invite.role === "company-scorer";
       const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
       if (invite.cancelledAt || invite.deactivatedAt || isExpired) {
         await ctx.db.patch(invite._id, {
@@ -368,6 +431,10 @@ export const acceptPendingInvitesForUser = internalMutation({
           deactivatedAt: invite.deactivatedAt ?? undefined,
         });
         continue;
+      }
+
+      if (inviteNeedsDepartment && !invite.departmentId) {
+        throw new Error("This invite is missing a department. Ask a workspace admin to re-send the invite with a department.");
       }
 
       const existingMemberships = await ctx.db
@@ -382,8 +449,11 @@ export const acceptPendingInvitesForUser = internalMutation({
       const hasMatchingVendorMembership = invite.vendorId
         ? existingMemberships.some((membership) => membership.vendorId === invite.vendorId)
         : true;
+      const hasMatchingDepartment = inviteNeedsDepartment
+        ? existingMemberships.some((membership) => membership.departmentId === invite.departmentId)
+        : true;
 
-      if (canonicalMembership && canonicalMembership.isActive && hasMatchingVendorMembership) {
+      if (canonicalMembership && canonicalMembership.isActive && hasMatchingVendorMembership && hasMatchingDepartment) {
         for (const duplicate of existingMemberships) {
           if (duplicate._id !== canonicalMembership._id) {
             await ctx.db.delete(duplicate._id);
@@ -405,6 +475,7 @@ export const acceptPendingInvitesForUser = internalMutation({
           email: targetEmail,
           displayName: args.displayName ?? invite.displayName,
           role: invite.role,
+          departmentId: inviteNeedsDepartment ? invite.departmentId : undefined,
           vendorId: invite.vendorId ?? canonicalMembership.vendorId,
           isActive: true,
         });
@@ -415,11 +486,53 @@ export const acceptPendingInvitesForUser = internalMutation({
           email: targetEmail,
           displayName: args.displayName ?? invite.displayName,
           role: invite.role,
+          departmentId: inviteNeedsDepartment ? invite.departmentId : undefined,
           vendorId: invite.vendorId,
           isActive: true,
           createdAt: Date.now(),
           isTestData: invite.isTestData ?? false,
         });
+      }
+
+      if (inviteNeedsDepartment && invite.departmentId) {
+        const activeAssignments = await ctx.db
+          .query("departmentMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
+          .filter((q: any) => q.eq(q.field("userId"), args.userId))
+          .collect();
+
+        for (const assignment of activeAssignments) {
+          await ctx.db.patch(assignment._id, {
+            isActive: assignment.departmentId === invite.departmentId,
+            email: targetEmail,
+            displayName: args.displayName ?? invite.displayName,
+            role: invite.role,
+          });
+        }
+
+        const hasTargetAssignment = activeAssignments.some((assignment) => assignment.departmentId === invite.departmentId);
+        if (!hasTargetAssignment) {
+          await ctx.db.insert("departmentMembers", {
+            companyId: invite.companyId,
+            departmentId: invite.departmentId,
+            userId: args.userId,
+            email: targetEmail,
+            displayName: args.displayName ?? invite.displayName,
+            role: invite.role,
+            createdAt: Date.now(),
+            isActive: true,
+          });
+        }
+      } else {
+        const activeAssignments = await ctx.db
+          .query("departmentMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
+          .filter((q: any) => q.eq(q.field("userId"), args.userId))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .collect();
+        for (const assignment of activeAssignments) {
+          await ctx.db.patch(assignment._id, { isActive: false });
+        }
       }
 
       for (const duplicate of existingMemberships) {

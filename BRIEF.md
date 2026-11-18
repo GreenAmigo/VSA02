@@ -5,7 +5,7 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 
 ## Roles
 - Project owner (PM or BA): creates projects; manages vendors, scorers, requirements, priorities and deadlines.
-- Scorer: an individual or a department within the company. Up to 20 per project.
+- Scorer: always an individual company person. Up to 20 per project.
 - Vendor: external supplier. Up to 10 per project.
 
 ## Projects
@@ -35,8 +35,9 @@ This is a multi-company app for IT vendor selection. Each company has its own us
   - these restrictions must be enforced on the server, not just hidden in the UI
 - Scorers:
   - score each vendor against each requirement (0 or 1, optional comment)
-  - grid view: requirements as rows, one column per scorer
+  - grid view: requirements as rows, one column per individual scorer
   - whether scorers can see each other's scores is a per-project setting the PM/BA controls
+  - each scorer score stores the scorer department snapshot at entry time for reporting accuracy
 - Record who entered every score and when.
 
 ## Vendor views
@@ -59,8 +60,8 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 ## Decisions
 1. A vendor's official total is based on the company scorers' scores, averaged across scorers. The vendor's own self-scores are shown alongside for comparison but do not count.
 2. Company staff log in with company single sign-on (SSO), not shared logins.
-   - A scorer can be an individual or a department.
-   - Staff log in as themselves. A department scorer column can be scored by any member of that department, and the app records which person entered each score and when.
+  - Scorers are individual people only.
+  - Staff log in as themselves and each score records who entered it, when, and the scorer's department snapshot.
 3. Priority 0 means Out Of Scope. These requirements are shown but add nothing to totals. A requirement can be set to 0 at any time, and it stays in the app for traceability (never deleted).
 
 ## Logins
@@ -116,11 +117,11 @@ The app uses a single canonical consultant home route for the workspace director
 | /workspaces/import | `src/app/workspaces/import/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceImportPage` | Bulk import entry for consultant-managed workspaces |
 | /workspaces/[companyId] | `src/app/workspaces/[companyId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceOverviewPage` | Company/workspace landing page |
 | /workspaces/[companyId]/projects | `src/app/workspaces/[companyId]/projects/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectsPage` | Real workspace project catalogue: project list, New project form, and access-controlled project creation for the active company |
-| /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Real project detail screen with assignment controls, project edit controls (name, description, vendor/scorer deadlines, archive/restore), dedicated scoring settings panel (default OFF scorer peer-visibility toggle with activity logging), consultant/company-admin vendor-response review (status/progress, answer review, post-deadline amendment with reason/history, optional reopen date), and company-scorer scoring workboard/grid with completion-gated vendor side-by-side answers |
+| /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Real project detail screen with assignment controls (individual scorers only), project edit controls (name, description, vendor/scorer deadlines, archive/restore), dedicated scoring settings panel (default OFF scorer peer-visibility toggle with activity logging), consultant/company-admin vendor-response review (status/progress, answer review, post-deadline amendment with reason/history, optional reopen date), department-grouped scorer progress, and company-scorer scoring workboard/grid with completion-gated vendor side-by-side answers |
 | /workspaces/[companyId]/projects/[projectId]/answer-requirements | `src/app/workspaces/[companyId]/projects/[projectId]/answer-requirements/page.tsx` -> `AuthGate` -> `VendorProjectAnswerRequirementsPage` | Vendor-only requirement answering surface with autosave, submit confirmation, deadline lock, and amendment visibility |
 | /projects/[projectId]/scoring | `src/components/project-workflow-ui.tsx` -> `ScoringPage` | Vendor self-scoring workflow with per-requirement answers, answered-count progress, deadline lock, status display, and admin-only post-deadline score amendment history |
-| /workspaces/[companyId]/people | `src/app/workspaces/[companyId]/people/page.tsx` -> `AuthGate` -> `ConsultantWorkspacePeoplePage` | People and role management |
-| /workspaces/[companyId]/departments | `src/app/workspaces/[companyId]/departments/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceDepartmentsPage` | Department/team view for workspace members |
+| /workspaces/[companyId]/people | `src/app/workspaces/[companyId]/people/page.tsx` -> `AuthGate` -> `ConsultantWorkspacePeoplePage` | People and role management with required department assignment for company admins/scorers, invite-time department selection, and editable department changes logged to activity |
+| /workspaces/[companyId]/departments | `src/app/workspaces/[companyId]/departments/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceDepartmentsPage` | Managed department list (create, rename, deactivate) for workspace people |
 | /workspaces/[companyId]/vendors | `src/app/workspaces/[companyId]/vendors/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorsPage` | Workspace-level vendor management and vendor-home redirect for vendor contacts |
 | /workspaces/[companyId]/vendors/[vendorId]/contacts | `src/app/workspaces/[companyId]/vendors/[vendorId]/contacts/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceVendorContactsPage` | Vendor contact invitations, status, and reactivation |
 | /workspaces/[companyId]/requirements | `src/app/workspaces/[companyId]/requirements/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceRequirementsPage` | Workspace requirements summary by project (active/withdrawn/out-of-scope counts) with links to project detail pages |
@@ -146,7 +147,7 @@ The app uses a single canonical consultant home route for the workspace director
 ### Persona: Vendor Selection (VS) Consultant
 A platform-level super-admin who onboards client companies and has full admin over every workspace.
 
-Definition: A workspace belongs to exactly one company, and each company has exactly one workspace (so in the database, workspace and company are the same record, matching one WorkOS organisation). There can be many workspaces. A workspace holds everything that company needs to run vendor selections: its people (admins and scorers, individuals or departments), its vendors, and one or more projects. Each project has its own requirements, NFRs, priorities, scoring, deadlines and dashboard. People and vendors belong to the workspace and are assigned to projects.
+Definition: A workspace belongs to exactly one company, and each company has exactly one workspace (so in the database, workspace and company are the same record, matching one WorkOS organisation). There can be many workspaces. A workspace holds everything that company needs to run vendor selections: its people (admins and individual scorers with required departments), its vendors, and one or more projects. Each project has its own requirements, NFRs, priorities, scoring, deadlines and dashboard. People and vendors belong to the workspace and are assigned to projects.
 
 Access:
 - VS Consultants: full access to every workspace.

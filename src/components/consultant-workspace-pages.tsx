@@ -1880,22 +1880,19 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
-  const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
-    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
-    | undefined;
   const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId ? "skip" : { companyId }) as
-    | Array<{ departmentId: string; name: string; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
+    | Array<{ departmentId: string; name: string; isActive?: boolean; memberCount?: number; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
     | undefined;
 
   const createDepartment = useMutation((api as any).admin.createWorkspaceDepartment);
-  const addDepartmentMember = useMutation((api as any).admin.addWorkspaceDepartmentMember);
-  const removeDepartmentMember = useMutation((api as any).admin.removeWorkspaceDepartmentMember);
+  const renameDepartment = useMutation((api as any).admin.renameWorkspaceDepartment);
+  const deactivateDepartment = useMutation((api as any).admin.deactivateWorkspaceDepartment);
   const [departmentName, setDepartmentName] = useState("");
-  const [selectedMembers, setSelectedMembers] = useState<Record<string, string>>({});
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined || departments === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || departments === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -1911,13 +1908,12 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
     name: company.name,
     isTestData: false,
     projects: [],
-    people: people.map((person) => ({ id: person.id, name: person.name })),
+    people: [],
     vendors: [],
     requirements: [],
     scores: [],
   };
-
-  const activeWorkspaceMembers = people.filter((person) => person.status === "active" && person.userId);
+  const activeDepartments = departments.filter((department) => department.isActive !== false);
 
   const handleCreateDepartment = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1939,37 +1935,40 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
     }
   };
 
-  const handleAddMember = async (departmentId: string) => {
-    const userId = selectedMembers[departmentId];
-    if (!userId) {
-      setNotice({ kind: "error", message: "Choose a person to add to the department." });
+  const handleRenameDepartment = async (department: { departmentId: string; name: string }) => {
+    const nextName = (renameDrafts[department.departmentId] ?? department.name).trim();
+    if (!nextName) {
+      setNotice({ kind: "error", message: "Department name is required." });
+      return;
+    }
+    if (nextName === department.name) {
+      setNotice({ kind: "error", message: "Enter a different name before saving." });
       return;
     }
 
     setBusy(true);
     try {
-      await addDepartmentMember({ companyId: companyId as any, departmentId: departmentId as any, userId });
-      setSelectedMembers((current) => ({ ...current, [departmentId]: "" }));
-      setNotice({ kind: "success", message: "Member added to the department." });
+      await renameDepartment({ companyId: companyId as any, departmentId: department.departmentId as any, name: nextName });
+      setNotice({ kind: "success", message: `Renamed ${department.name} to ${nextName}.` });
     } catch (error) {
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to add the member." });
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to rename this department." });
     } finally {
       setBusy(false);
     }
   };
 
-  const handleRemoveMember = async (departmentId: string, userId: string) => {
-    const confirmed = window.confirm("Remove this person from the department?");
+  const handleDeactivateDepartment = async (department: { departmentId: string; name: string }) => {
+    const confirmed = window.confirm(`Deactivate ${department.name}?`);
     if (!confirmed) {
       return;
     }
 
     setBusy(true);
     try {
-      await removeDepartmentMember({ companyId: companyId as any, departmentId: departmentId as any, userId });
-      setNotice({ kind: "success", message: "Member removed from the department." });
+      await deactivateDepartment({ companyId: companyId as any, departmentId: department.departmentId as any });
+      setNotice({ kind: "success", message: `Deactivated ${department.name}.` });
     } catch (error) {
-      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to remove the member." });
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to deactivate this department." });
     } finally {
       setBusy(false);
     }
@@ -1991,7 +1990,7 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Departments</h2>
-          <StatusPill label={`${departments.length} groups`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+          <StatusPill label={`${activeDepartments.length} active`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
         </div>
 
         {notice ? (
@@ -2018,73 +2017,44 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
           </form>
         ) : null}
 
-        {departments.length === 0 ? (
+        {activeDepartments.length === 0 ? (
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300">
-            No department groups are configured yet for this workspace.
+            No active departments are configured yet for this workspace.
           </div>
         ) : (
           <div className="space-y-4">
-            {departments.map((department) => {
-              const availableMembers = activeWorkspaceMembers.filter(
-                (person) => !department.members.some((member) => member.userId === person.userId),
-              );
-
-              return (
-                <div key={department.departmentId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-base font-semibold text-white">{department.name}</h3>
-                    <StatusPill label={`${department.members.length} members`} className="border-slate-700 bg-slate-900 text-slate-200" />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {department.members.length === 0 ? (
-                      <span className="text-sm text-slate-400">No members assigned yet.</span>
-                    ) : (
-                      department.members.map((member) => (
-                        <div key={`${department.departmentId}-${member.userId}`} className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">
-                          <span>{member.displayName}</span>
-                          {canManagePeople ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleRemoveMember(department.departmentId, member.userId)}
-                              className="text-rose-300 hover:text-rose-200"
-                              aria-label={`Remove ${member.displayName} from ${department.name}`}
-                            >
-                              ×
-                            </button>
-                          ) : null}
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  {canManagePeople && availableMembers.length > 0 ? (
-                    <div className="mt-4 flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3 md:flex-row md:items-center">
-                      <select
-                        value={selectedMembers[department.departmentId] ?? ""}
-                        onChange={(event) => setSelectedMembers((current) => ({ ...current, [department.departmentId]: event.target.value }))}
-                        className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white outline-none focus:border-sky-400"
-                      >
-                        <option value="">Choose a person</option>
-                        {availableMembers.map((person) => (
-                          <option key={person.id} value={person.userId ?? ""}>
-                            {person.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => void handleAddMember(department.departmentId)}
-                        disabled={busy || !selectedMembers[department.departmentId]}
-                        className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
-                      >
-                        Add member
-                      </button>
-                    </div>
-                  ) : null}
+            {activeDepartments.map((department) => (
+              <div key={department.departmentId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold text-white">{department.name}</h3>
+                  <StatusPill label={`${department.memberCount ?? department.members.length} people`} className="border-slate-700 bg-slate-900 text-slate-200" />
                 </div>
-              );
-            })}
+
+                <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                  <input
+                    value={renameDrafts[department.departmentId] ?? department.name}
+                    onChange={(event) => setRenameDrafts((current) => ({ ...current, [department.departmentId]: event.target.value }))}
+                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleRenameDepartment(department)}
+                    disabled={busy}
+                    className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
+                  >
+                    Save name
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeactivateDepartment(department)}
+                    disabled={busy}
+                    className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200 hover:border-rose-400 disabled:opacity-60"
+                  >
+                    Deactivate
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -2282,6 +2252,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const canManageWorkspace = Boolean(access && (access.isConsultant || access.role === "company-admin"));
+  const canManageProjects = Boolean(access && (access.isConsultant || access.role === "company-admin"));
   const isVendorView = Boolean(access?.isVendor || access?.role === "vendor");
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
@@ -2309,32 +2280,55 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     }
     | undefined;
   const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
-    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string; departmentId?: string | null; departmentName?: string | null }>
     | undefined;
   const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
-    | Array<{ departmentId: string; name: string; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
+    | Array<{ departmentId: string; name: string; isActive?: boolean; memberCount?: number; members: Array<{ userId: string; displayName: string; email?: string | null; role?: string }> }>
     | undefined;
   const workspaceVendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
     | Array<{ vendorId: string; name: string; contactEmail?: string | null; status: string; contactCount?: number }>
     | undefined;
   const addProjectScorer = useMutation(api.admin.addProjectScorer);
   const addProjectVendor = useMutation(api.admin.addProjectVendor);
-  const [scorerDraft, setScorerDraft] = useState({ selectedUserId: "", role: "individual" as "individual" | "department", departmentName: "" });
+  const [scorerDraft, setScorerDraft] = useState({ selectedUserId: "" });
+  const [selectedProgressDepartmentId, setSelectedProgressDepartmentId] = useState("");
   const [vendorDraft, setVendorDraft] = useState({ selectedVendorId: "" });
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const scoringProgress = useQuery(
+    (api as any).scores.getProjectScoringProgress,
+    isProtectedLoading || !projectId || !canManageProjects
+      ? "skip"
+      : { projectId: projectId as any, departmentId: selectedProgressDepartmentId || undefined },
+  ) as
+    | {
+      projectId: string;
+      vendors: Array<{ vendorUserId: string; vendorName: string; vendorContactName: string | null }>;
+      groups: Array<{
+        departmentId: string | null;
+        departmentName: string;
+        completedPairs: number;
+        totalPairs: number;
+        scorers: Array<{ displayName: string; completedPairs: number; totalPairs: number }>;
+      }>;
+    }
+    | undefined;
 
   if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
-  const canManageProjects = Boolean(access.isConsultant || access.role === "company-admin");
   const isScorerView = access.role === "company-scorer";
   const workspacePeopleList = canManageWorkspace ? (workspacePeople ?? []) : [];
-  const departmentsList = canManageWorkspace ? (departments ?? []) : [];
+  const departmentsList = canManageWorkspace ? (departments ?? []).filter((department) => department.isActive !== false) : [];
   const workspaceVendorsList = canManageWorkspace ? (workspaceVendors ?? []) : [];
-  const assignableScorers = workspacePeopleList.filter((person) => person.status === "active" && person.source === "member" && (person.role === "company-scorer" || person.role === "company-admin"));
+  const assignableScorers = workspacePeopleList.filter((person) =>
+    person.status === "active"
+    && person.source === "member"
+    && (person.role === "company-scorer" || person.role === "company-admin")
+    && Boolean(person.departmentId),
+  );
   const assignableVendors = workspaceVendorsList.filter((vendor) => vendor.status === "active");
   const selectedScorer = assignableScorers.find((person) => person.id === scorerDraft.selectedUserId) ?? null;
   const selectedVendor = assignableVendors.find((vendor) => vendor.vendorId === vendorDraft.selectedVendorId) ?? null;
@@ -2364,10 +2358,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         userId: selectedScorer.userId ?? undefined,
         displayName: selectedScorer.name.trim(),
         email: selectedScorer.email.trim(),
-        role: scorerDraft.role,
-        departmentName: scorerDraft.role === "department" ? scorerDraft.departmentName.trim() || undefined : undefined,
       });
-      setScorerDraft({ selectedUserId: "", role: "individual", departmentName: "" });
+      setScorerDraft({ selectedUserId: "" });
       setNotice({ kind: "success", message: "Scorer assigned to the project." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign scorer." });
@@ -2457,6 +2449,49 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
 
+      {!isVendorView && canManageProjects ? (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-white">Scoring progress by department</h3>
+            <select
+              value={selectedProgressDepartmentId}
+              onChange={(event) => setSelectedProgressDepartmentId(event.target.value)}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+            >
+              <option value="">All departments</option>
+              {departmentsList.map((department) => (
+                <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {scoringProgress === undefined ? (
+            <p className="text-sm text-slate-400">Loading scorer progress...</p>
+          ) : scoringProgress.groups.length === 0 ? (
+            <p className="text-sm text-slate-400">No assigned scorers yet for this filter.</p>
+          ) : (
+            <div className="space-y-4">
+              {scoringProgress.groups.map((group) => (
+                <div key={group.departmentId ?? group.departmentName} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-base font-semibold text-white">{group.departmentName}</p>
+                    <StatusPill label={`${group.completedPairs} / ${group.totalPairs} completed`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+                  </div>
+                  <div className="space-y-2">
+                    {group.scorers.map((scorer) => (
+                      <div key={`${group.departmentName}-${scorer.displayName}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+                        <span className="text-sm text-slate-100">{scorer.displayName}</span>
+                        <span className="text-xs text-slate-300">{scorer.completedPairs} / {scorer.totalPairs} vendors completed</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} /> : null}
 
       {isVendorView ? (
@@ -2504,31 +2539,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                 >
                   <option value="">Select a workspace person</option>
                   {assignableScorers.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name} — {person.email}</option>
+                    <option key={person.id} value={person.id}>{person.name} — {person.email} — {person.departmentName}</option>
                   ))}
                 </select>
-                <div className="flex gap-3">
-                  <select
-                    value={scorerDraft.role}
-                    onChange={(event) => setScorerDraft((current) => ({ ...current, role: event.target.value as "individual" | "department" }))}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                  >
-                    <option value="individual">Individual</option>
-                    <option value="department">Department</option>
-                  </select>
-                  {scorerDraft.role === "department" ? (
-                    <select
-                      value={scorerDraft.departmentName}
-                      onChange={(event) => setScorerDraft((current) => ({ ...current, departmentName: event.target.value }))}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                    >
-                      <option value="">Select a department</option>
-                      {departmentsList.map((department) => (
-                        <option key={department.departmentId} value={department.name}>{department.name}</option>
-                      ))}
-                    </select>
-                  ) : null}
-                </div>
+                <p className="text-xs text-slate-400">Project scoring assignments are individual only. Each person keeps their workspace department.</p>
                 <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
                   Add scorer
                 </button>
@@ -2868,18 +2882,23 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const people = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId ? "skip" : { companyId }) as
-    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string }>
+    | Array<{ id: string; userId?: string | null; name: string; email: string; role: string; status: string; source: string; departmentId?: string | null; departmentName?: string | null }>
+    | undefined;
+  const departments = useQuery((api as any).admin.listWorkspaceDepartments, isProtectedLoading || !companyId ? "skip" : { companyId }) as
+    | Array<{ departmentId: string; name: string; isActive?: boolean }>
     | undefined;
 
   const invitePerson = useMutation((api as any).admin.inviteWorkspacePerson);
   const cancelInvite = useMutation((api as any).admin.cancelWorkspaceInvite);
   const deactivatePerson = useMutation((api as any).admin.deactivateWorkspacePerson);
   const reactivatePerson = useMutation((api as any).admin.reactivateWorkspacePerson);
-  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "company-scorer" as "company-admin" | "company-scorer" | "vendor" });
+  const updateWorkspacePersonDepartment = useMutation((api as any).admin.updateWorkspacePersonDepartment);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "company-scorer" as "company-admin" | "company-scorer" | "vendor", departmentId: "" });
+  const [departmentDrafts, setDepartmentDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || people === undefined || departments === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -2891,12 +2910,17 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
 
   const members = people.filter((person) => person.source === "member");
   const invitations = people.filter((person) => person.source === "invite");
+  const activeDepartments = departments.filter((department) => department.isActive !== false);
 
   const handleInvite = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedEmail = inviteForm.email.trim();
     if (!inviteForm.name.trim() || !trimmedEmail) {
       setNotice({ kind: "error", message: "Enter a name and email before inviting a person." });
+      return;
+    }
+    if ((inviteForm.role === "company-admin" || inviteForm.role === "company-scorer") && !inviteForm.departmentId) {
+      setNotice({ kind: "error", message: "Select a department before inviting a company admin or scorer." });
       return;
     }
 
@@ -2907,11 +2931,37 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
         name: inviteForm.name.trim(),
         email: trimmedEmail,
         role: inviteForm.role,
+        departmentId: inviteForm.role === "vendor" ? undefined : (inviteForm.departmentId as any),
       });
-      setInviteForm({ name: "", email: "", role: "company-scorer" });
+      setInviteForm({ name: "", email: "", role: "company-scorer", departmentId: "" });
       setNotice({ kind: "success", message: "Invite created. The person will be linked automatically on their next verified sign-in." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to invite this person." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUpdateDepartment = async (person: { id: string; userId?: string | null; name: string; departmentId?: string | null; role: string }) => {
+    if (!person.userId || person.role === "vendor") {
+      return;
+    }
+
+    const nextDepartmentId = departmentDrafts[person.id] ?? person.departmentId ?? "";
+    if (!nextDepartmentId) {
+      setNotice({ kind: "error", message: "Select a department before saving." });
+      return;
+    }
+    if (nextDepartmentId === person.departmentId) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await updateWorkspacePersonDepartment({ companyId: companyId as any, userId: person.userId, departmentId: nextDepartmentId as any });
+      setNotice({ kind: "success", message: `Updated ${person.name}'s department.` });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to update department." });
     } finally {
       setBusy(false);
     }
@@ -3012,7 +3062,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
         {canManagePeople ? (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="text-lg font-semibold text-white">Invite a person</h2>
-            <form onSubmit={handleInvite} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_180px_auto]">
+            <form onSubmit={handleInvite} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_180px_220px_auto]">
               <input
                 value={inviteForm.name}
                 onChange={(event) => setInviteForm((current) => ({ ...current, name: event.target.value }))}
@@ -3027,12 +3077,27 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
               />
               <select
                 value={inviteForm.role}
-                onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value as "company-admin" | "company-scorer" | "vendor" }))}
+                onChange={(event) => setInviteForm((current) => ({
+                  ...current,
+                  role: event.target.value as "company-admin" | "company-scorer" | "vendor",
+                  departmentId: event.target.value === "vendor" ? "" : current.departmentId,
+                }))}
                 className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
               >
                 <option value="company-admin">Company admin</option>
                 <option value="company-scorer">Company scorer</option>
                 <option value="vendor">Vendor</option>
+              </select>
+              <select
+                value={inviteForm.departmentId}
+                onChange={(event) => setInviteForm((current) => ({ ...current, departmentId: event.target.value }))}
+                disabled={inviteForm.role === "vendor"}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400 disabled:opacity-60"
+              >
+                <option value="">Select department</option>
+                {activeDepartments.map((department) => (
+                  <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
+                ))}
               </select>
               <button
                 type="submit"
@@ -3061,6 +3126,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                     <div className="min-w-0">
                       <p className="truncate text-base font-medium text-white" title={person.name}>{person.name}</p>
                       <p className="truncate text-sm text-slate-400" title={person.email}>{person.email}</p>
+                      {person.role !== "vendor" ? <p className="mt-1 text-xs text-slate-400">Department: {person.departmentName ?? "Not set"}</p> : null}
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill
@@ -3076,6 +3142,29 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                       </span>
                     </div>
                   </div>
+
+                  {person.status === "active" && person.userId && person.role !== "vendor" ? (
+                    <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
+                      <select
+                        value={departmentDrafts[person.id] ?? person.departmentId ?? ""}
+                        onChange={(event) => setDepartmentDrafts((current) => ({ ...current, [person.id]: event.target.value }))}
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+                      >
+                        <option value="">Select department</option>
+                        {activeDepartments.map((department) => (
+                          <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleUpdateDepartment(person)}
+                        disabled={busy}
+                        className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
+                      >
+                        Save department
+                      </button>
+                    </div>
+                  ) : null}
 
                   {person.status === "active" && person.userId ? (
                     <div className="mt-3 flex justify-end">
@@ -3122,6 +3211,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                     <div className="min-w-0">
                       <p className="truncate text-base font-medium text-white" title={person.name}>{person.name}</p>
                       <p className="truncate text-sm text-slate-400" title={person.email}>{person.email}</p>
+                      {person.role !== "vendor" ? <p className="mt-1 text-xs text-slate-400">Department: {person.departmentName ?? "Not set"}</p> : null}
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusPill

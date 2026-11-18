@@ -543,6 +543,12 @@ describe("Phase 5 score audit trail", () => {
     const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor", name: "Northwind Labs" });
 
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))[0].departmentId,
+    });
+
     await admin.mutation(api.requirements.applyRequirementImport, {
       projectId: seeded.projectBId,
       rows: [
@@ -628,7 +634,7 @@ describe("Phase 5 score audit trail", () => {
     expect(logs.some((entry: { action: string }) => entry.action === "scorer_vendor_complete")).toBe(true);
   });
 
-  test("department scorer columns can be scored by any department member and record who entered each score", async () => {
+  test("scorer scores keep the scorer department snapshot", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health",
@@ -638,8 +644,6 @@ describe("Phase 5 score audit trail", () => {
     });
 
     const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin" });
-    const deptMember = t.withIdentity({ tokenIdentifier: "ops-member", name: "Ops Member", email: "ops.member@beta.example" });
-
     const department = await admin.mutation(api.admin.createWorkspaceDepartment, {
       companyId: seeded.companyBId,
       name: "Operations",
@@ -650,6 +654,7 @@ describe("Phase 5 score audit trail", () => {
       name: "Ops Member",
       email: "ops.member@beta.example",
       role: "company-scorer",
+      departmentId: department.departmentId,
     });
 
     await t.mutation(internal.access.acceptPendingInvitesForUser, {
@@ -658,18 +663,14 @@ describe("Phase 5 score audit trail", () => {
       displayName: "Ops Member",
     });
 
-    await admin.mutation(api.admin.addWorkspaceDepartmentMember, {
-      companyId: seeded.companyBId,
-      departmentId: department.departmentId,
-      userId: "ops-member",
-    });
+    const deptMember = t.withIdentity({ tokenIdentifier: "ops-member", name: "Ops Member", email: "ops.member@beta.example" });
 
     await admin.mutation(api.admin.addProjectScorer, {
       companyId: seeded.companyBId,
       projectId: seeded.projectBId,
-      role: "department",
-      departmentId: department.departmentId,
-      departmentName: "Operations",
+      userId: "ops-member",
+      displayName: "Ops Member",
+      email: "ops.member@beta.example",
     });
 
     await admin.mutation(api.requirements.applyRequirementImport, {
@@ -678,27 +679,38 @@ describe("Phase 5 score audit trail", () => {
       confirm: true,
     });
 
-    const workboard = await deptMember.query((api as any).scores.getScorerWorkboard, { projectId: seeded.projectBId });
-    const departmentScope = workboard.scorerScopes.find((scope: { scopeType: string; label: string }) => scope.scopeType === "department" && scope.label === "Operations");
-    expect(departmentScope).toBeTruthy();
-
     await deptMember.mutation((api as any).scores.saveScorerScore, {
       projectId: seeded.projectBId,
       vendorUserId: "northwind-vendor",
       requirementId: "REQ-D1",
       score: 1,
       comment: "Department assessment",
-      scopeKey: departmentScope.scopeKey,
     });
 
     const grid = await deptMember.query((api as any).scores.getScorerVendorGrid, {
       projectId: seeded.projectBId,
       vendorUserId: "northwind-vendor",
-      scopeKey: departmentScope.scopeKey,
     });
     expect(grid.rows[0].ownScore).toBe(1);
     expect(grid.rows[0].ownComment).toBe("Department assessment");
     expect(grid.rows[0].ownEnteredByDisplayName).toBe("Ops Member");
+    expect(grid.rows[0].ownScorerDepartmentName).toBe("Operations");
+
+    const engineering = await admin.mutation(api.admin.createWorkspaceDepartment, {
+      companyId: seeded.companyBId,
+      name: "Engineering",
+    });
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "ops-member",
+      departmentId: engineering.departmentId,
+    });
+
+    const gridAfterMove = await deptMember.query((api as any).scores.getScorerVendorGrid, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+    expect(gridAfterMove.rows[0].ownScorerDepartmentName).toBe("Operations");
   });
 
   test("scorer peer visibility is controlled by the per-project admin setting", async () => {
@@ -713,11 +725,18 @@ describe("Phase 5 score audit trail", () => {
     const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin" });
     const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer" });
 
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))[0].departmentId,
+    });
+
     await admin.mutation(api.admin.inviteWorkspacePerson, {
       companyId: seeded.companyBId,
       name: "Peer Scorer",
       email: "peer.scorer@beta.example",
       role: "company-scorer",
+      departmentId: (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))[0].departmentId,
     });
 
     await t.mutation(internal.access.acceptPendingInvitesForUser, {
@@ -732,7 +751,6 @@ describe("Phase 5 score audit trail", () => {
       userId: "peer-scorer",
       displayName: "Peer Scorer",
       email: "peer.scorer@beta.example",
-      role: "individual",
     });
 
     const peerScorer = t.withIdentity({ tokenIdentifier: "peer-scorer", name: "Peer Scorer", email: "peer.scorer@beta.example" });

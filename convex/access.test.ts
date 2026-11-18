@@ -7,6 +7,14 @@ import { api, internal } from "./_generated/api";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
+async function getFirstDepartmentId(actor: any, companyId: any) {
+  const departments = await actor.query((api as any).admin.listWorkspaceDepartments, { companyId });
+  if (!departments[0]?.departmentId) {
+    throw new Error("No department found for invite setup");
+  }
+  return departments[0].departmentId;
+}
+
 describe("Phase 2 access checks", () => {
   test("a user can only see companies and projects they belong to", async () => {
     const t = convexTest({ schema, modules });
@@ -349,6 +357,7 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
         email: "frank+invite@maxwellknight.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const noEmailUser = t.withIdentity({
@@ -431,6 +440,7 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
         email: "frank+invite@maxwellknight.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const invitedUser = t.withIdentity({
@@ -507,6 +517,7 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
         email: "frank+invite@maxwellknight.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       await consultant.mutation(api.admin.cancelWorkspaceInvite, {
@@ -541,6 +552,7 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
         email: "frank+invite@maxwellknight.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       await consultant.mutation(api.admin.expireWorkspaceInvite, {
@@ -575,6 +587,7 @@ describe("Phase 2 access checks", () => {
         name: "Frank Invite",
         email: "frank+invite@maxwellknight.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const acceptedUser = t.withIdentity({
@@ -646,6 +659,7 @@ describe("Phase 2 access checks", () => {
         name: "Green Test1",
         email: "greenamigo+new@hotmail.co.uk",
         role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
       });
 
       const user = t.withIdentity({
@@ -818,12 +832,13 @@ describe("Phase 2 access checks", () => {
         ssoProvider: "google-workspace",
       });
 
-    await consultant.mutation(api.admin.inviteWorkspacePerson, {
-      companyId: company.companyId,
-      name: "Green Test1",
-      email: "green-test-one@example.com",
-      role: "company-scorer",
-    });
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Green Test1",
+        email: "green-test-one@example.com",
+        role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
+      });
 
     const scorer = t.withIdentity({
       tokenIdentifier: "green-test-one",
@@ -845,7 +860,6 @@ describe("Phase 2 access checks", () => {
         projectId: project.projectId,
         displayName: "Green Test1",
         email: "green-test-one@example.com",
-        role: "individual",
       });
 
       const visibleProjects = await scorer.query(api.access.listProjectsForCompany, { companyId: company.companyId });

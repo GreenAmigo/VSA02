@@ -28,6 +28,7 @@ export default defineSchema({
     email: v.optional(v.string()),
     displayName: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    departmentId: v.optional(v.id("workspaceDepartments")),
     vendorId: v.optional(v.id("vendorOrganizations")),
     isActive: v.boolean(),
     createdAt: v.number(),
@@ -52,6 +53,7 @@ export default defineSchema({
     email: v.string(),
     displayName: v.string(),
     role: v.union(v.literal("company-admin"), v.literal("company-scorer"), v.literal("vendor")),
+    departmentId: v.optional(v.id("workspaceDepartments")),
     vendorId: v.optional(v.id("vendorOrganizations")),
     status: v.union(v.literal("invited"), v.literal("active"), v.literal("deactivated"), v.literal("cancelled"), v.literal("expired")),
     invitedByUserId: v.string(),
@@ -175,6 +177,8 @@ export default defineSchema({
     comment: v.optional(v.string()),
     enteredByUserId: v.string(),
     enteredByDisplayName: v.string(),
+    scorerDepartmentId: v.optional(v.id("workspaceDepartments")),
+    scorerDepartmentName: v.optional(v.string()),
     enteredAt: v.number(),
     updatedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
@@ -195,6 +199,8 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
     updatedByUserId: v.string(),
     updatedByDisplayName: v.string(),
+    scorerDepartmentId: v.optional(v.id("workspaceDepartments")),
+    scorerDepartmentName: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_scope", ["projectId", "scorerScopeKey"])
