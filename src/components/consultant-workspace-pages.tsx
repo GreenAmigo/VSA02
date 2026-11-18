@@ -361,6 +361,7 @@ function ScoringSettingsPanel({ companyId, projectId, project }: { companyId: st
 }
 
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
+  const selectedReviewRef = useRef<HTMLDivElement | null>(null);
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
     | Array<{
       vendorId: string;
@@ -383,6 +384,18 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const linkedVendorUserId = params.get("vendorUserId")?.trim();
+    if (linkedVendorUserId) {
+      setSelectedVendorUserId(linkedVendorUserId);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!vendorResponses || vendorResponses.length === 0) {
       setSelectedVendorUserId("");
       return;
@@ -396,6 +409,14 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
     const firstWithContact = vendorResponses.find((row) => Boolean(row.vendorUserId));
     setSelectedVendorUserId(firstWithContact?.vendorUserId ?? "");
   }, [vendorResponses, selectedVendorUserId]);
+
+  useEffect(() => {
+    if (!selectedVendorUserId || !selectedReviewRef.current) {
+      return;
+    }
+
+    selectedReviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedVendorUserId]);
 
   const selectedReview = useQuery(
     (api as any).scores.getVendorResponseReview,
@@ -575,17 +596,23 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedVendorUserId(vendor.vendorUserId as string);
+                      const targetVendorUserId = vendor.vendorUserId as string;
+                      setSelectedVendorUserId(targetVendorUserId);
                       setEditingRequirementId("");
                       setNotice(null);
                       setReopenDate("");
+                      if (typeof window !== "undefined") {
+                        const nextUrl = new URL(window.location.href);
+                        nextUrl.searchParams.set("vendorUserId", targetVendorUserId);
+                        window.history.replaceState({}, "", nextUrl.toString());
+                      }
                     }}
                     className={`rounded-xl border px-3 py-2 text-sm ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/60 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"}`}
                   >
-                    View answers
+                    View scores
                   </button>
                 ) : (
-                  <p className="text-xs text-slate-400">Add an active vendor contact to view and amend answers.</p>
+                  <p className="text-xs text-slate-400">Add an active vendor contact to view and amend scores.</p>
                 )}
               </div>
             </div>
@@ -600,7 +627,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       ) : null}
 
       {selectedVendorUserId ? (
-        <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        <div ref={selectedReviewRef} className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           {selectedReview === undefined ? (
             <p className="text-sm text-slate-400">Loading selected vendor answers...</p>
           ) : (
@@ -1876,7 +1903,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
 
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
-  const projects = useQuery(api.access.listProjectsForCompany, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as
+  const projects = useQuery((api as any).access.listDashboardProjects, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as
     | Array<{ _id: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }>
     | undefined;
 

@@ -164,6 +164,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).not.toContain("All workspaces");
     expect(html).not.toContain("Company ID");
     expect(html).not.toContain("Workspace directory");
+    expect(html).not.toContain("Workspace actions");
   });
 
   test("vendor project detail shows progress and answer CTA without import cards or assigned members", () => {
@@ -378,6 +379,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).not.toContain("Mark complete");
     expect(html).not.toContain("All workspaces");
     expect(html).not.toContain("Workspace directory");
+    expect(html).not.toContain("Workspace actions");
   });
 
   test("project detail renders for loading, consultant, company admin, scorer, and vendor without errors", () => {

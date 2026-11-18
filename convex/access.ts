@@ -1085,6 +1085,36 @@ export const listWorkspaceScoringSummary = query({
   },
 });
 
+export const listDashboardProjects = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    const userIds = getIdentityUserIds(identity);
+    const memberships = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity);
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity);
+
+    if (memberships.length === 0 && !consultantMembership) {
+      throw new Error("Company access denied");
+    }
+
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+      .collect();
+
+    if (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")) {
+      return projects;
+    }
+
+    const allowedProjectIds = await getAccessibleProjectIdsForUser(ctx, args.companyId, userIds, identity);
+    return projects.filter((project) => allowedProjectIds.has(project._id));
+  },
+});
+
 export async function canViewRequirements(
   ctx: any,
   projectId: Id<"projects">,

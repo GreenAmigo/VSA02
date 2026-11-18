@@ -515,19 +515,28 @@ describe("admin console actions", () => {
 
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
     const previousSeedSecret = process.env.CONVEX_PREVIEW_SEED_SECRET;
+    const previousGrantSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
 
     try {
       process.env.APP_ENVIRONMENT = "development";
       process.env.CONVEX_PREVIEW_SEED_SECRET = "test-preview-seed-secret";
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
 
-      await t.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspace] });
-      await t.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [{ ...workspace, slug: "acme-health-v2" }] });
+      await t.mutation(internal.admin.grantConsultantRole, {
+        secret: "test-consultant-secret",
+        userId: "seed-import",
+        email: "seed-import@example.com",
+        displayName: "Seed Importer",
+      });
 
       const seededIdentity = t.withIdentity({
         tokenIdentifier: "seed-import",
         email: "seed-import@example.com",
         name: "Seed Importer",
       });
+
+      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspace] });
+      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [{ ...workspace, slug: "acme-health-v2" }] });
 
       const companies: ReadonlyArray<{ name: string; _id: string }> = await seededIdentity.query(api.access.listAccessibleCompanies, {});
       const acmeCompanies = companies.filter((company: { name: string; _id: string }) => company.name === "Acme Health");
@@ -552,6 +561,12 @@ describe("admin console actions", () => {
         delete process.env.CONVEX_PREVIEW_SEED_SECRET;
       } else {
         process.env.CONVEX_PREVIEW_SEED_SECRET = previousSeedSecret;
+      }
+
+      if (previousGrantSecret === undefined) {
+        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      } else {
+        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousGrantSecret;
       }
     }
   });

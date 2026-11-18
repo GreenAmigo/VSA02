@@ -60,6 +60,38 @@ describe("Phase 2 access checks", () => {
     await expect(vendor.query(api.access.getCompany, { companyId: seeded.companyCId })).rejects.toThrow("Company access denied");
   });
 
+  test("dashboard projects return all workspace projects for admins and only assigned projects for scorers", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "admin@beta.example" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer", email: "scorer@beta.example" });
+
+    await admin.mutation(api.admin.createProject, {
+      companyId: seeded.companyBId,
+      name: "Unassigned Admin Project",
+      description: "Admin should see this",
+    });
+
+    const adminProjects = await admin.query((api as any).access.listDashboardProjects, {
+      companyId: seeded.companyBId,
+    });
+    expect(adminProjects.length).toBeGreaterThanOrEqual(2);
+    expect(adminProjects.some((project: { name: string }) => project.name === "Supply Chain")).toBe(true);
+    expect(adminProjects.some((project: { name: string }) => project.name === "Unassigned Admin Project")).toBe(true);
+
+    const scorerProjects = await scorer.query((api as any).access.listDashboardProjects, {
+      companyId: seeded.companyBId,
+    });
+    expect(scorerProjects.some((project: { name: string }) => project.name === "Supply Chain")).toBe(true);
+    expect(scorerProjects.some((project: { name: string }) => project.name === "Unassigned Admin Project")).toBe(false);
+  });
+
   test("a granted VS Consultant sees every workspace, including a newly created one, and legacy company consultant rows are migrated away", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

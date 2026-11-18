@@ -26,5 +26,6 @@
 - Shared workspace frame rule: every workspace page must use the same shell: the workspace name header, the same tab strip, and the signed-in panel. People and vendor contact pages must not be exceptions.
 - Breadcrumb rule: every workspace page must show a breadcrumb trail; consultants always include All workspaces, and vendor contact screens must link back to the vendor list before the vendor record.
 - Role menu rule: menu items are role-aware and server-enforced. Consultant: All workspaces, Activity log, and all workspace tabs; company admin: Overview, People, Departments, Vendors only; company scorer: Overview only; vendor: Vendor home only, with no People, Departments, Vendors or Activity log.
+- Dashboard project list rule: the workspace Overview dashboard must list the current user's visible projects directly (consultants/company admins: all workspace projects; scorers/vendors: assigned projects) without requiring a secondary "View all projects" hop.
 - Long text rule: labels and values in cards must use a smaller, consistent type scale, clamp long strings with ellipses, and keep full values available on hover/focus; long emails and IDs may wrap instead of forcing overflow.
 - When a task includes a verification step, run the exact proving commands and report the real output.

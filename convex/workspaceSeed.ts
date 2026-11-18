@@ -72,12 +72,35 @@ function toRequirementStatus(status: "Active" | "Draft") {
   return status === "Active" ? "active" : "withdrawn";
 }
 
+async function assertConsultantAccess(ctx: any, identity: { subject?: string; tokenIdentifier?: string; email?: string | null }) {
+  const userIds = Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+
+  const consultant = await ctx.db
+    .query("consultants")
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+    ))
+    .first();
+
+  if (!consultant) {
+    throw new Error("Consultant access required");
+  }
+}
+
 export const importWorkspaceBundle = mutation({
   args: {
     workspaces: v.array(workspaceSeedValidator),
   },
   handler: async (ctx, { workspaces }) => {
     const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not signed in");
+    }
+    await assertConsultantAccess(ctx, identity);
+
     const actorUserId = identity?.tokenIdentifier ?? "seed-import";
     const actorEmail = identity?.email ?? undefined;
     const actorName = identity?.name ?? "Seed importer";
