@@ -978,5 +978,115 @@ describe("Phase 5 score audit trail", () => {
     expect(visiblePeerAfterCompletion.canSeePeerScores).toBe(true);
     expect(visiblePeerAfterCompletion.rows[0].peerScores.length).toBeGreaterThan(0);
   });
+
+  test("preview/dev scorer reset clears scorer-only project data and leaves vendor answers", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    process.env.APP_ENVIRONMENT = "development";
+
+    try {
+      const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "admin@beta.example" });
+      const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer", email: "scorer@beta.example" });
+      const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor", name: "Northwind Labs", email: "vendor@northwind.example" });
+
+      await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+        companyId: seeded.companyBId,
+        userId: "beta-scorer",
+        departmentId: (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))[0].departmentId,
+      });
+
+      await admin.mutation(api.requirements.applyRequirementImport, {
+        projectId: seeded.projectBId,
+        rows: [{ id: "REQ-R1", text: "Reset row", type: "user-story", priority: 9, status: "active" }],
+        confirm: true,
+      });
+
+      await vendor.mutation((api as any).scores.saveVendorAnswer, {
+        projectId: seeded.projectBId,
+        requirementId: "REQ-R1",
+        score: 1,
+        comment: "Vendor stays",
+      });
+
+      await scorer.mutation((api as any).scores.saveScorerScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-R1",
+        score: 1,
+        comment: "Scorer removed",
+      });
+
+      await scorer.mutation((api as any).scores.completeScorerVendor, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+      });
+
+      await scorer.mutation((api as any).projectViews.saveProjectView, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        viewText: "Scorer view removed",
+      });
+
+      const resetResult = await t.mutation((internal as any).scores.clearProjectScorerData, {
+        projectId: seeded.projectBId,
+      });
+
+      expect(resetResult.scorerScoresRemoved).toBeGreaterThanOrEqual(1);
+      expect(resetResult.scorerCompletionsRemoved).toBeGreaterThanOrEqual(1);
+      expect(resetResult.scorerViewsRemoved).toBeGreaterThanOrEqual(1);
+
+      const scorerGrid = await scorer.query((api as any).scores.getScorerVendorGrid, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+      });
+      expect(scorerGrid.rows[0].ownScore).toBe(null);
+
+      const vendorRows = await vendor.query((api as any).scores.listVendorAnswerRequirements, {
+        projectId: seeded.projectBId,
+      });
+      expect(vendorRows.rows.find((row: { requirementId: string }) => row.requirementId === "REQ-R1")?.score).toBe(1);
+
+      const logs = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
+      expect(logs.some((entry: { action: string }) => entry.action === "clear_project_scorer_data")).toBe(true);
+    } finally {
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
+
+  test("project scorer reset is blocked in production", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    process.env.APP_ENVIRONMENT = "production";
+
+    try {
+      await expect(t.mutation((internal as any).scores.clearProjectScorerData, {
+        projectId: seeded.projectBId,
+      })).rejects.toThrow("Project scorer data reset is disabled in production");
+    } finally {
+      if (previousAppEnvironment === undefined) {
+        delete process.env.APP_ENVIRONMENT;
+      } else {
+        process.env.APP_ENVIRONMENT = previousAppEnvironment;
+      }
+    }
+  });
 });
 

@@ -78,6 +78,10 @@ const backfillScorerSnapshotsValidator = v.object({
   projectId: v.optional(v.id("projects")),
 });
 
+const clearProjectScorerDataValidator = v.object({
+  projectId: v.id("projects"),
+});
+
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
 }
@@ -359,6 +363,11 @@ function resolveScorerUserId(
   }
 
   return identity.subject ?? identity.tokenIdentifier ?? "system";
+}
+
+function isProductionEnvironment(): boolean {
+  const environment = (process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase();
+  return environment !== "development" && environment !== "preview";
 }
 
 async function resolveMemberDepartmentSnapshot(ctx: any, companyId: Id<"companies">, scorerUserId: string) {
@@ -1518,6 +1527,64 @@ export const backfillMissingScorerDepartmentSnapshots = internalMutation({
     return {
       scorerScoresUpdated,
       scorerCompletionsUpdated,
+    };
+  },
+});
+
+export const clearProjectScorerData = internalMutation({
+  args: clearProjectScorerDataValidator,
+  handler: async (ctx, args) => {
+    if (isProductionEnvironment()) {
+      throw new Error("Project scorer data reset is disabled in production");
+    }
+
+    const project = await ctx.db.get(args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const identity = await ctx.auth.getUserIdentity();
+    const actorUserId = identity?.subject ?? identity?.tokenIdentifier ?? "system";
+
+    const scorerScores = await ctx.db
+      .query("scorerScores")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .collect();
+
+    const scorerCompletions = await ctx.db
+      .query("scorerCompletions")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .collect();
+
+    const scorerViews = await ctx.db
+      .query("projectViews")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .collect();
+
+    for (const row of scorerScores) {
+      await ctx.db.delete(row._id);
+    }
+    for (const row of scorerCompletions) {
+      await ctx.db.delete(row._id);
+    }
+    for (const row of scorerViews) {
+      await ctx.db.delete(row._id);
+    }
+
+    await recordActivity(ctx, {
+      actorUserId,
+      actorEmail: identity?.email ?? undefined,
+      action: "clear_project_scorer_data",
+      details: `Cleared scorer data for project ${args.projectId}: ${scorerScores.length} scorer scores, ${scorerCompletions.length} scorer completions, ${scorerViews.length} scorer views removed.`,
+      companyId: project.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      scorerScoresRemoved: scorerScores.length,
+      scorerCompletionsRemoved: scorerCompletions.length,
+      scorerViewsRemoved: scorerViews.length,
     };
   },
 });
