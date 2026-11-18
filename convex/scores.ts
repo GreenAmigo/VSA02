@@ -68,6 +68,12 @@ const completeScorerVendorValidator = v.object({
   scopeKey: v.optional(v.string()),
 });
 
+const reopenScorerVendorValidator = v.object({
+  projectId: v.id("projects"),
+  vendorUserId: v.string(),
+  scopeKey: v.optional(v.string()),
+});
+
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
 }
@@ -333,6 +339,8 @@ function resolveActiveScope(scopes: Array<{ scopeKey: string; scopeType: "indivi
     if (exact) {
       return exact;
     }
+
+    throw new Error("You can only score as yourself.");
   }
 
   return scopes[0];
@@ -1322,6 +1330,61 @@ export const completeScorerVendor = mutation({
       answeredCount,
       totalRequirements: requirements.length,
       completedAt: now,
+    };
+  },
+});
+
+export const reopenScorerVendor = mutation({
+  args: reopenScorerVendorValidator,
+  handler: async (ctx, args) => {
+    const { project, identity, userIds, displayName } = await assertScorerAccess(ctx, args.projectId);
+    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const activeScope = resolveActiveScope(scopes, args.scopeKey);
+
+    if (isDeadlineLocked(project.scorerDeadline ? { dueAt: project.scorerDeadline } : null)) {
+      throw new Error("Scorer completion can only be reopened before the scorer deadline.");
+    }
+
+    const vendorRows = await listAssignedVendorUsers(ctx, project);
+    if (!vendorRows.some((row) => row.vendorUserId === args.vendorUserId)) {
+      throw new Error("Vendor is not assigned to this project");
+    }
+
+    const completion = await ctx.db
+      .query("scorerCompletions")
+      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
+      .first();
+
+    if (!completion || completion.status !== "completed") {
+      throw new Error("This scorer vendor row is not completed.");
+    }
+
+    const now = Date.now();
+    const scorerUserId = resolveScorerUserId(activeScope, identity);
+    await ctx.db.patch(completion._id, {
+      status: "in-progress",
+      completedAt: undefined,
+      updatedByUserId: scorerUserId,
+      updatedByDisplayName: displayName,
+      updatedAt: now,
+    });
+
+    await recordActivity(ctx, {
+      actorUserId: scorerUserId,
+      actorEmail: identity.email ?? undefined,
+      action: "scorer_vendor_reopen",
+      details: `Reopened scorer completion for ${args.vendorUserId} (${activeScope.label}).`,
+      companyId: project.companyId,
+      projectId: args.projectId,
+    });
+
+    return {
+      projectId: args.projectId,
+      vendorUserId: args.vendorUserId,
+      scopeKey: activeScope.scopeKey,
+      status: "in-progress" as const,
+      completedAt: null,
+      updatedAt: now,
     };
   },
 });

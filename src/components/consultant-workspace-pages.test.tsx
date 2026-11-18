@@ -324,6 +324,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => undefined);
     useQueryMock.mockImplementationOnce(() => ({
       projectId: "project-1",
       scorerCanSeePeerScores: false,
@@ -336,12 +337,33 @@ describe("ConsultantWorkspaceProjectsPage", () => {
         vendorContactName: "Northwind Contact",
         answeredCount: 1,
         totalRequirements: 10,
-        status: "in-progress",
-        completedAt: null,
+        status: "completed",
+        completedAt: Date.now(),
         lastScoredAt: Date.now(),
       }],
     }));
-    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => ({
+      projectId: "project-1",
+      vendorUserId: "northwind-vendor",
+      vendorName: "Northwind Labs",
+      vendorContactName: "Northwind Contact",
+      scorerScope: { scopeKey: "individual:beta-scorer", scopeType: "individual", label: "Beta Scorer" },
+      canSeePeerScores: false,
+      isCompleted: true,
+      completedAt: Date.now(),
+      rows: [{
+        requirementId: "REQ-1",
+        text: "Requirement",
+        type: "user-story",
+        ownScore: 1,
+        ownComment: "Done",
+        ownEnteredByDisplayName: "Beta Scorer",
+        ownEnteredAt: Date.now(),
+        vendorScore: 1,
+        vendorComment: "Vendor note",
+        peerScores: [],
+      }],
+    }));
 
     const html = renderToStaticMarkup(
       <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
@@ -350,6 +372,12 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Scorer scoring");
     expect(html).not.toContain("Vendor responses");
     expect(html).not.toContain("Edit project");
+    expect(html).not.toContain("Scorer column");
+    expect(html).toContain("Completed on");
+    expect(html).toContain("Reopen");
+    expect(html).not.toContain("Mark complete");
+    expect(html).not.toContain("All workspaces");
+    expect(html).not.toContain("Workspace directory");
   });
 
   test("project detail renders for loading, consultant, company admin, scorer, and vendor without errors", () => {

@@ -724,7 +724,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   );
 }
 
-function ScorerScoringPanel({ projectId }: { projectId: string }) {
+function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string; scorerDeadlineAt?: number | null }) {
   const [selectedScopeKey, setSelectedScopeKey] = useState("");
   const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -799,6 +799,7 @@ function ScorerScoringPanel({ projectId }: { projectId: string }) {
 
   const saveScorerScore = useMutation((api as any).scores.saveScorerScore);
   const completeScorerVendor = useMutation((api as any).scores.completeScorerVendor);
+  const reopenScorerVendor = useMutation((api as any).scores.reopenScorerVendor);
 
   const saveScore = async (payload: { requirementId: string; score: 0 | 1; comment: string }) => {
     if (!selectedVendorUserId || !selectedScopeKey) {
@@ -845,6 +846,27 @@ function ScorerScoringPanel({ projectId }: { projectId: string }) {
     }
   };
 
+  const reopenCompletion = async () => {
+    if (!selectedVendorUserId || !selectedScopeKey) {
+      return;
+    }
+
+    setNotice(null);
+    setBusyKey("reopen");
+    try {
+      await reopenScorerVendor({
+        projectId: projectId as any,
+        vendorUserId: selectedVendorUserId,
+        scopeKey: selectedScopeKey,
+      });
+      setNotice({ kind: "success", message: "Scorer completion reopened for this vendor." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to reopen scorer completion." });
+    } finally {
+      setBusyKey("");
+    }
+  };
+
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -855,20 +877,7 @@ function ScorerScoringPanel({ projectId }: { projectId: string }) {
         <p className="text-sm text-slate-400">Loading scorer workboard...</p>
       ) : (
         <>
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <label className="text-sm text-slate-300">
-              <span className="mb-1 block text-xs uppercase tracking-[0.14em] text-slate-400">Scorer column</span>
-              <select
-                value={selectedScopeKey}
-                onChange={(event) => setSelectedScopeKey(event.target.value)}
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-              >
-                {workboard.scorerScopes.map((scope) => (
-                  <option key={scope.scopeKey} value={scope.scopeKey}>{scope.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <p className="mb-4 text-xs text-slate-400">You always score as yourself. Peer scorer values remain read-only and only appear after you complete your own scoring when peer visibility is enabled.</p>
 
           <div className="space-y-3">
             {workboard.vendors.map((vendor) => (
@@ -905,14 +914,33 @@ function ScorerScoringPanel({ projectId }: { projectId: string }) {
                   <p className="text-base font-semibold text-white">Scoring {grid.vendorName}</p>
                   <p className="text-xs text-slate-400">Own scorer column: {grid.scorerScope.label}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void markComplete()}
-                  disabled={busyKey === "complete"}
-                  className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
-                >
-                  Mark complete
-                </button>
+                {grid.isCompleted ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill
+                      label={`Completed on ${grid.completedAt ? new Date(grid.completedAt).toLocaleDateString() : "today"}`}
+                      className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                    />
+                    {(!scorerDeadlineAt || scorerDeadlineAt > Date.now()) ? (
+                      <button
+                        type="button"
+                        onClick={() => void reopenCompletion()}
+                        disabled={busyKey === "reopen"}
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-60"
+                      >
+                        Reopen
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void markComplete()}
+                    disabled={busyKey === "complete"}
+                    className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+                  >
+                    Mark complete
+                  </button>
+                )}
               </div>
 
               {!grid.isCompleted ? (
@@ -1086,7 +1114,7 @@ function WorkspaceShell({
   const roleLabel =
     role === "consultant" ? "VS Consultant" : role === "company-admin" ? "Company admin" : role === "company-scorer" ? "Company scorer" : "Vendor";
   const isVendorShell = role === "vendor";
-  const sanitizedBreadcrumbs = isVendorShell
+  const sanitizedBreadcrumbs = isVendorShell || role !== "consultant"
     ? (breadcrumbs ?? []).filter((item) => item.label !== "All workspaces")
     : breadcrumbs;
 
@@ -1096,7 +1124,7 @@ function WorkspaceShell({
       <aside className="fixed inset-y-0 left-0 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5">
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
-          <h2 className="mt-3 text-xl font-semibold text-white">Workspace directory</h2>
+          <h2 className="mt-3 text-xl font-semibold text-white">{role === "consultant" ? "Workspace directory" : "Workspace navigation"}</h2>
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -1116,7 +1144,7 @@ function WorkspaceShell({
           </div>
         </div>
 
-        {role === "consultant" || showConsultantLinks ? (
+        {role === "consultant" && showConsultantLinks ? (
           <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
@@ -2492,7 +2520,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </section>
       ) : null}
 
-      {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} /> : null}
+      {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} scorerDeadlineAt={project.scorerDeadline ?? null} /> : null}
 
       {isVendorView ? (
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">

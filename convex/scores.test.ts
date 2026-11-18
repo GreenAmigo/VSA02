@@ -634,6 +634,65 @@ describe("Phase 5 score audit trail", () => {
     expect(logs.some((entry: { action: string }) => entry.action === "scorer_vendor_complete")).toBe(true);
   });
 
+  test("server rejects scorer attempts to save scores as another scorer", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer" });
+    const departments = await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId });
+
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: departments[0].departmentId,
+    });
+
+    await admin.mutation(api.admin.inviteWorkspacePerson, {
+      companyId: seeded.companyBId,
+      name: "Peer Scorer",
+      email: "peer.scorer@beta.example",
+      role: "company-scorer",
+      departmentId: departments[0].departmentId,
+    });
+
+    await t.mutation(internal.access.acceptPendingInvitesForUser, {
+      userId: "peer-scorer",
+      email: "peer.scorer@beta.example",
+      displayName: "Peer Scorer",
+    });
+
+    await admin.mutation(api.admin.addProjectScorer, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+      userId: "peer-scorer",
+      displayName: "Peer Scorer",
+      email: "peer.scorer@beta.example",
+    });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-OWNERSHIP", text: "Scope ownership", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await expect(
+      scorer.mutation((api as any).scores.saveScorerScore, {
+        projectId: seeded.projectBId,
+        vendorUserId: "northwind-vendor",
+        requirementId: "REQ-OWNERSHIP",
+        score: 1,
+        comment: "Should be blocked",
+        scopeKey: "individual:peer-scorer",
+      }),
+    ).rejects.toThrow("You can only score as yourself.");
+  });
+
   test("scorer scores keep the scorer department snapshot", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
