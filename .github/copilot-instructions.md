@@ -33,4 +33,5 @@
 - Long text rule: labels and values in cards must use a smaller, consistent type scale, clamp long strings with ellipses, and keep full values available on hover/focus; long emails and IDs may wrap instead of forcing overflow.
 - Requirements/scoring controls rule: long requirement lists expose Expand all/Collapse all controls and each row supports per-item collapse.
 - Priority and naming rule: requirement priority labels use P9 Critical/P3 High/P1 Low/P0 Out of scope, and user-facing requirement scoring CTAs are named Score requirements.
+- Activity log readability rule: activity rows show a plain-English summary first, then expandable details; field-level changes are listed as changed fields only, and labels should use names with safe fallbacks for legacy rows.
 - When a task includes a verification step, run the exact proving commands and report the real output.

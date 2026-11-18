@@ -1062,7 +1062,114 @@ export const listActivityLogs = query({
           .collect()
       : await ctx.db.query("activityLogs").collect();
 
-    return logs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 50);
+    const sortedLogs = logs.sort((a, b) => b.createdAt - a.createdAt).slice(0, 50);
+    const companyIds = Array.from(new Set(sortedLogs.map((log) => log.companyId).filter(Boolean)));
+    const projectIds = Array.from(new Set(sortedLogs.map((log) => log.projectId).filter(Boolean)));
+
+    const companyNameById = new Map<string, string>();
+    for (const companyId of companyIds) {
+      const company = await ctx.db.get(companyId as Id<"companies">);
+      if (company?.name) {
+        companyNameById.set(String(companyId), company.name);
+      }
+    }
+
+    const projectNameById = new Map<string, string>();
+    for (const projectId of projectIds) {
+      const project = await ctx.db.get(projectId as Id<"projects">);
+      if (project?.name) {
+        projectNameById.set(String(projectId), project.name);
+      }
+    }
+
+    const actorLabelByUserId = new Map<string, string>();
+    for (const log of sortedLogs) {
+      if (actorLabelByUserId.has(log.actorUserId)) {
+        continue;
+      }
+
+      const consultant = await ctx.db
+        .query("consultants")
+        .filter((q: any) => q.eq(q.field("userId"), log.actorUserId))
+        .first();
+      if (consultant?.displayName) {
+        actorLabelByUserId.set(log.actorUserId, consultant.displayName);
+        continue;
+      }
+
+      const member = await ctx.db
+        .query("companyMembers")
+        .filter((q: any) => q.eq(q.field("userId"), log.actorUserId))
+        .first();
+      if (member?.displayName) {
+        actorLabelByUserId.set(log.actorUserId, member.displayName);
+        continue;
+      }
+
+      if (log.actorEmail) {
+        const emailMatch = await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("email"), log.actorEmail))
+          .first();
+        if (emailMatch?.displayName) {
+          actorLabelByUserId.set(log.actorUserId, emailMatch.displayName);
+        }
+      }
+    }
+
+    const extractChangedFields = (details: string) => {
+      const labels = ["Name", "Description", "Vendor deadline", "Scorer deadline", "Scorer peer visibility"] as const;
+      const changed: Array<{ label: string; before: string; after: string }> = [];
+
+      for (const label of labels) {
+        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const labelPattern = `(?:${labels.map((entry) => entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`;
+        const regex = new RegExp(`${escaped}:\\s*(.*?)\\s*->\\s*(.*?)(?=\\s+${labelPattern}:|$)`);
+        const match = details.match(regex);
+        if (!match) {
+          continue;
+        }
+
+        const before = match[1].trim();
+        const after = match[2].trim();
+        if (before === after) {
+          continue;
+        }
+
+        changed.push({ label, before, after });
+      }
+
+      return changed;
+    };
+
+    return sortedLogs.map((log) => {
+      const firstPeriod = log.details.indexOf(".");
+      const summary = firstPeriod >= 0 ? log.details.slice(0, firstPeriod + 1).trim() : log.details;
+      const changedFields = extractChangedFields(log.details);
+      const workspaceFromCompany = log.companyId ? companyNameById.get(String(log.companyId)) : undefined;
+      const workspaceLabel = log.workspaceName && log.workspaceName !== "workspace"
+        ? log.workspaceName
+        : workspaceFromCompany ?? "Deleted workspace";
+
+      const actorLabel = actorLabelByUserId.get(log.actorUserId)
+        ?? log.actorEmail
+        ?? log.actorUserId
+        ?? "Unknown actor";
+
+      const detailLines = changedFields.length > 0
+        ? changedFields.map((field) => `${field.label}: ${field.before} -> ${field.after}`)
+        : [log.details];
+
+      return {
+        ...log,
+        summary,
+        detailLines,
+        changedFields,
+        workspaceLabel,
+        actorLabel,
+        projectName: log.projectId ? projectNameById.get(String(log.projectId)) ?? null : null,
+      };
+    });
   },
 });
 

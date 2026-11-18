@@ -114,6 +114,8 @@ Shared app UI rules for workspace screens:
 - Card labels and detail values use a smaller default type scale, truncate long content with ellipses, and keep full text on hover/focus; longer emails and IDs may wrap instead of overflowing.
 - Requirement and scoring lists expose Expand all/Collapse all controls on long per-row editors.
 - Priority display uses explicit labels (P9 Critical, P3 High, P1 Low, P0 Out of scope) and score entry links are labelled Score requirements.
+- Activity log entries show a concise summary line first, with expandable details and changed-fields breakdown where applicable.
+- Activity log labels prefer human names (workspace/project/actor) and only fall back to legacy technical identifiers when a name is unavailable.
 
 The app uses a single canonical consultant home route for the workspace directory and a dedicated activity log route. The route-to-component map below is the source of truth for the consultant and company screens during Phase 3 planning.
 

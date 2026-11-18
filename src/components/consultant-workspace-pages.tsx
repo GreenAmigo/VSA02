@@ -1984,8 +1984,15 @@ export function ConsultantActivityLogPage() {
         _id: string;
         action: string;
         details: string;
+        summary?: string;
+        detailLines?: string[];
+        changedFields?: Array<{ label: string; before: string; after: string }>;
+        workspaceLabel?: string | null;
+        actorLabel?: string | null;
+        projectName?: string | null;
         workspaceName?: string | null;
         companyId?: string | null;
+        actorUserId?: string | null;
         actorEmail?: string | null;
         createdAt: number;
       }>
@@ -2036,14 +2043,40 @@ export function ConsultantActivityLogPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <StatusPill label={log.action.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
-                      <span className="text-sm font-medium text-white">{log.workspaceName ?? "Deleted workspace"}</span>
+                      <span className="text-sm font-medium text-white">{log.workspaceLabel ?? log.workspaceName ?? "Deleted workspace"}</span>
+                      {log.projectName ? <span className="text-xs text-slate-400">Project: {log.projectName}</span> : null}
                     </div>
-                    <span className="text-xs text-slate-400">{new Date(log.createdAt).toLocaleString()}</span>
+                    <span className="text-xs text-slate-400">{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(log.createdAt))}</span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-300">{log.details}</p>
+
+                  <p className="mt-2 text-sm text-slate-200">{log.summary ?? log.details}</p>
+
+                  {log.changedFields && log.changedFields.length > 0 ? (
+                    <details className="mt-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                      <summary className="cursor-pointer text-xs uppercase tracking-[0.14em] text-slate-300">Changed fields ({log.changedFields.length})</summary>
+                      <div className="mt-2 space-y-2 text-xs text-slate-300">
+                        {log.changedFields.map((field) => (
+                          <div key={`${log._id}-${field.label}`} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+                            <p className="font-medium text-slate-200">{field.label}</p>
+                            <p className="text-slate-400">Before: {field.before}</p>
+                            <p className="text-slate-400">After: {field.after}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : (
+                    <details className="mt-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                      <summary className="cursor-pointer text-xs uppercase tracking-[0.14em] text-slate-300">Details</summary>
+                      <div className="mt-2 space-y-1 text-xs text-slate-300">
+                        {(log.detailLines && log.detailLines.length > 0 ? log.detailLines : [log.details]).map((line, index) => (
+                          <p key={`${log._id}-detail-${index}`}>{line}</p>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+
                   <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
-                    {log.companyId ? <span>Company: {log.companyId}</span> : null}
-                    {log.actorEmail ? <span>Actor: {log.actorEmail}</span> : null}
+                    <span>Actor: {log.actorLabel ?? log.actorEmail ?? log.actorUserId ?? "Unknown actor"}</span>
                   </div>
                 </div>
               ))}
