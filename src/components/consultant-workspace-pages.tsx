@@ -439,6 +439,32 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
     }
     | undefined;
 
+  const scorerViews = useQuery(
+    (api as any).projectViews.listProjectViews,
+    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+  ) as
+    | {
+      projectId: string;
+      vendorUserId: string | null;
+      canViewAll: boolean;
+      peerVisibilityEnabled: boolean;
+      peerViewsUnlocked: boolean;
+      rows: Array<{
+        _id: string;
+        projectId: string;
+        scorerUserId: string;
+        scorerDisplayName: string;
+        isOwnView: boolean;
+        vendorUserId: string;
+        viewText: string;
+        scorerDepartmentId: string | null;
+        scorerDepartmentName: string;
+        createdAt: number;
+        updatedAt: number;
+      }>;
+    }
+    | undefined;
+
   const amendVendorScore = useMutation((api as any).scores.amendVendorScore);
   const reopenVendorAnswers = useMutation((api as any).scores.reopenVendorAnswers);
 
@@ -738,6 +764,26 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                   );
                 })}
               </div>
+
+              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-300">Scorer overall views</p>
+                {scorerViews === undefined ? (
+                  <p className="mt-2 text-xs text-slate-400">Loading scorer views...</p>
+                ) : scorerViews.rows.length === 0 ? (
+                  <p className="mt-2 text-xs text-slate-400">No scorer views saved for this vendor yet.</p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {scorerViews.rows.map((row) => (
+                      <div key={row._id} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-200">
+                        <p className="font-medium text-slate-100">{row.scorerDisplayName}</p>
+                        <p className="text-slate-400">Department at entry: {row.scorerDepartmentName}</p>
+                        <p className="text-slate-400">Last updated: {new Date(row.updatedAt).toLocaleString()}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-slate-200">{row.viewText || "(no text)"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -751,6 +797,11 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
   const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busyKey, setBusyKey] = useState("");
+  const [viewDraft, setViewDraft] = useState("");
+  const [viewSaveState, setViewSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [viewLastSavedAt, setViewLastSavedAt] = useState<number | null>(null);
+  const [hydratedViewVendorId, setHydratedViewVendorId] = useState("");
+  const saveViewTimerRef = useRef<number | null>(null);
 
   const workboard = useQuery(
     (api as any).scores.getScorerWorkboard,
@@ -822,6 +873,80 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
   const saveScorerScore = useMutation((api as any).scores.saveScorerScore);
   const completeScorerVendor = useMutation((api as any).scores.completeScorerVendor);
   const reopenScorerVendor = useMutation((api as any).scores.reopenScorerVendor);
+  const saveProjectView = useMutation((api as any).projectViews.saveProjectView);
+  const scorerViews = useQuery(
+    (api as any).projectViews.listProjectViews,
+    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+  ) as
+    | {
+      projectId: string;
+      vendorUserId: string | null;
+      canViewAll: boolean;
+      peerVisibilityEnabled: boolean;
+      peerViewsUnlocked: boolean;
+      rows: Array<{
+        _id: string;
+        projectId: string;
+        scorerUserId: string;
+        scorerDisplayName: string;
+        isOwnView: boolean;
+        vendorUserId: string;
+        viewText: string;
+        scorerDepartmentId: string | null;
+        scorerDepartmentName: string;
+        createdAt: number;
+        updatedAt: number;
+      }>;
+    }
+    | undefined;
+
+  useEffect(() => () => {
+    if (saveViewTimerRef.current !== null) {
+      window.clearTimeout(saveViewTimerRef.current);
+      saveViewTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedVendorUserId || !scorerViews) {
+      return;
+    }
+
+    const ownView = scorerViews.rows.find((row) => row.isOwnView) ?? null;
+    setViewDraft(ownView?.viewText ?? "");
+    setViewLastSavedAt(ownView?.updatedAt ?? null);
+    setViewSaveState("idle");
+    setHydratedViewVendorId(selectedVendorUserId);
+  }, [selectedVendorUserId, scorerViews]);
+
+  const scheduleViewSave = (nextText: string) => {
+    if (!selectedVendorUserId) {
+      return;
+    }
+
+    if (saveViewTimerRef.current !== null) {
+      window.clearTimeout(saveViewTimerRef.current);
+      saveViewTimerRef.current = null;
+    }
+
+    setViewSaveState("saving");
+    saveViewTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const saved = await saveProjectView({
+            projectId: projectId as any,
+            vendorUserId: selectedVendorUserId,
+            viewText: nextText,
+          });
+          setViewLastSavedAt(saved.updatedAt ?? Date.now());
+          setViewSaveState("saved");
+        } catch (error) {
+          setViewSaveState("error");
+          setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to save scorer views." });
+        }
+      })();
+    }, 650);
+  };
 
   const saveScore = async (payload: { requirementId: string; score: 0 | 1; comment: string }) => {
     if (!selectedVendorUserId || !selectedScopeKey) {
@@ -972,6 +1097,55 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
               {grid.canSeePeerScores ? (
                 <p className="mb-3 text-xs text-slate-400">Peer scorer columns are enabled for this project.</p>
               ) : null}
+
+              <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-slate-100">Your overall views for this vendor</p>
+                  <span className="text-xs text-slate-400">
+                    {viewSaveState === "saving"
+                      ? "Saving..."
+                      : viewSaveState === "saved"
+                        ? `Saved${viewLastSavedAt ? ` ${new Date(viewLastSavedAt).toLocaleTimeString()}` : ""}`
+                        : viewSaveState === "error"
+                          ? "Save failed"
+                          : "Ready"}
+                  </span>
+                </div>
+                <textarea
+                  value={hydratedViewVendorId === selectedVendorUserId ? viewDraft : ""}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setViewDraft(nextValue);
+                    scheduleViewSave(nextValue);
+                  }}
+                  placeholder="Write your overall view of this vendor..."
+                  rows={4}
+                  disabled={Boolean(scorerDeadlineAt && scorerDeadlineAt <= Date.now())}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-60"
+                />
+                {scorerDeadlineAt && scorerDeadlineAt <= Date.now() ? (
+                  <p className="mt-2 text-xs text-rose-300">Scorer deadline has passed. Reopen the deadline to edit scorer views.</p>
+                ) : null}
+
+                {!scorerViews?.peerVisibilityEnabled ? (
+                  <p className="mt-2 text-xs text-slate-400">Peer scorer views are off for this project.</p>
+                ) : !scorerViews.peerViewsUnlocked ? (
+                  <p className="mt-2 text-xs text-slate-400">Complete your scoring for this vendor to unlock peer scorer views.</p>
+                ) : scorerViews.rows.some((row) => !row.isOwnView) ? (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Peer scorer views</p>
+                    {scorerViews.rows.filter((row) => !row.isOwnView).map((row) => (
+                      <div key={row._id} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-200">
+                        <p className="font-medium text-slate-100">{row.scorerDisplayName}</p>
+                        <p className="text-slate-400">Department at entry: {row.scorerDepartmentName}</p>
+                        <p className="mt-1 whitespace-pre-wrap">{row.viewText || "(no text)"}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-400">No peer scorer views saved yet.</p>
+                )}
+              </div>
 
               <div className="space-y-3">
                 {grid.rows.map((row) => (

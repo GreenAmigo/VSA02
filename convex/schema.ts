@@ -228,7 +228,10 @@ export default defineSchema({
     scorerUserId: v.string(),
     vendorUserId: v.string(),
     viewText: v.string(),
+    scorerDepartmentId: v.optional(v.id("workspaceDepartments")),
+    scorerDepartmentName: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_scorer", ["projectId", "scorerUserId"]),
 

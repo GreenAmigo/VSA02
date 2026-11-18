@@ -41,7 +41,11 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 - Record who entered every score and when.
 
 ## Vendor views
-- For each vendor, a section where each scorer records their overall views.
+- For each vendor, each assigned scorer can write and edit their own overall views until the scorer deadline.
+- Scorer views save automatically and show a clear saved state in the scorer UI.
+- Admins (consultants and company admins) can see all scorer views for a vendor, including scorer name, department snapshot at entry time, and last updated date.
+- Scorers only see peer scorer views when the project setting for peer visibility is ON and only after completing their own scoring for that vendor.
+- Vendors never see scorer views.
 
 ## Deadlines, status and notifications
 - The PM/BA sets a scoring deadline for vendors (and for scorers).
@@ -117,7 +121,7 @@ The app uses a single canonical consultant home route for the workspace director
 | /workspaces/import | `src/app/workspaces/import/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceImportPage` | Bulk import entry for consultant-managed workspaces |
 | /workspaces/[companyId] | `src/app/workspaces/[companyId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceOverviewPage` | Company/workspace landing page |
 | /workspaces/[companyId]/projects | `src/app/workspaces/[companyId]/projects/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectsPage` | Real workspace project catalogue: project list, New project form, and access-controlled project creation for the active company |
-| /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Real project detail screen with assignment controls (individual scorers only), project edit controls (name, description, vendor/scorer deadlines, archive/restore), dedicated scoring settings panel (default OFF scorer peer-visibility toggle with activity logging), consultant/company-admin vendor-response review (status/progress, answer review, post-deadline amendment with reason/history, optional reopen date), department-grouped scorer progress, and company-scorer scoring workboard/grid with completion-gated vendor side-by-side answers |
+| /workspaces/[companyId]/projects/[projectId] | `src/app/workspaces/[companyId]/projects/[projectId]/page.tsx` -> `AuthGate` -> `ConsultantWorkspaceProjectDetailPage` | Real project detail screen with assignment controls (individual scorers only), project edit controls (name, description, vendor/scorer deadlines, archive/restore), dedicated scoring settings panel (default OFF scorer peer-visibility toggle with activity logging), consultant/company-admin vendor-response review (status/progress, answer review, post-deadline amendment with reason/history, optional reopen date, and all scorer overall views with scorer name + department snapshot + last updated), department-grouped scorer progress, and company-scorer scoring workboard/grid with completion-gated vendor side-by-side answers plus autosaved scorer overall views (peer views shown only after own completion when peer visibility is enabled) |
 | /workspaces/[companyId]/projects/[projectId]/answer-requirements | `src/app/workspaces/[companyId]/projects/[projectId]/answer-requirements/page.tsx` -> `AuthGate` -> `VendorProjectAnswerRequirementsPage` | Vendor-only requirement answering surface with autosave, submit confirmation, deadline lock, and amendment visibility |
 | /projects/[projectId]/scoring | `src/components/project-workflow-ui.tsx` -> `ScoringPage` | Vendor self-scoring workflow with per-requirement answers, answered-count progress, deadline lock, status display, and admin-only post-deadline score amendment history |
 | /workspaces/[companyId]/people | `src/app/workspaces/[companyId]/people/page.tsx` -> `AuthGate` -> `ConsultantWorkspacePeoplePage` | People and role management with required department assignment for company admins/scorers, invite-time department selection, and editable department changes logged to activity |
