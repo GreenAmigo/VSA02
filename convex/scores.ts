@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
@@ -72,6 +72,10 @@ const reopenScorerVendorValidator = v.object({
   projectId: v.id("projects"),
   vendorUserId: v.string(),
   scopeKey: v.optional(v.string()),
+});
+
+const backfillScorerSnapshotsValidator = v.object({
+  projectId: v.optional(v.id("projects")),
 });
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
@@ -355,6 +359,27 @@ function resolveScorerUserId(
   }
 
   return identity.subject ?? identity.tokenIdentifier ?? "system";
+}
+
+async function resolveMemberDepartmentSnapshot(ctx: any, companyId: Id<"companies">, scorerUserId: string) {
+  const member = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), companyId))
+    .filter((q: any) => q.eq(q.field("userId"), scorerUserId))
+    .first();
+  if (!member?.departmentId) {
+    return { scorerDepartmentId: undefined, scorerDepartmentName: undefined };
+  }
+
+  const department = await ctx.db.get(member.departmentId);
+  if (!department || department.companyId !== companyId) {
+    return { scorerDepartmentId: undefined, scorerDepartmentName: undefined };
+  }
+
+  return {
+    scorerDepartmentId: member.departmentId,
+    scorerDepartmentName: department.name,
+  };
 }
 
 async function listScoringRequirements(ctx: any, project: any) {
@@ -1430,6 +1455,69 @@ export const reopenScorerVendor = mutation({
       status: "in-progress" as const,
       completedAt: null,
       updatedAt: now,
+    };
+  },
+});
+
+export const backfillMissingScorerDepartmentSnapshots = internalMutation({
+  args: backfillScorerSnapshotsValidator,
+  handler: async (ctx, args) => {
+    const scorerScores = args.projectId
+      ? await ctx.db
+          .query("scorerScores")
+          .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+          .collect()
+      : await ctx.db.query("scorerScores").collect();
+
+    let scorerScoresUpdated = 0;
+    for (const row of scorerScores) {
+      if (row.scorerDepartmentId && row.scorerDepartmentName) {
+        continue;
+      }
+
+      const completion = await ctx.db
+        .query("scorerCompletions")
+        .withIndex("by_project_vendor_scope", (q) => q
+          .eq("projectId", row.projectId)
+          .eq("vendorUserId", row.vendorUserId)
+          .eq("scorerScopeKey", row.scorerScopeKey))
+        .first();
+
+      const fallback = await resolveMemberDepartmentSnapshot(ctx, row.companyId, row.enteredByUserId);
+      const scorerDepartmentId = row.scorerDepartmentId ?? completion?.scorerDepartmentId ?? fallback.scorerDepartmentId;
+      const scorerDepartmentName = row.scorerDepartmentName ?? completion?.scorerDepartmentName ?? fallback.scorerDepartmentName;
+
+      await ctx.db.patch(row._id, {
+        scorerDepartmentId,
+        scorerDepartmentName,
+      });
+      scorerScoresUpdated += 1;
+    }
+
+    const scorerCompletions = args.projectId
+      ? await ctx.db
+          .query("scorerCompletions")
+          .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+          .collect()
+      : await ctx.db.query("scorerCompletions").collect();
+
+    let scorerCompletionsUpdated = 0;
+    for (const row of scorerCompletions) {
+      if (row.scorerDepartmentId && row.scorerDepartmentName) {
+        continue;
+      }
+
+      const fallback = await resolveMemberDepartmentSnapshot(ctx, row.companyId, row.updatedByUserId);
+      await ctx.db.patch(row._id, {
+        scorerDepartmentId: row.scorerDepartmentId ?? fallback.scorerDepartmentId,
+        scorerDepartmentName: row.scorerDepartmentName ?? fallback.scorerDepartmentName,
+      });
+      scorerCompletionsUpdated += 1;
+    }
+
+    return {
+      scorerScoresUpdated,
+      scorerCompletionsUpdated,
     };
   },
 });
