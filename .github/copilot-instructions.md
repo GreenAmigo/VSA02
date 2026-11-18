@@ -31,4 +31,6 @@
 - Vendor breadcrumb safety rule: vendor breadcrumbs and navigation labels use vendor-safe destinations only (My workspaces, My projects, then project-level scoring pages).
 - Dashboard project list rule: the workspace Overview dashboard must list the current user's visible projects directly (consultants/company admins: all workspace projects; scorers/vendors: assigned projects) without requiring a secondary "View all projects" hop.
 - Long text rule: labels and values in cards must use a smaller, consistent type scale, clamp long strings with ellipses, and keep full values available on hover/focus; long emails and IDs may wrap instead of forcing overflow.
+- Requirements/scoring controls rule: long requirement lists expose Expand all/Collapse all controls and each row supports per-item collapse.
+- Priority and naming rule: requirement priority labels use P9 Critical/P3 High/P1 Low/P0 Out of scope, and user-facing requirement scoring CTAs are named Score requirements.
 - When a task includes a verification step, run the exact proving commands and report the real output.

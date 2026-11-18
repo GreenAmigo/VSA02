@@ -54,6 +54,36 @@ function fromDateInputValue(value: string) {
   return new Date(value).getTime();
 }
 
+function requirementTypeLabel(type: "user-story" | "nfr") {
+  return type === "user-story" ? "Requirement/User story" : "NFR";
+}
+
+function priorityLabel(priority: 9 | 3 | 1 | 0) {
+  if (priority === 9) {
+    return "P9 Critical";
+  }
+  if (priority === 3) {
+    return "P3 High";
+  }
+  if (priority === 1) {
+    return "P1 Low";
+  }
+  return "P0 Out of scope";
+}
+
+function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
+  if (priority === 9) {
+    return "border-rose-500/50 bg-rose-500/10 text-rose-200";
+  }
+  if (priority === 3) {
+    return "border-amber-500/50 bg-amber-500/10 text-amber-200";
+  }
+  if (priority === 1) {
+    return "border-sky-500/50 bg-sky-500/10 text-sky-200";
+  }
+  return "border-slate-700 bg-slate-900 text-slate-300";
+}
+
 type ProjectDetailProject = {
   _id: string;
   companyId: string;
@@ -380,6 +410,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const [editingRequirementId, setEditingRequirementId] = useState("");
   const [amendDraft, setAmendDraft] = useState<{ score: 0 | 1; comment: string; reason: string }>({ score: 1, comment: "", reason: "" });
   const [reopenDate, setReopenDate] = useState("");
+  const [collapsedRequirementIds, setCollapsedRequirementIds] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -664,7 +695,24 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               </div>
 
               <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedRequirementIds(() => Object.fromEntries(selectedReview.rows.map((row) => [row.requirementId, true])))}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                  >
+                    Collapse all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedRequirementIds({})}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                  >
+                    Expand all
+                  </button>
+                </div>
                 {selectedReview.rows.map((row) => {
+                  const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
                   const isEditing = editingRequirementId === row.requirementId;
 
                   return (
@@ -673,7 +721,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                         <div className="min-w-0">
                           <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
                           <p className="mt-1 text-sm text-slate-100">{row.text}</p>
-                          <p className="mt-1 text-xs text-slate-400">Type: {row.type} | Priority: {row.priority}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <StatusPill label={requirementTypeLabel(row.type)} className="border-slate-700 bg-slate-900 text-slate-200" />
+                            <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                          </div>
                         </div>
                         <div className="text-right text-xs text-slate-300">
                           <p>Vendor score: {row.score === null ? "-" : row.score}</p>
@@ -681,8 +732,18 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                           {row.amendedByDisplayName && row.amendedAt ? (
                             <p className="mt-1 text-slate-400">Amended by {row.amendedByDisplayName} on {new Date(row.amendedAt).toLocaleString()}</p>
                           ) : null}
+                          <button
+                            type="button"
+                            onClick={() => setCollapsedRequirementIds((current) => ({ ...current, [row.requirementId]: !isCollapsed }))}
+                            className="mt-2 rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                          >
+                            {isCollapsed ? "Expand" : "Collapse"}
+                          </button>
                         </div>
                       </div>
+
+                      {isCollapsed ? null : (
+                        <>
 
                       {selectedReview.deadlineLocked ? (
                         <div className="mt-3">
@@ -787,6 +848,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                           </div>
                         </details>
                       ) : null}
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -822,6 +885,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
 function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string; scorerDeadlineAt?: number | null }) {
   const [selectedScopeKey, setSelectedScopeKey] = useState("");
   const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
+  const [collapsedRequirementIds, setCollapsedRequirementIds] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busyKey, setBusyKey] = useState("");
   const [viewDraft, setViewDraft] = useState("");
@@ -886,6 +950,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
         requirementId: string;
         text: string;
         type: "user-story" | "nfr";
+        priority: 9 | 3 | 1 | 0;
         ownScore: 0 | 1 | null;
         ownComment: string;
         ownEnteredByDisplayName: string | null;
@@ -1125,9 +1190,9 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 <p className="mb-3 text-xs text-slate-400">Peer scorer columns are enabled for this project.</p>
               ) : null}
 
-              <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+              <div className="mb-4 rounded-xl border border-slate-700 bg-slate-950/85 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-slate-100">Your overall views for this vendor</p>
+                  <p className="text-sm font-medium text-slate-100">Overall views (separate from requirement scoring)</p>
                   <span className="text-xs text-slate-400">
                     {viewSaveState === "saving"
                       ? "Saving..."
@@ -1174,14 +1239,48 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 )}
               </div>
 
+              <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCollapsedRequirementIds(() => Object.fromEntries(grid.rows.map((row) => [row.requirementId, true])))}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                >
+                  Collapse all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCollapsedRequirementIds({})}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                >
+                  Expand all
+                </button>
+              </div>
+
               <div className="space-y-3">
-                {grid.rows.map((row) => (
+                {grid.rows.map((row) => {
+                  const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
+                  return (
                   <div key={row.requirementId} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                    <div className="mb-2">
-                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
-                      <p className="text-sm text-slate-100">{row.text}</p>
-                      <p className="text-xs text-slate-400">Type: {row.type}</p>
+                    <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                        <p className="text-sm text-slate-100">{row.text}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <StatusPill label={requirementTypeLabel(row.type)} className="border-slate-700 bg-slate-900 text-slate-200" />
+                          <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCollapsedRequirementIds((current) => ({ ...current, [row.requirementId]: !isCollapsed }))}
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                      >
+                        {isCollapsed ? "Expand" : "Collapse"}
+                      </button>
                     </div>
+
+                    {isCollapsed ? null : (
+                      <>
 
                     <div className="grid gap-3 md:grid-cols-2">
                       <label className="text-sm text-slate-300">
@@ -1225,13 +1324,23 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
 
                     {grid.canSeePeerScores && row.peerScores.length > 0 ? (
                       <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-                        {row.peerScores.map((peer) => (
-                          <p key={`${row.requirementId}-${peer.scopeKey}`}>{peer.scopeLabel}: {peer.score} ({peer.enteredByDisplayName})</p>
-                        ))}
+                        <p className="mb-2 uppercase tracking-[0.14em] text-slate-400">Peer scores</p>
+                        <div className="space-y-2">
+                          {row.peerScores.map((peer) => (
+                            <div key={`${row.requirementId}-${peer.scopeKey}-${peer.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                              <p className="text-slate-100">{peer.scopeLabel}: {peer.score}</p>
+                              <p className="text-slate-400">By {peer.enteredByDisplayName} on {new Date(peer.enteredAt).toLocaleDateString()}</p>
+                              <p className="mt-1 text-slate-300">{peer.comment || "(no comment)"}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
+                      </>
+                    )}
                   </div>
-                ))}
+                );
+                })}
               </div>
             </div>
           ) : null}
@@ -2056,7 +2165,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
                         Open project
                       </Link>
                       <Link href={`/workspaces/${workspace.slug}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
-                        Answer requirements
+                        Score requirements
                       </Link>
                     </div>
                   </div>
@@ -2083,7 +2192,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
                       <p className="mt-2 text-xs text-slate-400">Next deadline: {new Date(project.nextDeadline).toLocaleDateString()}</p>
                     ) : null}
                     <Link href={`/workspaces/${workspace.slug}/projects/${project._id}/answer-requirements`} className="mt-3 inline-block text-sm text-sky-300 hover:text-sky-200">
-                      Answer requirements
+                      Score requirements
                     </Link>
                   </div>
                 ))
@@ -2850,7 +2959,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
               href={`/workspaces/${companyId}/projects/${projectId}/answer-requirements`}
               className="inline-flex rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
             >
-              Answer requirements
+              Score requirements
             </Link>
           </div>
         </section>
@@ -2991,6 +3100,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
   const submitVendorAnswers = useMutation((api as any).scores.submitVendorAnswers);
 
   const [drafts, setDrafts] = useState<Record<string, { score: 0 | 1 | null; comment: string }>>({});
+  const [collapsedRequirementIds, setCollapsedRequirementIds] = useState<Record<string, boolean>>({});
   const [saveState, setSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -3132,7 +3242,24 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
       </section>
 
       <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setCollapsedRequirementIds(() => Object.fromEntries(panel.rows.map((row) => [row.requirementId, true])))}
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+          >
+            Collapse all
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsedRequirementIds({})}
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+          >
+            Expand all
+          </button>
+        </div>
         {panel.rows.map((row) => {
+          const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
           const draft = drafts[row.requirementId] ?? { score: row.score, comment: row.comment ?? "" };
           const unanswered = draft.score === null;
           const state = saveState[row.requirementId] ?? "idle";
@@ -3144,46 +3271,57 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
                   <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
                   <p className="mt-2 text-sm text-slate-100">{row.text}</p>
                 </div>
-                <div className="text-xs text-slate-400">
-                  {state === "saving" ? "Saving..." : state === "saved" ? "Saved" : state === "error" ? "Save failed" : unanswered ? "Unanswered" : "Ready"}
+                <div className="text-right text-xs text-slate-400">
+                  <p>{state === "saving" ? "Saving..." : state === "saved" ? "Saved" : state === "error" ? "Save failed" : unanswered ? "Unanswered" : "Ready"}</p>
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedRequirementIds((current) => ({ ...current, [row.requirementId]: !isCollapsed }))}
+                    className="mt-2 rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                  >
+                    {isCollapsed ? "Expand" : "Collapse"}
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-200">
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name={`score-${row.requirementId}`}
-                    checked={draft.score === 0}
-                    disabled={panel.deadlineLocked}
-                    onChange={() => saveRow(row.requirementId, { ...draft, score: 0 })}
-                  />
-                  0
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name={`score-${row.requirementId}`}
-                    checked={draft.score === 1}
-                    disabled={panel.deadlineLocked}
-                    onChange={() => saveRow(row.requirementId, { ...draft, score: 1 })}
-                  />
-                  1
-                </label>
-              </div>
+              {isCollapsed ? null : (
+                <>
+                  <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-200">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`score-${row.requirementId}`}
+                        checked={draft.score === 0}
+                        disabled={panel.deadlineLocked}
+                        onChange={() => saveRow(row.requirementId, { ...draft, score: 0 })}
+                      />
+                      0
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`score-${row.requirementId}`}
+                        checked={draft.score === 1}
+                        disabled={panel.deadlineLocked}
+                        onChange={() => saveRow(row.requirementId, { ...draft, score: 1 })}
+                      />
+                      1
+                    </label>
+                  </div>
 
-              <textarea
-                value={draft.comment}
-                onChange={(event) => saveRow(row.requirementId, { ...draft, comment: event.target.value })}
-                disabled={panel.deadlineLocked}
-                rows={2}
-                placeholder="Optional comment"
-                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-70"
-              />
+                  <textarea
+                    value={draft.comment}
+                    onChange={(event) => saveRow(row.requirementId, { ...draft, comment: event.target.value })}
+                    disabled={panel.deadlineLocked}
+                    rows={2}
+                    placeholder="Optional comment"
+                    className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-70"
+                  />
 
-              {panel.deadlineLocked && row.amendedByDisplayName ? (
-                <p className="mt-2 text-xs text-slate-400">Amended by {row.amendedByDisplayName}</p>
-              ) : null}
+                  {panel.deadlineLocked && row.amendedByDisplayName ? (
+                    <p className="mt-2 text-xs text-slate-400">Amended by {row.amendedByDisplayName}</p>
+                  ) : null}
+                </>
+              )}
             </div>
           );
         })}
@@ -3858,7 +3996,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
                       Open project
                     </Link>
                     <Link href={`/workspaces/${companyId}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
-                      Answer requirements
+                      Score requirements
                     </Link>
                   </div>
                 </div>

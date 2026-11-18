@@ -1242,6 +1242,7 @@ export const getScorerVendorGrid = query({
         requirementId: requirement.requirementId,
         text: requirement.text,
         type: requirement.type,
+        priority: requirement.priority,
         ownScore: own?.score ?? null,
         ownComment: own?.comment ?? "",
         ownEnteredByDisplayName: own?.enteredByDisplayName ?? null,

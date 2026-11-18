@@ -160,7 +160,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     );
 
     expect(html).toContain("Vendor home");
-    expect(html).toContain("Answer requirements");
+    expect(html).toContain("Score requirements");
     expect(html).not.toContain("All workspaces");
     expect(html).not.toContain("Company ID");
     expect(html).not.toContain("Workspace directory");
@@ -207,7 +207,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     );
 
     expect(html).toContain("3 of 16 answered");
-    expect(html).toContain("Answer requirements");
+    expect(html).toContain("Score requirements");
     expect(html).not.toContain("Edit project");
     expect(html).not.toContain("Open import / requirements");
     expect(html).not.toContain("Assigned members");
