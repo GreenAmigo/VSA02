@@ -2382,6 +2382,12 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const assignableVendors = workspaceVendorsList.filter((vendor) => vendor.status === "active");
   const selectedScorer = assignableScorers.find((person) => person.id === scorerDraft.selectedUserId) ?? null;
   const selectedVendor = assignableVendors.find((vendor) => vendor.vendorId === vendorDraft.selectedVendorId) ?? null;
+  const mixedHistoryScorerCount = scoringProgress
+    ? scoringProgress.groups.reduce(
+        (total, group) => total + group.scorers.filter((scorer) => scorer.historicalDepartmentNames.length > 0).length,
+        0,
+      )
+    : 0;
 
   if (!company || !project) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Access denied.</div>;
@@ -2503,16 +2509,22 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-white">Scoring progress by department</h3>
-            <select
-              value={selectedProgressDepartmentId}
-              onChange={(event) => setSelectedProgressDepartmentId(event.target.value)}
-              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-            >
-              <option value="">All departments</option>
-              {departmentsList.map((department) => (
-                <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
-              ))}
-            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusPill
+                label={`${mixedHistoryScorerCount} mixed history`}
+                className="border-amber-500/40 bg-amber-500/10 text-amber-200"
+              />
+              <select
+                value={selectedProgressDepartmentId}
+                onChange={(event) => setSelectedProgressDepartmentId(event.target.value)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+              >
+                <option value="">All departments</option>
+                {departmentsList.map((department) => (
+                  <option key={department.departmentId} value={department.departmentId}>{department.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {scoringProgress === undefined ? (
