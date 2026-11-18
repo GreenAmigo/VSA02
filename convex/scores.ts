@@ -959,7 +959,7 @@ export const getScorerVendorGrid = query({
       enteredAt: number;
     }>>();
 
-    if (project.scorerCanSeePeerScores) {
+    if (project.scorerCanSeePeerScores && isCompleted) {
       const allScorerScores = await ctx.db
         .query("scorerScores")
         .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId))
@@ -997,7 +997,7 @@ export const getScorerVendorGrid = query({
         ownEnteredAt: own?.enteredAt ?? null,
         vendorScore: isCompleted ? (vendorSelf?.score ?? null) : null,
         vendorComment: isCompleted ? (vendorSelf?.comment ?? "") : null,
-        peerScores: project.scorerCanSeePeerScores ? (peerScoresByRequirementId.get(requirement.requirementId) ?? []) : [],
+        peerScores: project.scorerCanSeePeerScores && isCompleted ? (peerScoresByRequirementId.get(requirement.requirementId) ?? []) : [],
       };
     });
 
@@ -1011,7 +1011,7 @@ export const getScorerVendorGrid = query({
         scopeType: activeScope.scopeType,
         label: activeScope.label,
       },
-      canSeePeerScores: Boolean(project.scorerCanSeePeerScores),
+      canSeePeerScores: Boolean(project.scorerCanSeePeerScores && isCompleted),
       isCompleted,
       completedAt: completion?.completedAt ?? null,
       rows,

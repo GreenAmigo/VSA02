@@ -286,6 +286,80 @@ function ProjectEditPanel({ companyId, projectId, project }: { companyId: string
   );
 }
 
+function ScoringSettingsPanel({ companyId, projectId, project }: { companyId: string; projectId: string; project: ProjectDetailProject }) {
+  const updateProject = useMutation((api as any).admin.updateProject);
+  const [scorerCanSeePeerScores, setScorerCanSeePeerScores] = useState(Boolean(project.scorerCanSeePeerScores));
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    setScorerCanSeePeerScores(Boolean(project.scorerCanSeePeerScores));
+  }, [project.scorerCanSeePeerScores]);
+
+  const saveSettings = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      await updateProject({
+        companyId: companyId as any,
+        projectId: projectId as any,
+        name: project.name,
+        description: project.description ?? undefined,
+        vendorDeadline: project.vendorDeadline ?? null,
+        scorerDeadline: project.scorerDeadline ?? null,
+        scorerCanSeePeerScores,
+      });
+      setNotice({ kind: "success", message: "Scoring settings saved." });
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to save scoring settings." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-white">Scoring settings</h3>
+        <StatusPill
+          label={scorerCanSeePeerScores ? "Peer scores ON" : "Peer scores OFF"}
+          className={scorerCanSeePeerScores ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-slate-700 bg-slate-900 text-slate-200"}
+        />
+      </div>
+
+      <p className="mb-3 text-sm text-slate-400">
+        Default is OFF. When ON, scorers can see other scorer scores and comments for this project only after they mark their own scoring complete for that vendor.
+      </p>
+
+      <label className="mb-4 flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={scorerCanSeePeerScores}
+          onChange={(event) => setScorerCanSeePeerScores(event.target.checked)}
+        />
+        Allow scorers to see other scorer scores and comments
+      </label>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void saveSettings()}
+          disabled={busy}
+          className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+        >
+          Save scoring settings
+        </button>
+      </div>
+
+      {notice ? (
+        <div className={`mt-3 rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+          {notice.message}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
     | Array<{
@@ -2379,6 +2453,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
 
+      {!isVendorView && canManageProjects ? <ScoringSettingsPanel companyId={companyId} projectId={projectId} project={project} /> : null}
+
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
 
       {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} /> : null}
@@ -3499,6 +3575,9 @@ export function ConsultantWorkspaceRequirementsPage({ companyId }: { companyId: 
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const summaries = useQuery((api as any).access.listWorkspaceRequirementsSummary, isProtectedLoading ? "skip" : { companyId: companyId as any }) as
+    | Array<{ projectId: string; projectName: string; activeCount: number; withdrawnCount: number; outOfScopeCount: number }>
+    | undefined;
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -3510,10 +3589,62 @@ export function ConsultantWorkspaceRequirementsPage({ companyId }: { companyId: 
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">Requirements</h1>
-      <p className="mt-3 text-slate-300">Authorized company: {company?.name ?? "Consultant view"}</p>
-    </div>
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company?.name ?? "Workspace",
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="requirements"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company?.name ?? "Workspace", href: `/workspaces/${companyId}` },
+        { label: "Requirements" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-white">Requirements by project</h2>
+          <StatusPill label={`${summaries?.length ?? 0} projects`} className="border-slate-700 bg-slate-900 text-slate-200" />
+        </div>
+
+        {summaries === undefined ? (
+          <p className="text-sm text-slate-400">Loading requirement summaries...</p>
+        ) : summaries.length === 0 ? (
+          <p className="text-sm text-slate-400">No visible projects yet for this workspace.</p>
+        ) : (
+          <div className="space-y-3">
+            {summaries.map((summary) => (
+              <div key={summary.projectId} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold text-white">{summary.projectName}</h3>
+                  <Link
+                    href={`/workspaces/${companyId}/projects/${summary.projectId}`}
+                    className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-sm text-sky-200 hover:border-sky-400"
+                  >
+                    Open project
+                  </Link>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  <StatusPill label={`${summary.activeCount} active`} className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200" />
+                  <StatusPill label={`${summary.withdrawnCount} withdrawn`} className="border-amber-500/40 bg-amber-500/10 text-amber-200" />
+                  <StatusPill label={`${summary.outOfScopeCount} out of scope`} className="border-slate-700 bg-slate-900 text-slate-200" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </WorkspaceShell>
   );
 }
 
@@ -3525,6 +3656,16 @@ export function ConsultantWorkspaceScoringPage({ companyId }: { companyId: strin
     | { email?: string | null; role?: string | null; isConsultant?: boolean; companyIds?: string[] }
     | undefined;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
+  const summaries = useQuery((api as any).access.listWorkspaceScoringSummary, isProtectedLoading ? "skip" : { companyId: companyId as any }) as
+    | Array<{
+      projectId: string;
+      projectName: string;
+      submittedVendors: number;
+      totalVendors: number;
+      completedScorerVendorPairs: number;
+      totalScorerVendorPairs: number;
+    }>
+    | undefined;
 
   if (isProtectedLoading || access === undefined || companies === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -3536,9 +3677,60 @@ export function ConsultantWorkspaceScoringPage({ companyId }: { companyId: strin
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-semibold text-white">Scoring</h1>
-      <p className="mt-3 text-slate-300">Authorized company: {company?.name ?? "Consultant view"}</p>
-    </div>
+    <WorkspaceShell
+      workspace={{
+        id: companyId,
+        slug: companyId,
+        name: company?.name ?? "Workspace",
+        isTestData: false,
+        projects: [],
+        people: [],
+        vendors: [],
+        requirements: [],
+        scores: [],
+      }}
+      activeTab="scoring"
+      breadcrumbs={[
+        { label: "All workspaces", href: "/workspaces" },
+        { label: company?.name ?? "Workspace", href: `/workspaces/${companyId}` },
+        { label: "Scoring" },
+      ]}
+      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : "company-scorer"}
+      userEmail={access.email ?? user?.email ?? "Unknown"}
+      showConsultantLinks={Boolean(access.isConsultant)}
+    >
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-white">Scoring progress by project</h2>
+          <StatusPill label={`${summaries?.length ?? 0} projects`} className="border-slate-700 bg-slate-900 text-slate-200" />
+        </div>
+
+        {summaries === undefined ? (
+          <p className="text-sm text-slate-400">Loading scoring summaries...</p>
+        ) : summaries.length === 0 ? (
+          <p className="text-sm text-slate-400">No visible projects yet for this workspace.</p>
+        ) : (
+          <div className="space-y-3">
+            {summaries.map((summary) => (
+              <div key={summary.projectId} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold text-white">{summary.projectName}</h3>
+                  <Link
+                    href={`/workspaces/${companyId}/projects/${summary.projectId}`}
+                    className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-sm text-sky-200 hover:border-sky-400"
+                  >
+                    Open project
+                  </Link>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  <StatusPill label={`${summary.submittedVendors} / ${summary.totalVendors} vendors submitted`} className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200" />
+                  <StatusPill label={`${summary.completedScorerVendorPairs} / ${summary.totalScorerVendorPairs} scorer completions`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </WorkspaceShell>
   );
 }

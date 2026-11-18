@@ -818,6 +818,160 @@ export const listProjectsForCompany = query({
   },
 });
 
+export const listWorkspaceRequirementsSummary = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    const userIds = getIdentityUserIds(identity);
+    const memberships = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity);
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity);
+
+    if (memberships.length === 0 && !consultantMembership) {
+      throw new Error("Company access denied");
+    }
+
+    const allProjects = await ctx.db
+      .query("projects")
+      .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+      .collect();
+
+    const allowedProjectIds = consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")
+      ? null
+      : await getAccessibleProjectIdsForUser(ctx, args.companyId, userIds, identity);
+
+    const scopedProjects = allowedProjectIds
+      ? allProjects.filter((project) => allowedProjectIds.has(project._id))
+      : allProjects;
+
+    const rows = await Promise.all(scopedProjects.map(async (project) => {
+      const requirements = await ctx.db
+        .query("requirements")
+        .withIndex("by_company_project", (q) => q.eq("companyId", args.companyId).eq("projectId", project._id))
+        .collect();
+
+      const activeCount = requirements.filter((row) => row.status === "active" && row.priority !== 0).length;
+      const withdrawnCount = requirements.filter((row) => row.status === "withdrawn").length;
+      const outOfScopeCount = requirements.filter((row) => row.status === "active" && row.priority === 0).length;
+
+      return {
+        projectId: project._id,
+        projectName: project.name,
+        activeCount,
+        withdrawnCount,
+        outOfScopeCount,
+      };
+    }));
+
+    return rows.sort((a, b) => a.projectName.localeCompare(b.projectName));
+  },
+});
+
+export const listWorkspaceScoringSummary = query({
+  args: { companyId: v.id("companies") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [] as const;
+    }
+
+    const userIds = getIdentityUserIds(identity);
+    const memberships = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity);
+    const consultantMembership = await getActiveConsultantRecord(ctx, identity);
+
+    if (memberships.length === 0 && !consultantMembership) {
+      throw new Error("Company access denied");
+    }
+
+    const allProjects = await ctx.db
+      .query("projects")
+      .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
+      .collect();
+
+    const allowedProjectIds = consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")
+      ? null
+      : await getAccessibleProjectIdsForUser(ctx, args.companyId, userIds, identity);
+
+    const scopedProjects = allowedProjectIds
+      ? allProjects.filter((project) => allowedProjectIds.has(project._id))
+      : allProjects;
+
+    const rows = await Promise.all(scopedProjects.map(async (project) => {
+      const assignments = await ctx.db
+        .query("projectVendors")
+        .filter((q: any) => q.eq(q.field("projectId"), project._id))
+        .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+        .collect();
+
+      const vendors = await Promise.all(assignments.map(async (assignment) => {
+        const contacts = await ctx.db
+          .query("companyMembers")
+          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+          .filter((q: any) => q.eq(q.field("role"), "vendor"))
+          .filter((q: any) => q.eq(q.field("isActive"), true))
+          .filter((q: any) => q.eq(q.field("vendorId"), assignment.vendorId))
+          .collect();
+
+        const selectedContact = contacts.sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+        if (!selectedContact) {
+          return null;
+        }
+
+        const deadline = await ctx.db
+          .query("projectDeadlines")
+          .withIndex("by_project_target", (q) => q.eq("projectId", project._id).eq("targetType", "vendor").eq("targetUserId", selectedContact.userId))
+          .first();
+
+        return {
+          vendorUserId: selectedContact.userId,
+          submitted: deadline?.status === "submitted",
+        };
+      }));
+
+      const vendorRows = vendors.filter((row): row is { vendorUserId: string; submitted: boolean } => row !== null);
+      const submittedVendors = vendorRows.filter((row) => row.submitted).length;
+
+      const scopeKeys = new Set<string>();
+      const scorerAssignments = await ctx.db
+        .query("projectMembers")
+        .filter((q: any) => q.eq(q.field("projectId"), project._id))
+        .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+        .filter((q: any) => q.eq(q.field("isActive"), true))
+        .collect();
+
+      for (const assignment of scorerAssignments) {
+        if (assignment.departmentId || assignment.departmentName) {
+          scopeKeys.add(`department:${assignment.departmentId ?? assignment.departmentName}`);
+        } else {
+          scopeKeys.add(`individual:${assignment.userId}`);
+        }
+      }
+
+      const completionRows = await ctx.db
+        .query("scorerCompletions")
+        .filter((q: any) => q.eq(q.field("projectId"), project._id))
+        .filter((q: any) => q.eq(q.field("status"), "completed"))
+        .collect();
+      const completedScorerVendorPairs = new Set(completionRows.map((row) => `${row.vendorUserId}::${row.scorerScopeKey}`));
+      const totalScorerVendorPairs = scopeKeys.size * vendorRows.length;
+
+      return {
+        projectId: project._id,
+        projectName: project.name,
+        submittedVendors,
+        totalVendors: vendorRows.length,
+        completedScorerVendorPairs: completedScorerVendorPairs.size,
+        totalScorerVendorPairs,
+      };
+    }));
+
+    return rows.sort((a, b) => a.projectName.localeCompare(b.projectName));
+  },
+});
+
 export async function canViewRequirements(
   ctx: any,
   projectId: Id<"projects">,

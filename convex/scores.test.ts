@@ -766,12 +766,24 @@ describe("Phase 5 score audit trail", () => {
       scorerCanSeePeerScores: true,
     });
 
-    const visiblePeer = await scorer.query((api as any).scores.getScorerVendorGrid, {
+    const visiblePeerBeforeCompletion = await scorer.query((api as any).scores.getScorerVendorGrid, {
       projectId: seeded.projectBId,
       vendorUserId: "northwind-vendor",
     });
-    expect(visiblePeer.canSeePeerScores).toBe(true);
-    expect(visiblePeer.rows[0].peerScores.length).toBeGreaterThan(0);
+    expect(visiblePeerBeforeCompletion.canSeePeerScores).toBe(false);
+    expect(visiblePeerBeforeCompletion.rows[0].peerScores).toHaveLength(0);
+
+    await scorer.mutation((api as any).scores.completeScorerVendor, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+
+    const visiblePeerAfterCompletion = await scorer.query((api as any).scores.getScorerVendorGrid, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+    expect(visiblePeerAfterCompletion.canSeePeerScores).toBe(true);
+    expect(visiblePeerAfterCompletion.rows[0].peerScores.length).toBeGreaterThan(0);
   });
 });
 
