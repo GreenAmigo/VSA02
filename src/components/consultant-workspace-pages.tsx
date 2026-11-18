@@ -2357,9 +2357,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       groups: Array<{
         departmentId: string | null;
         departmentName: string;
+        groupType: "default" | "current" | "historical";
         completedPairs: number;
         totalPairs: number;
-        scorers: Array<{ displayName: string; completedPairs: number; totalPairs: number; historicalDepartmentNames: string[] }>;
+        scorers: Array<{ displayName: string; departmentName: string; completedPairs: number; totalPairs: number; historicalDepartmentNames: string[]; selectedDepartmentScoreCount: number }>;
       }>;
     }
     | undefined;
@@ -2543,8 +2544,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                     {group.scorers.map((scorer) => (
                       <div key={`${group.departmentName}-${scorer.displayName}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
                         <div>
-                          <span className="text-sm text-slate-100">{scorer.displayName}, {group.departmentName}</span>
-                          {scorer.historicalDepartmentNames.length > 0 ? (
+                          <span className="text-sm text-slate-100">{scorer.displayName}, {group.groupType === "historical" ? scorer.departmentName ?? "Current department" : group.departmentName}</span>
+                          {group.groupType === "historical" ? (
+                            <p className="text-xs text-slate-400">{`${scorer.selectedDepartmentScoreCount} scores recorded under this department`}</p>
+                          ) : scorer.historicalDepartmentNames.length > 0 ? (
                             <p className="text-xs text-slate-400">{`some scores entered while in ${scorer.historicalDepartmentNames.join(", ")}`}</p>
                           ) : null}
                         </div>

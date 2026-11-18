@@ -888,6 +888,70 @@ describe("Phase 5 score audit trail", () => {
     expect(scorerRow?.historicalDepartmentNames).toContain("Finance");
   });
 
+  test("department filter splits current and historical scorer groups based on score snapshots", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "admin@beta.example" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer", email: "scorer@beta.example" });
+
+    const itDepartment = await admin.mutation(api.admin.createWorkspaceDepartment, {
+      companyId: seeded.companyBId,
+      name: "IT Test Dept",
+    });
+    const digitalDepartment = await admin.mutation(api.admin.createWorkspaceDepartment, {
+      companyId: seeded.companyBId,
+      name: "Digital",
+    });
+
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: itDepartment.departmentId,
+    });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-IT-1", text: "IT snapshot", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await scorer.mutation((api as any).scores.saveScorerScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-IT-1",
+      score: 1,
+      comment: "Entered in IT",
+    });
+
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: digitalDepartment.departmentId,
+    });
+
+    const filtered = await admin.query((api as any).scores.getProjectScoringProgress, {
+      projectId: seeded.projectBId,
+      departmentId: itDepartment.departmentId,
+    });
+
+    const currentGroup = filtered.groups.find((group: { groupType: string }) => group.groupType === "current");
+    const historicalGroup = filtered.groups.find((group: { groupType: string }) => group.groupType === "historical");
+
+    expect(currentGroup?.departmentName).toBe("Currently in IT Test Dept");
+    expect(currentGroup?.scorers).toHaveLength(0);
+    expect(historicalGroup?.departmentName).toBe("Also scored while in IT Test Dept");
+
+    const historicalScorer = historicalGroup?.scorers.find((row: { displayName: string }) => row.displayName === "Beta Scorer");
+    expect(historicalScorer?.departmentName).toBe("Digital");
+    expect(historicalScorer?.selectedDepartmentScoreCount).toBeGreaterThanOrEqual(1);
+  });
+
   test("scorer peer visibility is controlled by the per-project admin setting", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

@@ -835,6 +835,10 @@ export const getProjectScoringProgress = query({
   },
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+    const selectedDepartment = args.departmentId ? await ctx.db.get(args.departmentId) : null;
+    if (args.departmentId && (!selectedDepartment || selectedDepartment.companyId !== project.companyId || selectedDepartment.isActive === false)) {
+      throw new Error("Department not found");
+    }
 
     const vendors = await listAssignedVendorUsers(ctx, project);
     const vendorRows = vendors.map((vendor) => ({
@@ -856,6 +860,7 @@ export const getProjectScoringProgress = query({
       departmentId: Id<"workspaceDepartments"> | null;
       departmentName: string;
       historicalDepartmentNames: string[];
+      selectedDepartmentScoreCount: number;
       scopeKey: string;
       completedPairs: number;
       totalPairs: number;
@@ -878,12 +883,9 @@ export const getProjectScoringProgress = query({
       const departmentId = member?.departmentId ?? null;
       const departmentName = memberDepartment?.name ?? "No department";
 
-      if (args.departmentId && departmentId !== args.departmentId) {
-        continue;
-      }
-
       const scopeKey = `individual:${assignment.userId}`;
       const snapshotDepartments = new Set<string>();
+      let selectedDepartmentScoreCount = 0;
       const scorerVendorRows: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }> = [];
 
       for (const vendor of vendorRows) {
@@ -899,6 +901,15 @@ export const getProjectScoringProgress = query({
         for (const scorerScoreRow of scorerScoreRows) {
           if (scorerScoreRow.scorerDepartmentName) {
             snapshotDepartments.add(scorerScoreRow.scorerDepartmentName);
+          }
+          if (
+            args.departmentId
+            && (
+              (scorerScoreRow.scorerDepartmentId && String(scorerScoreRow.scorerDepartmentId) === String(args.departmentId))
+              || (!scorerScoreRow.scorerDepartmentId && scorerScoreRow.scorerDepartmentName === selectedDepartment?.name)
+            )
+          ) {
+            selectedDepartmentScoreCount += 1;
           }
         }
 
@@ -916,17 +927,60 @@ export const getProjectScoringProgress = query({
         .filter((name) => name !== departmentName)
         .sort((a, b) => a.localeCompare(b));
 
+      if (args.departmentId && departmentId !== args.departmentId && selectedDepartmentScoreCount === 0) {
+        continue;
+      }
+
       scorerRows.push({
         userId: assignment.userId,
         displayName: assignment.displayName,
         departmentId,
         departmentName,
         historicalDepartmentNames,
+        selectedDepartmentScoreCount,
         scopeKey,
         completedPairs,
         totalPairs: vendorRows.length,
         vendors: scorerVendorRows,
       });
+    }
+
+    if (args.departmentId && selectedDepartment) {
+      const selectedDepartmentName = selectedDepartment.name;
+      const currentlyIn = scorerRows
+        .filter((scorer) => scorer.departmentId === args.departmentId)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+      const alsoScoredWhileIn = scorerRows
+        .filter((scorer) => scorer.departmentId !== args.departmentId && scorer.selectedDepartmentScoreCount > 0)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+      const currentlyCompletedPairs = currentlyIn.reduce((sum, scorer) => sum + scorer.completedPairs, 0);
+      const currentlyTotalPairs = currentlyIn.reduce((sum, scorer) => sum + scorer.totalPairs, 0);
+      const historicalCompletedPairs = alsoScoredWhileIn.reduce((sum, scorer) => sum + scorer.completedPairs, 0);
+      const historicalTotalPairs = alsoScoredWhileIn.reduce((sum, scorer) => sum + scorer.totalPairs, 0);
+
+      return {
+        projectId: args.projectId,
+        vendors: vendorRows,
+        groups: [
+          {
+            departmentId: args.departmentId,
+            departmentName: `Currently in ${selectedDepartmentName}`,
+            groupType: "current" as const,
+            completedPairs: currentlyCompletedPairs,
+            totalPairs: currentlyTotalPairs,
+            scorers: currentlyIn,
+          },
+          {
+            departmentId: args.departmentId,
+            departmentName: `Also scored while in ${selectedDepartmentName}`,
+            groupType: "historical" as const,
+            completedPairs: historicalCompletedPairs,
+            totalPairs: historicalTotalPairs,
+            scorers: alsoScoredWhileIn,
+          },
+        ],
+      };
     }
 
     const grouped = new Map<string, { departmentId: string | null; departmentName: string; scorers: typeof scorerRows; completedPairs: number; totalPairs: number }>();
@@ -951,6 +1005,7 @@ export const getProjectScoringProgress = query({
       groups: Array.from(grouped.values())
         .map((group) => ({
           ...group,
+          groupType: "default" as const,
           scorers: group.scorers.sort((a, b) => a.displayName.localeCompare(b.displayName)),
         }))
         .sort((a, b) => a.departmentName.localeCompare(b.departmentName)),
