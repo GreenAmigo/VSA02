@@ -417,6 +417,15 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
         comment: string;
         amendedByDisplayName: string | null;
         amendedAt: number | null;
+        scorerScores: Array<{
+          scopeKey: string;
+          scopeLabel: string;
+          score: 0 | 1;
+          comment: string;
+          enteredByDisplayName: string;
+          scorerDepartmentName: string;
+          enteredAt: number;
+        }>;
         history: Array<{
           originalScore: 0 | 1;
           newScore: 0 | 1;
@@ -696,6 +705,19 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                       ) : (
                         <p className="mt-3 text-xs text-slate-400">Amendments unlock only after the vendor deadline.</p>
                       )}
+
+                      {row.scorerScores.length > 0 ? (
+                        <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-300">Scorer scores (with recorded department)</p>
+                          <div className="mt-2 space-y-1 text-xs text-slate-300">
+                            {row.scorerScores.map((entry) => (
+                              <p key={`${row.requirementId}-${entry.scopeKey}-${entry.enteredAt}`}>
+                                {entry.scopeLabel}: {entry.score} ({entry.enteredByDisplayName}) - Department: {entry.scorerDepartmentName}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
 
                       {row.history.length > 0 ? (
                         <details className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
@@ -2337,7 +2359,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         departmentName: string;
         completedPairs: number;
         totalPairs: number;
-        scorers: Array<{ displayName: string; completedPairs: number; totalPairs: number }>;
+        scorers: Array<{ displayName: string; completedPairs: number; totalPairs: number; historicalDepartmentNames: string[] }>;
       }>;
     }
     | undefined;
@@ -2508,7 +2530,12 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                   <div className="space-y-2">
                     {group.scorers.map((scorer) => (
                       <div key={`${group.departmentName}-${scorer.displayName}`} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
-                        <span className="text-sm text-slate-100">{scorer.displayName}</span>
+                        <div>
+                          <span className="text-sm text-slate-100">{scorer.displayName}, {group.departmentName}</span>
+                          {scorer.historicalDepartmentNames.length > 0 ? (
+                            <p className="text-xs text-slate-400">{`some scores entered while in ${scorer.historicalDepartmentNames.join(", ")}`}</p>
+                          ) : null}
+                        </div>
                         <span className="text-xs text-slate-300">{scorer.completedPairs} / {scorer.totalPairs} vendors completed</span>
                       </div>
                     ))}

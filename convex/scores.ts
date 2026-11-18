@@ -821,6 +821,7 @@ export const getProjectScoringProgress = query({
       displayName: string;
       departmentId: Id<"workspaceDepartments"> | null;
       departmentName: string;
+      historicalDepartmentNames: string[];
       scopeKey: string;
       completedPairs: number;
       totalPairs: number;
@@ -848,6 +849,7 @@ export const getProjectScoringProgress = query({
       }
 
       const scopeKey = `individual:${assignment.userId}`;
+      const snapshotDepartments = new Set<string>();
       const scorerVendorRows: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }> = [];
 
       for (const vendor of vendorRows) {
@@ -855,6 +857,16 @@ export const getProjectScoringProgress = query({
           .query("scorerCompletions")
           .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId).eq("scorerScopeKey", scopeKey))
           .first();
+
+        const scorerScoreRows = await ctx.db
+          .query("scorerScores")
+          .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId).eq("scorerScopeKey", scopeKey))
+          .collect();
+        for (const scorerScoreRow of scorerScoreRows) {
+          if (scorerScoreRow.scorerDepartmentName) {
+            snapshotDepartments.add(scorerScoreRow.scorerDepartmentName);
+          }
+        }
 
         scorerVendorRows.push({
           vendorUserId: vendor.vendorUserId,
@@ -866,12 +878,16 @@ export const getProjectScoringProgress = query({
       }
 
       const completedPairs = scorerVendorRows.filter((row) => row.status === "completed").length;
+      const historicalDepartmentNames = Array.from(snapshotDepartments)
+        .filter((name) => name !== departmentName)
+        .sort((a, b) => a.localeCompare(b));
 
       scorerRows.push({
         userId: assignment.userId,
         displayName: assignment.displayName,
         departmentId,
         departmentName,
+        historicalDepartmentNames,
         scopeKey,
         completedPairs,
         totalPairs: vendorRows.length,
@@ -928,6 +944,33 @@ export const getVendorResponseReview = query({
       .collect();
     const scoreByRequirementId = new Map(scoreRows.map((row) => [row.requirementId, row]));
 
+    const scorerRows = await ctx.db
+      .query("scorerScores")
+      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
+      .collect();
+    const scorerRowsByRequirementId = new Map<string, Array<{
+      scopeKey: string;
+      scopeLabel: string;
+      score: 0 | 1;
+      comment: string;
+      enteredByDisplayName: string;
+      scorerDepartmentName: string;
+      enteredAt: number;
+    }>>();
+    for (const scorerRow of scorerRows) {
+      const current = scorerRowsByRequirementId.get(scorerRow.requirementId) ?? [];
+      current.push({
+        scopeKey: scorerRow.scorerScopeKey,
+        scopeLabel: scorerRow.scorerScopeLabel,
+        score: scorerRow.score,
+        comment: scorerRow.comment ?? "",
+        enteredByDisplayName: scorerRow.enteredByDisplayName,
+        scorerDepartmentName: scorerRow.scorerDepartmentName ?? "No department snapshot",
+        enteredAt: scorerRow.enteredAt,
+      });
+      scorerRowsByRequirementId.set(scorerRow.requirementId, current);
+    }
+
     const amendments = await ctx.db
       .query("scoreAmendments")
       .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
@@ -967,6 +1010,8 @@ export const getVendorResponseReview = query({
         comment: score?.comment ?? "",
         amendedByDisplayName: score?.amendedByDisplayName ?? null,
         amendedAt: score?.amendedAt ?? null,
+        scorerScores: (scorerRowsByRequirementId.get(requirement.requirementId) ?? [])
+          .sort((a, b) => a.scopeLabel.localeCompare(b.scopeLabel) || b.enteredAt - a.enteredAt),
         history,
       };
     });
@@ -1186,11 +1231,11 @@ export const saveScorerScore = mutation({
       requirementId: args.requirementId,
       score: args.score,
       comment: args.comment?.trim() || undefined,
-      enteredByUserId: scorerUserId,
-      enteredByDisplayName: displayName,
-      scorerDepartmentId: departmentSnapshot.scorerDepartmentId,
-      scorerDepartmentName: departmentSnapshot.scorerDepartmentName,
-      enteredAt: now,
+      enteredByUserId: existing?.enteredByUserId ?? scorerUserId,
+      enteredByDisplayName: existing?.enteredByDisplayName ?? displayName,
+      scorerDepartmentId: existing?.scorerDepartmentId ?? departmentSnapshot.scorerDepartmentId,
+      scorerDepartmentName: existing?.scorerDepartmentName ?? departmentSnapshot.scorerDepartmentName,
+      enteredAt: existing?.enteredAt ?? now,
       updatedAt: now,
     };
 

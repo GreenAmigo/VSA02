@@ -770,6 +770,122 @@ describe("Phase 5 score audit trail", () => {
       vendorUserId: "northwind-vendor",
     });
     expect(gridAfterMove.rows[0].ownScorerDepartmentName).toBe("Operations");
+
+    const adminReview = await admin.query((api as any).scores.getVendorResponseReview, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+    const scoredRow = adminReview.rows.find((item: { requirementId: string }) => item.requirementId === "REQ-D1");
+    expect(scoredRow?.scorerScores[0].scorerDepartmentName).toBe("Operations");
+  });
+
+  test("vendor response review shows scorer department snapshots on each scorer score", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "admin@beta.example" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer", email: "scorer@beta.example" });
+
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))[0].departmentId,
+    });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-SNAPSHOT", text: "Snapshot visibility", type: "user-story", priority: 9, status: "active" }],
+      confirm: true,
+    });
+
+    await scorer.mutation((api as any).scores.saveScorerScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-SNAPSHOT",
+      score: 1,
+      comment: "Snapshot check",
+    });
+
+    const review = await admin.query((api as any).scores.getVendorResponseReview, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+    });
+
+    const row = review.rows.find((item: { requirementId: string }) => item.requirementId === "REQ-SNAPSHOT");
+    expect(row?.scorerScores.length).toBe(1);
+    expect(row?.scorerScores[0].scopeLabel).toBe("Beta Scorer");
+    expect(row?.scorerScores[0].scorerDepartmentName).toBe("General");
+  });
+
+  test("scoring progress flags scorers with historical snapshot departments", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin", name: "Beta Admin", email: "admin@beta.example" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Scorer", email: "scorer@beta.example" });
+
+    const finance = await admin.mutation(api.admin.createWorkspaceDepartment, {
+      companyId: seeded.companyBId,
+      name: "Finance",
+    });
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: finance.departmentId,
+    });
+
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [
+        { id: "REQ-HIST-1", text: "History 1", type: "user-story", priority: 9, status: "active" },
+        { id: "REQ-HIST-2", text: "History 2", type: "user-story", priority: 9, status: "active" },
+      ],
+      confirm: true,
+    });
+
+    await scorer.mutation((api as any).scores.saveScorerScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-HIST-1",
+      score: 1,
+      comment: "Finance score",
+    });
+
+    const generalDepartmentId = (await admin.query((api as any).admin.listWorkspaceDepartments, { companyId: seeded.companyBId }))
+      .find((row: { name: string }) => row.name === "General")?.departmentId;
+    expect(generalDepartmentId).toBeTruthy();
+
+    await admin.mutation((api as any).admin.updateWorkspacePersonDepartment, {
+      companyId: seeded.companyBId,
+      userId: "beta-scorer",
+      departmentId: generalDepartmentId,
+    });
+
+    await scorer.mutation((api as any).scores.saveScorerScore, {
+      projectId: seeded.projectBId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "REQ-HIST-2",
+      score: 1,
+      comment: "General score",
+    });
+
+    const progress = await admin.query((api as any).scores.getProjectScoringProgress, {
+      projectId: seeded.projectBId,
+    });
+
+    const generalGroup = progress.groups.find((group: { departmentName: string }) => group.departmentName === "General");
+    const scorerRow = generalGroup?.scorers.find((row: { displayName: string }) => row.displayName === "Beta Scorer");
+    expect(scorerRow?.historicalDepartmentNames).toContain("Finance");
   });
 
   test("scorer peer visibility is controlled by the per-project admin setting", async () => {

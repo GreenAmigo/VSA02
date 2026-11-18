@@ -193,6 +193,9 @@ Phase 1 is approved with the following changes:
 7. Phase 7 — Consultant reporting and data management exports
 8. Phase 8 — Final hardening and release prep
 
+Phase 6 reporting rule:
+- Dashboard and score reporting must use the department recorded on each scorer score entry (snapshot at score time), not the scorer's current department.
+
 ### Phase 1 status update
 - Consultant access and preview-only workspace visibility are in place and enforced on the server.
 - The consultant home, workspace directory and activity-log route are all wired to Convex-backed access queries.
