@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
 import { parseWorkspaceCsv } from "@/lib/workspaceImport";
@@ -15,6 +15,9 @@ type ImportMode = "json" | "csv";
 
 export function WorkspaceImportForm() {
   const importWorkspaceBundle = useMutation(api.workspaceSeed.importWorkspaceBundle);
+  const access = useQuery(api.access.getCurrentUserAccess, {}) as
+    | { email?: string | null; role?: string | null; isConsultant?: boolean }
+    | undefined;
   const [mode, setMode] = useState<ImportMode>("json");
   const [jsonText, setJsonText] = useState(emptyJsonTemplate);
   const [csvText, setCsvText] = useState(emptyCsvTemplate);
@@ -66,6 +69,35 @@ export function WorkspaceImportForm() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
+      <aside className="fixed inset-y-0 left-0 hidden w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 lg:block">
+        <div className="mb-8">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
+          <h2 className="mt-3 text-xl font-semibold text-white">Workspace navigation</h2>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-300">
+            <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+              All workspaces
+            </Link>
+            <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+              Activity log
+            </Link>
+            <Link href="/workspaces/import" className="block rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sky-100 hover:border-sky-400">
+              Bulk data import
+            </Link>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+          <p className="mt-2 truncate text-sm text-white" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
+          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
+        </div>
+      </aside>
+
+      <main className="min-h-screen lg:ml-80">
       <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -73,10 +105,10 @@ export function WorkspaceImportForm() {
             <h1 className="mt-2 text-2xl font-semibold text-white">Bulk data import</h1>
           </div>
           <Link
-            href="/"
+            href="/workspaces"
             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
           >
-            ← Back to home
+            Back to workspaces
           </Link>
         </div>
       </header>
@@ -165,6 +197,7 @@ export function WorkspaceImportForm() {
           ) : null}
         </div>
       </div>
+      </main>
     </div>
   );
 }

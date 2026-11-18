@@ -1313,6 +1313,7 @@ function WorkspaceShell({
   showConsultantLinks?: boolean;
   children: React.ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const tabsByRole: Record<WorkspaceRole, Array<{ key: string; label: string; href: string }>> = {
     consultant: [
       { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
@@ -1330,7 +1331,9 @@ function WorkspaceShell({
       { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
     ],
     "company-scorer": [{ key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` }],
-    vendor: [],
+    vendor: [
+      { key: "overview", label: "My projects", href: `/workspaces/${workspace.slug}` },
+    ],
   };
 
   const tabs = tabsByRole[role ?? "consultant"] ?? tabsByRole.consultant;
@@ -1340,14 +1343,35 @@ function WorkspaceShell({
   const sanitizedBreadcrumbs = isVendorShell || role !== "consultant"
     ? (breadcrumbs ?? []).filter((item) => item.label !== "All workspaces")
     : breadcrumbs;
+  const projectNavHref = isVendorShell
+    ? `/workspaces/${workspace.slug}`
+    : `/workspaces/${workspace.slug}/projects`;
+  const canSeeProjectsLink = role === "consultant" || role === "company-admin" || role === "company-scorer" || role === "vendor";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      {isVendorShell ? null : (
-      <aside className="fixed inset-y-0 left-0 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5">
+      {menuOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
+        />
+      ) : null}
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
-          <h2 className="mt-3 text-xl font-semibold text-white">{role === "consultant" ? "Workspace directory" : "Workspace navigation"}</h2>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold text-white">{role === "consultant" ? "Workspace directory" : role === "vendor" ? "Vendor navigation" : "Workspace navigation"}</h2>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300 lg:hidden"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -1389,13 +1413,35 @@ function WorkspaceShell({
             </div>
           </div>
         ) : null}
-      </aside>
-      )}
 
-      <main className={isVendorShell ? "min-h-screen" : "ml-80 min-h-screen"}>
+        {role === "vendor" ? (
+          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Vendor links</p>
+            <div className="mt-3 space-y-2 text-sm text-slate-300">
+              <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+                My workspaces
+              </Link>
+              <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+                My projects
+              </Link>
+            </div>
+          </div>
+        ) : null}
+      </aside>
+
+      <main className="min-h-screen lg:ml-80">
         <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0 flex-1">
+              <div className="mb-3 flex items-center gap-2 lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(true)}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
+                >
+                  Menu
+                </button>
+              </div>
               {sanitizedBreadcrumbs && sanitizedBreadcrumbs.length > 0 ? <WorkspaceBreadcrumbs items={sanitizedBreadcrumbs} /> : null}
               <div className="flex items-center gap-3">
                 <div>
@@ -1409,6 +1455,14 @@ function WorkspaceShell({
               <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
               <p className="truncate text-sm font-medium text-white" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
               <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
+              {canSeeProjectsLink ? (
+                <Link
+                  href={projectNavHref}
+                  className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
+                >
+                  Projects
+                </Link>
+              ) : null}
               {shouldShowPreviewDebugLine() ? (
                 <p className="text-[10px] text-slate-400">
                   Preview debug: role {serverRole ?? roleLabel}, lookup {serverLookupId ?? "unknown"}
@@ -2670,12 +2724,17 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         scores: [],
       }}
       activeTab="projects"
-      breadcrumbs={[
-        { label: "All workspaces", href: "/workspaces" },
-        { label: company.name, href: `/workspaces/${companyId}` },
-        { label: "Projects", href: `/workspaces/${companyId}/projects` },
-        { label: project.name },
-      ]}
+      breadcrumbs={isVendorView
+        ? [
+            { label: "My projects", href: `/workspaces/${companyId}` },
+            { label: project.name },
+          ]
+        : [
+            { label: "All workspaces", href: "/workspaces" },
+            { label: company.name, href: `/workspaces/${companyId}` },
+            { label: "Projects", href: `/workspaces/${companyId}/projects` },
+            { label: project.name },
+          ]}
       role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
       userEmail={access.email ?? user?.email ?? "Unknown"}
       serverRole={access.isConsultant ? "vs-consultant" : access.role ?? "none"}
@@ -3035,9 +3094,9 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
       }}
       activeTab="projects"
       breadcrumbs={[
-        { label: company.name, href: `/workspaces/${companyId}` },
+        { label: "My projects", href: `/workspaces/${companyId}` },
         { label: panel.projectName, href: `/workspaces/${companyId}/projects/${projectId}` },
-        { label: "Answer requirements" },
+        { label: "Score requirements" },
       ]}
       role="vendor"
       userEmail={access.email ?? user?.email ?? "Unknown"}
@@ -3323,7 +3382,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
       userEmail={access.email ?? user?.email ?? "Unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
-      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="space-y-6">
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -3657,7 +3716,7 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
       userEmail={access.email ?? user?.email ?? "Unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="space-y-6">
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -3776,7 +3835,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
         userEmail={access.email ?? user?.email ?? "Unknown"}
         showConsultantLinks={false}
       >
-        <div className="mx-auto max-w-4xl rounded-2xl border border-slate-800 bg-slate-900 p-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
           <h1 className="mt-3 text-2xl font-semibold text-white sm:text-3xl" title={vendorNameText}>{vendorNameText}</h1>
           <p className="mt-2 text-base text-slate-300">Working with {companyName}</p>
@@ -3876,7 +3935,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
       userEmail={access.email ?? user?.email ?? "Unknown"}
       showConsultantLinks={Boolean(access.isConsultant)}
     >
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="space-y-6">
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
