@@ -8,6 +8,31 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 8 deadline and reminder logic", () => {
+  test("vendor deadlines use active contacts of assigned organisations", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const assignmentId = await t.run(async (ctx) => {
+      const member = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!member || !assignment) throw new Error("Missing test setup");
+      await ctx.db.delete(member._id);
+      return assignment._id;
+    });
+    const args = { projectId: seeded.projectBId, targetType: "vendor" as const, targetUserId: "northwind-vendor", dueAt: Date.now() + 10000 };
+    await expect(scorer.mutation(api.deadlines.upsertProjectDeadline, args)).resolves.toMatchObject({ targetUserId: "northwind-vendor" });
+    expect(await vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId })).toHaveLength(1);
+    await t.run(async (ctx) => { await ctx.db.delete(assignmentId); });
+    await expect(scorer.mutation(api.deadlines.upsertProjectDeadline, args)).rejects.toThrow("Target user is not a vendor on this project");
+    await expect(vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+  });
+
   test("scorers and vendors can see their deadline state, and vendors can only update their own submitted status", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

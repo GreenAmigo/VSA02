@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -59,7 +60,7 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     ))
     .first();
 
-  if (member && member.companyId === project.companyId) {
+  if (member && member.companyId === project.companyId && member.role !== "vendor") {
     return { project, identity, member };
   }
 
@@ -88,16 +89,12 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     };
   }
 
+  const vendors = await getProjectVendors(ctx, project);
   const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
   for (const vendorMembership of vendorMemberships) {
-    const assignment = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("projectId"), projectId))
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
-      .first();
+    const assignment = findProjectVendorByUserId(vendors, vendorMembership.userId);
 
-    if (assignment) {
+    if (assignment && assignment.vendorId === vendorMembership.vendorId) {
       return {
         project,
         identity,
@@ -111,11 +108,7 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     }
   }
 
-  if (!member || member.companyId !== project.companyId) {
-    throw new Error("Project access denied");
-  }
-
-  return { project, identity, member };
+  throw new Error("Project access denied");
 }
 
 export const listProjectDeadlines = query({
@@ -161,23 +154,21 @@ export const upsertProjectDeadline = mutation({
       throw new Error("Project access denied");
     }
 
-    const targetMembership = await ctx.db
-      .query("projectMembers")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("userId"), args.targetUserId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    if (!targetMembership) {
-      throw new Error("Target user is not on this project");
-    }
-
-    if (args.targetType === "vendor" && targetMembership.role !== "vendor") {
-      throw new Error("Target user is not a vendor on this project");
-    }
-
-    if (args.targetType === "scorer" && targetMembership.role !== "company-scorer" && targetMembership.role !== "company-admin") {
-      throw new Error("Target user is not a scorer on this project");
+    if (args.targetType === "vendor") {
+      if (!findProjectVendorByUserId(await getProjectVendors(ctx, project), args.targetUserId)) {
+        throw new Error("Target user is not a vendor on this project");
+      }
+    } else {
+      const targetMembership = await ctx.db
+        .query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", args.projectId).eq("userId", args.targetUserId))
+        .first();
+      if (!targetMembership || !targetMembership.isActive || targetMembership.companyId !== project.companyId) {
+        throw new Error("Target user is not on this project");
+      }
+      if (targetMembership.role !== "company-scorer" && targetMembership.role !== "company-admin") {
+        throw new Error("Target user is not a scorer on this project");
+      }
     }
 
     const existing = await ctx.db
