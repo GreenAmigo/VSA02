@@ -1,13 +1,59 @@
 /// <reference types="vite/client" />
 
+import * as XLSX from "xlsx";
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { buildRequirementTemplateWorkbook, parseRequirementFileWithIssues, toRequirementImportRows } from "../src/lib/projectRequirements";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 4 requirement import preview and confirm", () => {
+  test("template parser output matches previewRequirementImport validator contract", async () => {
+    const t = convexTest({ schema, modules });
+
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+
+    const workbook = buildRequirementTemplateWorkbook();
+    workbook.Sheets.Requirements = XLSX.utils.aoa_to_sheet([
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ["REQ-901", "Identity federation", "user-story", 9, "Security"],
+      ["REQ-902", "Audit export", "user-story", 3, "Compliance"],
+    ]);
+    workbook.Sheets.NFRs = XLSX.utils.aoa_to_sheet([
+      ["Requirement ID", "Title/Text", "Type", "Priority", "Category"],
+      ["NFR-901", "99.95% availability", "nfr", 9, "Availability"],
+    ]);
+
+    const xlsxBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
+    const file = new File([xlsxBuffer], "requirements-template.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const parsed = await parseRequirementFileWithIssues(file);
+    expect(parsed.issues).toEqual([]);
+
+    const rows = toRequirementImportRows(parsed.rows);
+    expect(rows).toHaveLength(3);
+
+    await expect(
+      admin.mutation(api.requirements.previewRequirementImport, {
+        projectId: seeded.projectAId,
+        rows,
+      }),
+    ).resolves.toMatchObject({
+      summary: { added: 3 },
+    });
+  });
+
   test("import preview counts changes and applies only after confirm", async () => {
     const t = convexTest({ schema, modules });
 

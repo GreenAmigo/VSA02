@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { getProjectDraftError, normalizeProjectName } from "../lib/projectDraft";
 import { getPersonInviteDraftError } from "../lib/projectPeople";
-import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFile, parseRequirementFileWithIssues } from "../lib/projectRequirements";
+import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFileWithIssues, toRequirementImportRows } from "../lib/projectRequirements";
 import { getScoringDraftError, getScoringModeMeta } from "../lib/projectScoring";
 
 describe("project creation screen", () => {
@@ -47,7 +47,8 @@ describe("project creation screen", () => {
 
     const xlsxBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
     const xlsxFile = new File([xlsxBuffer], "template.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const xlsxResult = await parseRequirementFile(xlsxFile);
+    const xlsxParsed = await parseRequirementFileWithIssues(xlsxFile);
+    const xlsxResult = toRequirementImportRows(xlsxParsed.rows);
     expect(xlsxResult).toHaveLength(4);
     expect(xlsxResult.map((row) => row.id).sort()).toEqual(["NFR-101", "NFR-102", "REQ-101", "REQ-102"]);
 
@@ -57,13 +58,13 @@ describe("project creation screen", () => {
       "NFR-201,Encryption at rest,nfr,3,Security",
     ].join("\n");
     const csvFile = new File([csvContent], "requirements.csv", { type: "text/csv" });
-    const csvResult = await parseRequirementFile(csvFile);
+    const csvParsed = await parseRequirementFileWithIssues(csvFile);
+    const csvResult = toRequirementImportRows(csvParsed.rows);
     expect(csvResult).toHaveLength(2);
     expect(csvResult[0].id).toBe("REQ-201");
 
-    const issues = await parseRequirementFileWithIssues(csvFile);
-    expect(issues.issues).toEqual([]);
-    expect(issues.rows).toHaveLength(2);
+    expect(csvParsed.issues).toEqual([]);
+    expect(csvParsed.rows).toHaveLength(2);
   });
 
   it("keeps valid rows and rejects a row with an invalid priority", async () => {

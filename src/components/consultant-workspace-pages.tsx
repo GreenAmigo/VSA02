@@ -8,7 +8,7 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { parseRequirementFileWithIssues } from "../lib/projectRequirements";
+import { parseRequirementFileWithIssues, toRequirementImportRows, type RequirementImportRow } from "../lib/projectRequirements";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -2822,7 +2822,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [selectedProgressDepartmentId, setSelectedProgressDepartmentId] = useState("");
   const [vendorDraft, setVendorDraft] = useState({ selectedVendorId: "" });
   const [importFileName, setImportFileName] = useState("");
-  const [importRows, setImportRows] = useState<Array<{ id: string; text: string; type: "user-story" | "nfr"; priority: 9 | 3 | 1 | 0; status?: "active" | "withdrawn" }>>([]);
+  const [importRows, setImportRows] = useState<RequirementImportRow[]>([]);
   const [importIssues, setImportIssues] = useState<Array<{ requirementId?: string; reason: string }>>([]);
   const [importSummary, setImportSummary] = useState<{ added: number; updated: number; withdrawn: number; total: number } | null>(null);
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
@@ -2947,18 +2947,19 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     setImportSummary(null);
     try {
       const parsed = await parseRequirementFileWithIssues(file);
+      const parsedRows = toRequirementImportRows(parsed.rows);
       setImportFileName(file.name);
-      setImportRows(parsed.rows);
+      setImportRows(parsedRows);
       setImportIssues(parsed.issues);
 
-      if (parsed.rows.length === 0) {
+      if (parsedRows.length === 0) {
         setNotice({ kind: "error", message: "No valid requirement rows were found in the selected file." });
         return;
       }
 
       const preview = await previewRequirementImport({
         projectId: projectId as any,
-        rows: parsed.rows,
+        rows: parsedRows,
       });
       setImportSummary(preview.summary ?? null);
       if (parsed.issues.length > 0) {

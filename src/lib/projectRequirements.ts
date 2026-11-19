@@ -15,6 +15,14 @@ export type RequirementRecord = {
   updatedAt: string;
 };
 
+export type RequirementImportRow = {
+  id: string;
+  text: string;
+  type: RequirementType;
+  priority: RequirementPriority;
+  status?: RequirementStatus;
+};
+
 export type Project = {
   id: string;
   companyId: string;
@@ -224,9 +232,14 @@ export function parseRequirementFileWithIssues(file: File): Promise<{ rows: Requ
   })();
 }
 
-export async function parseRequirementFile(file: File): Promise<RequirementRecord[]> {
-  const parsed = await parseRequirementFileWithIssues(file);
-  return parsed.rows;
+export function toRequirementImportRows(rows: RequirementRecord[]): RequirementImportRow[] {
+  return rows.map((row) => ({
+    id: row.id,
+    text: row.text,
+    type: row.type,
+    priority: row.priority,
+    status: row.status,
+  }));
 }
 
 export function normalizeRequirementId(value: unknown): string {
