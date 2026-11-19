@@ -71,6 +71,23 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("project roster uses workspace scorer display names", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "beta-scorer")).unique();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.patch(assignment._id, { displayName: "scorer@beta.example" });
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const roster = await admin.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+    expect(roster.find((row) => row.userId === "beta-scorer")?.displayName).toBe("Beta Scorer");
+  });
+
   test("project roster uses vendor assignments and limits vendors to their own contact", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

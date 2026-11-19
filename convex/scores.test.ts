@@ -256,6 +256,62 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("scoring screens prefer workspace scorer names over stale assignment and score labels", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "beta-scorer")).unique();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.patch(assignment._id, { displayName: "scorer@beta.example" });
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyAId, userId: "beta-scorer", displayName: "Other Company Scorer",
+        role: "company-scorer", isActive: true, createdAt: Date.now(),
+      });
+    });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-NAME", text: "Scorer name", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    await scorer.mutation(api.scores.saveScorerScore, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ-NAME", score: 1,
+    });
+    await t.run(async (ctx) => {
+      const score = await ctx.db.query("scorerScores")
+        .withIndex("by_project_vendor", (q) => q.eq("projectId", seeded.projectBId).eq("vendorUserId", "northwind-vendor")).first();
+      if (!score) throw new Error("Missing test score");
+      await ctx.db.patch(score._id, { scorerScopeLabel: "user_stale", enteredByDisplayName: "user_stale" });
+    });
+
+    const grid = await scorer.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(grid.scorerScope.label).toBe("Beta Scorer");
+    expect(grid.rows[0].ownEnteredByDisplayName).toBe("Beta Scorer");
+    const workboard = await scorer.query(api.scores.getScorerWorkboard, { projectId: seeded.projectBId });
+    expect(workboard.scorerScopes[0].label).toBe("Beta Scorer");
+    const review = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(review.rows[0].scorerScores[0]).toMatchObject({ scopeLabel: "Beta Scorer", enteredByDisplayName: "Beta Scorer", scorerDepartmentName: "General" });
+    const progress = await admin.query(api.scores.getProjectScoringProgress, { projectId: seeded.projectBId });
+    expect(progress.groups[0].scorers[0].displayName).toBe("Beta Scorer");
+    const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.rows[0].cells[0].scorerDetails[0].scorerName).toBe("Beta Scorer");
+
+    await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique();
+      if (!member) throw new Error("Missing test member");
+      await ctx.db.patch(member._id, { displayName: "beta-scorer" });
+    });
+    const fallbackGrid = await scorer.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(fallbackGrid.scorerScope.label).toBe("Scorer");
+    expect(fallbackGrid.rows[0].ownEnteredByDisplayName).toBe("Scorer");
+  });
+
   test("vendor scoring access follows organisation assignment rather than legacy project membership", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
@@ -1365,6 +1421,17 @@ describe("Phase 5 score audit trail", () => {
       scopeKey: "individual:peer-scorer",
     });
 
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "peer-scorer")).unique();
+      const scores = await ctx.db.query("scorerScores")
+        .withIndex("by_project_vendor", (q) => q.eq("projectId", seeded.projectBId).eq("vendorUserId", "northwind-vendor")).collect();
+      const score = scores.find((row) => row.enteredByUserId === "peer-scorer");
+      if (!assignment || !score) throw new Error("Missing peer test data");
+      await ctx.db.patch(assignment._id, { displayName: "peer.scorer@beta.example" });
+      await ctx.db.patch(score._id, { scorerScopeLabel: "user_peer", enteredByDisplayName: "user_peer" });
+    });
+
     const hiddenPeer = await scorer.query((api as any).scores.getScorerVendorGrid, {
       projectId: seeded.projectBId,
       vendorUserId: "northwind-vendor",
@@ -1397,6 +1464,10 @@ describe("Phase 5 score audit trail", () => {
     });
     expect(visiblePeerAfterCompletion.canSeePeerScores).toBe(true);
     expect(visiblePeerAfterCompletion.rows[0].peerScores.length).toBeGreaterThan(0);
+    expect(visiblePeerAfterCompletion.rows[0].peerScores[0]).toMatchObject({
+      scopeLabel: "Peer Scorer",
+      enteredByDisplayName: "Peer Scorer",
+    });
   });
 
   test("preview/dev scorer reset clears scorer-only project data and leaves vendor answers", async () => {

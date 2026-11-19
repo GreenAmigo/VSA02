@@ -2,6 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -89,59 +90,6 @@ const clearProjectScorerDataValidator = v.object({
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
-}
-
-function looksLikeIdentityValue(value: string | null | undefined) {
-  const normalized = `${value ?? ""}`.trim();
-  if (!normalized) {
-    return false;
-  }
-
-  return (
-    normalized.includes("|")
-    || normalized.includes("@")
-    || /^workos[_-]/i.test(normalized)
-    || /^user[_:-]/i.test(normalized)
-    || /^org[_:-]/i.test(normalized)
-    || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(normalized)
-  );
-}
-
-async function getProjectMemberDisplayNameByUserId(ctx: any, projectId: string) {
-  const rows = await ctx.db
-    .query("projectMembers")
-    .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .collect();
-
-  const map = new Map<string, string>();
-  for (const row of rows) {
-    if (!row.userId || !row.displayName || looksLikeIdentityValue(row.displayName)) {
-      continue;
-    }
-    map.set(row.userId, row.displayName.trim());
-  }
-
-  return map;
-}
-
-function resolveScorerDisplayName(params: {
-  enteredByUserId?: string | null;
-  enteredByDisplayName?: string | null;
-  displayNameByUserId: Map<string, string>;
-}) {
-  if (params.enteredByUserId) {
-    const memberName = params.displayNameByUserId.get(params.enteredByUserId);
-    if (memberName) {
-      return memberName;
-    }
-  }
-
-  const fallback = params.enteredByDisplayName?.trim();
-  if (!fallback || looksLikeIdentityValue(fallback)) {
-    return "Scorer";
-  }
-
-  return fallback;
 }
 
 async function getProjectDeadlineForVendor(ctx: any, projectId: string, vendorUserId: string) {
@@ -410,11 +358,12 @@ async function resolveScorerScopes(ctx: any, project: any, identity: any, userId
     userIds.includes(row.userId) || (identity.name?.trim() ? row.displayName === identity.name.trim() : false),
   );
 
+  const displayNameByUserId = await getScorerDisplayNames(ctx, project);
   for (const assignment of individualAssignments) {
     scopeMap.set(`individual:${assignment.userId}`, {
       scopeKey: `individual:${assignment.userId}`,
       scopeType: "individual",
-      label: assignment.displayName,
+      label: resolveScorerDisplayName({ enteredByUserId: assignment.userId, enteredByDisplayName: assignment.displayName, displayNameByUserId }),
     });
   }
 
@@ -928,6 +877,7 @@ export const getProjectScoringProgress = query({
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .collect();
 
+    const displayNameByUserId = await getScorerDisplayNames(ctx, project);
     const scorerRows: Array<{
       userId: string;
       displayName: string;
@@ -1007,7 +957,7 @@ export const getProjectScoringProgress = query({
 
       scorerRows.push({
         userId: assignment.userId,
-        displayName: assignment.displayName,
+        displayName: resolveScorerDisplayName({ enteredByUserId: assignment.userId, enteredByDisplayName: assignment.displayName, displayNameByUserId }),
         departmentId,
         departmentName,
         historicalDepartmentNames,
@@ -1092,8 +1042,6 @@ export const getVendorResponseReview = query({
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
     const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
-    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
-
     const requirements = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
@@ -1112,6 +1060,7 @@ export const getVendorResponseReview = query({
       .query("scorerScores")
       .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
       .collect();
+    const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
     const scorerRowsByRequirementId = new Map<string, Array<{
       scopeKey: string;
       scopeLabel: string;
@@ -1125,7 +1074,11 @@ export const getVendorResponseReview = query({
       const current = scorerRowsByRequirementId.get(scorerRow.requirementId) ?? [];
       current.push({
         scopeKey: scorerRow.scorerScopeKey,
-        scopeLabel: scorerRow.scorerScopeLabel,
+        scopeLabel: scorerRow.scorerScopeType === "individual" ? resolveScorerDisplayName({
+          enteredByUserId: scorerRow.enteredByUserId,
+          enteredByDisplayName: scorerRow.scorerScopeLabel,
+          displayNameByUserId: scorerDisplayNamesByUserId,
+        }) : scorerRow.scorerScopeLabel,
         score: scorerRow.score,
         comment: scorerRow.comment ?? "",
         enteredByDisplayName: resolveScorerDisplayName({
@@ -1200,8 +1153,6 @@ export const getProjectRequirementComparison = query({
   args: requirementComparisonValidator,
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
-    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
-
     const requirements = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q: any) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
@@ -1222,6 +1173,7 @@ export const getProjectRequirementComparison = query({
         .query("scorerScores")
         .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
         .collect();
+      const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
       const vendorRows = await ctx.db
         .query("scores")
         .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
@@ -1454,7 +1406,7 @@ export const getScorerVendorGrid = query({
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
     const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
-    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
+    let scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project);
     const vendorRows = await listAssignedVendorUsers(ctx, project);
     const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
 
@@ -1497,6 +1449,7 @@ export const getScorerVendorGrid = query({
         .query("scorerScores")
         .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId))
         .collect();
+      scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, allScorerScores.map((row) => row.enteredByUserId));
 
       for (const row of allScorerScores) {
         if (row.scorerScopeKey === activeScope.scopeKey) {
@@ -1506,7 +1459,11 @@ export const getScorerVendorGrid = query({
         const current = peerScoresByRequirementId.get(row.requirementId) ?? [];
         current.push({
           scopeKey: row.scorerScopeKey,
-          scopeLabel: row.scorerScopeLabel,
+          scopeLabel: row.scorerScopeType === "individual" ? resolveScorerDisplayName({
+            enteredByUserId: row.enteredByUserId,
+            enteredByDisplayName: row.scorerScopeLabel,
+            displayNameByUserId: scorerDisplayNamesByUserId,
+          }) : row.scorerScopeLabel,
           score: row.score,
           comment: row.comment ?? "",
           enteredByDisplayName: resolveScorerDisplayName({
@@ -1531,7 +1488,11 @@ export const getScorerVendorGrid = query({
         priority: requirement.priority,
         ownScore: own?.score ?? null,
         ownComment: own?.comment ?? "",
-        ownEnteredByDisplayName: own?.enteredByDisplayName ?? null,
+        ownEnteredByDisplayName: own ? resolveScorerDisplayName({
+          enteredByUserId: own.enteredByUserId,
+          enteredByDisplayName: own.enteredByDisplayName,
+          displayNameByUserId: scorerDisplayNamesByUserId,
+        }) : null,
         ownScorerDepartmentName: own?.scorerDepartmentName ?? null,
         ownEnteredAt: own?.enteredAt ?? null,
         vendorScore: isCompleted ? (vendorSelf?.score ?? null) : null,

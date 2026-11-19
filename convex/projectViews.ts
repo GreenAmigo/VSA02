@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
 
 const projectViewValidator = v.object({
   projectId: v.id("projects"),
@@ -131,15 +132,7 @@ export const listProjectViews = query({
           .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId))
           .take(500);
 
-    const projectMembers = await ctx.db
-      .query("projectMembers")
-      .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
-      .collect();
-    const scorerNameByUserId = new Map<string, string>(
-      projectMembers
-        .filter((row) => row.isActive === true)
-        .map((row) => [row.userId, row.displayName]),
-    );
+    const scorerNameByUserId = await getScorerDisplayNames(ctx, project, rows.map((row) => row.scorerUserId));
 
     const requesterUserId = member?.userId ?? identity.tokenIdentifier ?? identity.subject ?? "";
     let peerViewsUnlocked = false;
@@ -172,7 +165,7 @@ export const listProjectViews = query({
         _id: row._id,
         projectId: row.projectId,
         scorerUserId: row.scorerUserId,
-        scorerDisplayName: scorerNameByUserId.get(row.scorerUserId) ?? row.scorerUserId,
+        scorerDisplayName: resolveScorerDisplayName({ enteredByUserId: row.scorerUserId, displayNameByUserId: scorerNameByUserId }),
         isOwnView: row.scorerUserId === requesterUserId,
         vendorUserId: row.vendorUserId,
         viewText: row.viewText,

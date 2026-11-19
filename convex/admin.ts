@@ -2,6 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { getProjectVendors } from "./projectVendors";
+import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
 const consultantRole = "vs-consultant" as const;
@@ -3136,7 +3137,13 @@ export const listProjectMembers = query({
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
 
-    const visibleMembers = members.filter((member) => member.role !== "vendor" && !isLegacyGeneratedUserId(member.userId));
+    const displayNameByUserId = await getScorerDisplayNames(ctx, project);
+    const visibleMembers = members
+      .filter((member) => member.role !== "vendor" && !isLegacyGeneratedUserId(member.userId))
+      .map((member) => member.role === "company-scorer" ? {
+        ...member,
+        displayName: resolveScorerDisplayName({ enteredByUserId: member.userId, enteredByDisplayName: member.displayName, displayNameByUserId }),
+      } : member);
 
     const vendorRows = projectVendors.map((vendor) => ({
       _id: vendor.assignmentId,

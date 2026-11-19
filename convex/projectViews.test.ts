@@ -8,6 +8,47 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 6 project view isolation", () => {
+  test("scorer views show workspace names and a safe fallback for missing names", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "A view",
+    });
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "beta-scorer")).unique();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.patch(assignment._id, { displayName: "scorer@beta.example" });
+    });
+    const views = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(views.rows[0].scorerDisplayName).toBe("Beta Scorer");
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "beta-scorer")).unique();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.delete(assignment._id);
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique();
+      if (!member) throw new Error("Missing test member");
+      await ctx.db.patch(member._id, { isActive: false });
+    });
+    const historical = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(historical.rows[0].scorerDisplayName).toBe("Beta Scorer");
+    await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique();
+      if (!member) throw new Error("Missing test member");
+      await ctx.db.patch(member._id, { displayName: "beta-scorer" });
+    });
+    const fallback = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(fallback.rows[0].scorerDisplayName).toBe("Scorer");
+  });
+
   test("scorer views require an active contact of an assigned vendor organisation, not a legacy project member", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
