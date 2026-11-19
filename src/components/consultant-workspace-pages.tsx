@@ -2893,7 +2893,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | ProjectDetailProject
     | undefined;
-  const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
+  const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId || isVendorView ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
     | undefined;
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
@@ -3009,12 +3009,13 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [comparisonShowWithdrawn, setComparisonShowWithdrawn] = useState(false);
   const [selectedComparisonCell, setSelectedComparisonCell] = useState<{ requirementId: string; vendorUserId: string } | null>(null);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined || (isVendorView && vendorScoringPanel === undefined)) {
+  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || requirements === undefined || (!isVendorView && projectMembers === undefined) || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
   const company = companies.find((item) => item._id === companyId) ?? companies[0];
   const isScorerView = access.role === "company-scorer";
+  const projectMembersList = projectMembers ?? [];
   const workspacePeopleList = canManageWorkspace ? (workspacePeople ?? []) : [];
   const departmentsList = canManageWorkspace ? (departments ?? []).filter((department) => department.isActive !== false) : [];
   const workspaceVendorsList = canManageWorkspace ? (workspaceVendors ?? []) : [];
@@ -3044,7 +3045,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       return;
     }
 
-    const isAlreadyAssigned = projectMembers.some((member) => member.userId === selectedScorer.userId || member.displayName === selectedScorer.name);
+    const isAlreadyAssigned = projectMembersList.some((member) => member.userId === selectedScorer.userId || member.displayName === selectedScorer.name);
     if (isAlreadyAssigned) {
       setNotice({ kind: "error", message: `${selectedScorer.name} is already assigned to this project.` });
       return;
@@ -3075,7 +3076,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       return;
     }
 
-    const isAlreadyAssigned = projectMembers.some((member) => member.userId === selectedVendor.vendorId || member.displayName === selectedVendor.name);
+    const isAlreadyAssigned = projectMembersList.some((member) => member.userId === selectedVendor.vendorId || member.displayName === selectedVendor.name);
     if (isAlreadyAssigned) {
       setNotice({ kind: "error", message: `${selectedVendor.name} is already assigned to this project.` });
       return;
@@ -3867,10 +3868,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <h3 className="text-lg font-semibold text-white">Assigned members</h3>
         <div className="mt-4 space-y-3">
-          {projectMembers.length === 0 ? (
+          {projectMembersList.length === 0 ? (
             <p className="text-sm text-slate-400">No people or vendors are assigned yet.</p>
           ) : (
-            projectMembers.map((member) => (
+            projectMembersList.map((member) => (
               <div key={member._id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                 <div>
                   <p className="font-medium text-white">{member.displayName}</p>

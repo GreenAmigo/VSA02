@@ -222,25 +222,99 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
   }
 
   const userIds = getIdentityUserIds(identity);
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedName = identity.name?.trim();
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .first();
 
-  if (!member || (member.role !== "company-admin" && member.role !== "company-scorer" && member.role !== "vendor")) {
+  if (member && member.companyId === project.companyId && (member.role === "company-admin" || member.role === "company-scorer" || member.role === "vendor")) {
+    return { project, identity, member };
+  }
+
+  const companyMemberships = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+
+  const companyAdminMembership = companyMemberships.find((row: any) => row.role === "company-admin") ?? null;
+  if (companyAdminMembership) {
+    return {
+      project,
+      identity,
+      member: {
+        companyId: project.companyId,
+        projectId,
+        userId: companyAdminMembership.userId,
+        role: "company-admin",
+      },
+    };
+  }
+
+  const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
+  for (const vendorMembership of vendorMemberships) {
+    const assignment = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), projectId))
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
+      .first();
+
+    if (assignment) {
+      return {
+        project,
+        identity,
+        member: {
+          companyId: project.companyId,
+          projectId,
+          userId: vendorMembership.userId,
+          role: "vendor",
+          vendorId: vendorMembership.vendorId,
+        },
+      };
+    }
+  }
+
+  const consultant = await ctx.db
+    .query("consultants")
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+    ))
+    .first();
+
+  if (consultant) {
+    return {
+      project,
+      identity,
+      member: {
+        companyId: project.companyId,
+        projectId,
+        userId: consultant.userId,
+        role: "company-admin",
+      },
+    };
+  }
+
+  if (member && member.companyId !== project.companyId) {
     throw new Error("Project access denied");
   }
 
-  if (member.companyId !== project.companyId) {
-    throw new Error("Project access denied");
-  }
-
-  return { project, identity, member };
+  throw new Error("Project access denied");
 }
 
 async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; actorUserId: string; actorDisplayName: string }> {

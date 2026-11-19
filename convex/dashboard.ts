@@ -1,6 +1,10 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 
+function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
+  return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
+}
+
 async function assertProjectDashboardAccess(ctx: any, projectId: string) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
@@ -12,22 +16,54 @@ async function assertProjectDashboardAccess(ctx: any, projectId: string) {
     throw new Error("Project not found");
   }
 
+  const userIds = getIdentityUserIds(identity);
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedName = identity.name?.trim();
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
     .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
+    ))
     .first();
+
+  if (member && member.companyId === project.companyId && (member.role === "company-admin" || member.role === "company-scorer")) {
+    return { project, identity, member };
+  }
+
+  const companyAdminMembership = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.eq(q.field("role"), "company-admin"))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
+    ))
+    .first();
+
+  if (companyAdminMembership) {
+    return {
+      project,
+      identity,
+      member: {
+        companyId: project.companyId,
+        projectId,
+        userId: companyAdminMembership.userId,
+        role: "company-admin",
+      },
+    };
+  }
 
   if (!member || member.companyId !== project.companyId) {
     throw new Error("Project access denied");
   }
 
-  if (member.role !== "company-admin" && member.role !== "company-scorer") {
-    throw new Error("Project access denied");
-  }
-
-  return { project, identity, member };
+  throw new Error("Project access denied");
 }
 
 export const getProjectDashboard = query({

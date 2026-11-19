@@ -1,6 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
+  return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
+}
+
 const projectDeadlineValidator = v.object({
   projectId: v.id("projects"),
   targetType: v.union(v.literal("vendor"), v.literal("scorer")),
@@ -41,12 +45,71 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     throw new Error("Project not found");
   }
 
+  const userIds = getIdentityUserIds(identity);
+  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedName = identity.name?.trim();
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("userId"), identity.tokenIdentifier))
     .filter((q: any) => q.eq(q.field("isActive"), true))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
+    ))
     .first();
+
+  if (member && member.companyId === project.companyId) {
+    return { project, identity, member };
+  }
+
+  const companyMemberships = await ctx.db
+    .query("companyMembers")
+    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+    .filter((q: any) => q.or(
+      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
+      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
+      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
+    ))
+    .filter((q: any) => q.eq(q.field("isActive"), true))
+    .collect();
+
+  const companyAdminMembership = companyMemberships.find((row: any) => row.role === "company-admin") ?? null;
+  if (companyAdminMembership) {
+    return {
+      project,
+      identity,
+      member: {
+        companyId: project.companyId,
+        projectId,
+        userId: companyAdminMembership.userId,
+        role: "company-admin",
+      },
+    };
+  }
+
+  const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
+  for (const vendorMembership of vendorMemberships) {
+    const assignment = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), projectId))
+      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
+      .first();
+
+    if (assignment) {
+      return {
+        project,
+        identity,
+        member: {
+          companyId: project.companyId,
+          projectId,
+          userId: vendorMembership.userId,
+          role: "vendor",
+        },
+      };
+    }
+  }
 
   if (!member || member.companyId !== project.companyId) {
     throw new Error("Project access denied");

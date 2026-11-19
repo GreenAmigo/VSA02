@@ -150,6 +150,280 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a vendor contact assigned in two workspaces can open both projects and no unassigned project", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "multi-vendor-consultant", "consultant@example.com", "Consultant");
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "multi-vendor-consultant",
+        email: "consultant@example.com",
+        name: "Consultant",
+      });
+
+      const harbor = await consultant.mutation(api.admin.createCompany, {
+        name: "Harbor Logistics Test",
+        ssoProvider: "google-workspace",
+      });
+      const northway = await consultant.mutation(api.admin.createCompany, {
+        name: "Northway Health Test",
+        ssoProvider: "microsoft-entra",
+      });
+
+      const harborAssigned = await consultant.mutation(api.admin.createProject, {
+        companyId: harbor.companyId,
+        name: "Test Project 1",
+      });
+      const harborHidden = await consultant.mutation(api.admin.createProject, {
+        companyId: harbor.companyId,
+        name: "Hidden Harbor Project",
+      });
+      const northwayAssigned = await consultant.mutation(api.admin.createProject, {
+        companyId: northway.companyId,
+        name: "Test Project Frank",
+      });
+
+      const acmeHarbor = await consultant.mutation(api.admin.addWorkspaceVendor, {
+        companyId: harbor.companyId,
+        name: "Acme Software Test",
+        contactEmail: "greenamigo+vendor@hotmail.co.uk",
+      });
+      const acmeNorthway = await consultant.mutation(api.admin.addWorkspaceVendor, {
+        companyId: northway.companyId,
+        name: "Acme Software Test",
+        contactEmail: "greenamigo+vendor@hotmail.co.uk",
+      });
+
+      await consultant.mutation(api.admin.addProjectVendor, {
+        companyId: harbor.companyId,
+        projectId: harborAssigned.projectId,
+        vendorId: acmeHarbor.vendorId,
+      });
+      await consultant.mutation(api.admin.addProjectVendor, {
+        companyId: northway.companyId,
+        projectId: northwayAssigned.projectId,
+        vendorId: acmeNorthway.vendorId,
+      });
+
+      await consultant.mutation((api as any).admin.inviteVendorContact, {
+        companyId: harbor.companyId,
+        vendorId: acmeHarbor.vendorId,
+        name: "Green Vendor",
+        email: "greenamigo+vendor@hotmail.co.uk",
+      });
+      await consultant.mutation((api as any).admin.inviteVendorContact, {
+        companyId: northway.companyId,
+        vendorId: acmeNorthway.vendorId,
+        name: "Green Vendor",
+        email: "greenamigo+vendor@hotmail.co.uk",
+      });
+
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "green-vendor-user",
+        email: "greenamigo+vendor@hotmail.co.uk",
+        displayName: "Green Vendor",
+      });
+
+      const vendor = t.withIdentity({
+        tokenIdentifier: "green-vendor-user",
+        email: "greenamigo+vendor@hotmail.co.uk",
+        name: "Green Vendor",
+      });
+
+      const harborProject = await vendor.query(api.access.getProject, { projectId: harborAssigned.projectId });
+      const northwayProject = await vendor.query(api.access.getProject, { projectId: northwayAssigned.projectId });
+
+      expect(harborProject._id).toBe(harborAssigned.projectId);
+      expect(northwayProject._id).toBe(northwayAssigned.projectId);
+      await expect(vendor.query(api.access.getProject, { projectId: harborHidden.projectId })).rejects.toThrow("Project access denied");
+    });
+  });
+
+  test("a scorer in two workspaces sees each workspace project data separately", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "multi-scorer-consultant", "consultant@example.com", "Consultant");
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "multi-scorer-consultant",
+        email: "consultant@example.com",
+        name: "Consultant",
+      });
+
+      const harbor = await consultant.mutation(api.admin.createCompany, {
+        name: "Harbor Logistics Test",
+        ssoProvider: "google-workspace",
+      });
+      const northway = await consultant.mutation(api.admin.createCompany, {
+        name: "Northway Health Test",
+        ssoProvider: "microsoft-entra",
+      });
+
+      const harborAssigned = await consultant.mutation(api.admin.createProject, {
+        companyId: harbor.companyId,
+        name: "Harbor Assigned",
+      });
+      const harborUnassigned = await consultant.mutation(api.admin.createProject, {
+        companyId: harbor.companyId,
+        name: "Harbor Unassigned",
+      });
+      const northwayAssigned = await consultant.mutation(api.admin.createProject, {
+        companyId: northway.companyId,
+        name: "Northway Assigned",
+      });
+      const northwayUnassigned = await consultant.mutation(api.admin.createProject, {
+        companyId: northway.companyId,
+        name: "Northway Unassigned",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: harbor.companyId,
+        name: "Green Test1",
+        email: "green.multi@example.com",
+        role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, harbor.companyId),
+      });
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: northway.companyId,
+        name: "Green Test1",
+        email: "green.multi@example.com",
+        role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, northway.companyId),
+      });
+
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "green-multi-user",
+        email: "green.multi@example.com",
+        displayName: "Green Test1",
+      });
+
+      await consultant.mutation(api.admin.addProjectScorer, {
+        companyId: harbor.companyId,
+        projectId: harborAssigned.projectId,
+        userId: "green-multi-user",
+        displayName: "Green Test1",
+        email: "green.multi@example.com",
+      });
+      await consultant.mutation(api.admin.addProjectScorer, {
+        companyId: northway.companyId,
+        projectId: northwayAssigned.projectId,
+        userId: "green-multi-user",
+        displayName: "Green Test1",
+        email: "green.multi@example.com",
+      });
+
+      const scorer = t.withIdentity({
+        tokenIdentifier: "green-multi-user",
+        email: "green.multi@example.com",
+        name: "Green Test1",
+      });
+
+      const harborProjects = await scorer.query((api as any).access.listDashboardProjects, { companyId: harbor.companyId });
+      const northwayProjects = await scorer.query((api as any).access.listDashboardProjects, { companyId: northway.companyId });
+
+      expect(harborProjects.some((project: { _id: string }) => project._id === harborAssigned.projectId)).toBe(true);
+      expect(harborProjects.some((project: { _id: string }) => project._id === harborUnassigned.projectId)).toBe(false);
+      expect(northwayProjects.some((project: { _id: string }) => project._id === northwayAssigned.projectId)).toBe(true);
+      expect(northwayProjects.some((project: { _id: string }) => project._id === northwayUnassigned.projectId)).toBe(false);
+    });
+  });
+
+  test("project detail queries load for consultant, admin, scorer, and vendor when allowed", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "role-load-consultant", "consultant@example.com", "Consultant");
+
+      const consultant = t.withIdentity({
+        tokenIdentifier: "role-load-consultant",
+        email: "consultant@example.com",
+        name: "Consultant",
+      });
+
+      const company = await consultant.mutation(api.admin.createCompany, {
+        name: "Role Load Workspace",
+        ssoProvider: "google-workspace",
+      });
+      const project = await consultant.mutation(api.admin.createProject, {
+        companyId: company.companyId,
+        name: "Role Load Project",
+      });
+
+      await consultant.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId,
+        name: "Role Scorer",
+        email: "role.scorer@example.com",
+        role: "company-scorer",
+        departmentId: await getFirstDepartmentId(consultant, company.companyId),
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "role-scorer-user",
+        email: "role.scorer@example.com",
+        displayName: "Role Scorer",
+      });
+      await consultant.mutation(api.admin.addProjectScorer, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        userId: "role-scorer-user",
+        displayName: "Role Scorer",
+        email: "role.scorer@example.com",
+      });
+
+      const vendorOrg = await consultant.mutation(api.admin.addWorkspaceVendor, {
+        companyId: company.companyId,
+        name: "Role Vendor Org",
+        contactEmail: "role.vendor@example.com",
+      });
+      await consultant.mutation(api.admin.addProjectVendor, {
+        companyId: company.companyId,
+        projectId: project.projectId,
+        vendorId: vendorOrg.vendorId,
+      });
+      await consultant.mutation((api as any).admin.inviteVendorContact, {
+        companyId: company.companyId,
+        vendorId: vendorOrg.vendorId,
+        name: "Role Vendor",
+        email: "role.vendor@example.com",
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "role-vendor-user",
+        email: "role.vendor@example.com",
+        displayName: "Role Vendor",
+      });
+
+      const admin = t.withIdentity({
+        tokenIdentifier: "role-load-consultant",
+        email: "consultant@example.com",
+        name: "Consultant",
+      });
+      const scorer = t.withIdentity({
+        tokenIdentifier: "role-scorer-user",
+        email: "role.scorer@example.com",
+        name: "Role Scorer",
+      });
+      const vendor = t.withIdentity({
+        tokenIdentifier: "role-vendor-user",
+        email: "role.vendor@example.com",
+        name: "Role Vendor",
+      });
+
+      await expect(consultant.query(api.access.getProject, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(consultant.query((api as any).access.listProjectRequirements, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(consultant.query(api.admin.listProjectMembers, { projectId: project.projectId })).resolves.toBeTruthy();
+
+      await expect(admin.query(api.access.getProject, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(admin.query((api as any).access.listProjectRequirements, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(admin.query(api.admin.listProjectMembers, { projectId: project.projectId })).resolves.toBeTruthy();
+
+      await expect(scorer.query(api.access.getProject, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(scorer.query((api as any).access.listProjectRequirements, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(scorer.query(api.admin.listProjectMembers, { projectId: project.projectId })).resolves.toBeTruthy();
+
+      await expect(vendor.query(api.access.getProject, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(vendor.query((api as any).access.listProjectRequirements, { projectId: project.projectId })).resolves.toBeTruthy();
+      await expect(vendor.query((api as any).scores.listVendorAnswerRequirements, { projectId: project.projectId })).resolves.toBeTruthy();
+    });
+  });
+
   test("listProjectMembers ignores leftover legacy generated rows without writing", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

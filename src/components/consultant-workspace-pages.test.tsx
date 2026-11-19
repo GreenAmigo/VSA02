@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { api } from "../../convex/_generated/api";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
 import { ConsultantWorkspaceOverviewPage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage } from "./consultant-workspace-pages";
@@ -211,11 +212,16 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
     );
 
+    const calledRosterQuery = useQueryMock.mock.calls.some(
+      ([queryRef]) => queryRef === api.admin.listProjectMembers,
+    );
+
     expect(html).toContain("3 of 16 answered");
     expect(html).toContain("Score requirements");
     expect(html).not.toContain("Edit project");
     expect(html).not.toContain("Open import / requirements");
     expect(html).not.toContain("Assigned members");
+    expect(calledRosterQuery).toBe(false);
   });
 
   test("consultant project detail shows Edit project controls", () => {

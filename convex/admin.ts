@@ -3087,7 +3087,7 @@ export const listProjectMembers = query({
       .collect();
 
     const hasCompanyAdminAccess = companyMemberships.some((member) => member.role === "company-admin");
-    const vendorMembership = companyMemberships.find((member) => member.role === "vendor") ?? null;
+    const vendorMemberships = companyMemberships.filter((member) => member.role === "vendor" && Boolean(member.vendorId));
     const consultantAccess = await getActiveConsultantRow(ctx, userIds);
 
     const projectMemberships = await ctx.db
@@ -3101,22 +3101,32 @@ export const listProjectMembers = query({
       .collect();
 
     const hasProjectAccess = projectMemberships.length > 0;
-    if (!hasCompanyAdminAccess && !hasProjectAccess && !consultantAccess) {
+    let hasVendorProjectAssignment = false;
+    for (const vendorMembership of vendorMemberships) {
+      if (!vendorMembership.vendorId) {
+        continue;
+      }
+
+      const vendorProjectAssignment = await ctx.db
+        .query("projectVendors")
+        .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+        .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+        .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
+        .first();
+
+      if (vendorProjectAssignment) {
+        hasVendorProjectAssignment = true;
+        break;
+      }
+    }
+
+    if (!hasCompanyAdminAccess && !hasProjectAccess && !hasVendorProjectAssignment && !consultantAccess) {
       throw new Error("Project access denied");
     }
 
-    if (vendorMembership && !hasCompanyAdminAccess && !consultantAccess) {
+    if (vendorMemberships.length > 0 && !hasCompanyAdminAccess && !consultantAccess) {
       const matchingProjectMembership = projectMemberships.find((member) => member.role === "vendor") ?? null;
-      const vendorProjectAssignment = vendorMembership.vendorId
-        ? await ctx.db
-            .query("projectVendors")
-            .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-            .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-            .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
-            .first()
-        : null;
-
-      if (!matchingProjectMembership && !vendorProjectAssignment) {
+      if (!matchingProjectMembership && !hasVendorProjectAssignment) {
         throw new Error("Project access denied");
       }
 
@@ -3131,7 +3141,52 @@ export const listProjectMembers = query({
         ))
         .collect();
 
-      return allowedVendorMemberships.filter((member) => !isLegacyGeneratedUserId(member.userId));
+      const activeDirectVendorRows = allowedVendorMemberships.filter((entry) => !isLegacyGeneratedUserId(entry.userId));
+      if (activeDirectVendorRows.length > 0) {
+        return activeDirectVendorRows;
+      }
+
+      const allowedVendorIds = new Set(
+        vendorMemberships
+          .map((membership) => membership.vendorId)
+          .filter((vendorId): vendorId is Id<"vendorOrganizations"> => Boolean(vendorId)),
+      );
+
+      const assignedVendorRows = (await Promise.all(
+        Array.from(allowedVendorIds).map(async (vendorId) => {
+          const assignment = await ctx.db
+            .query("projectVendors")
+            .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+            .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
+            .filter((q: any) => q.eq(q.field("vendorId"), vendorId))
+            .first();
+
+          if (!assignment) {
+            return null;
+          }
+
+          const vendor = await ctx.db.get(vendorId);
+          return {
+            _id: assignment._id,
+            projectId: assignment.projectId,
+            userId: vendorId,
+            role: "vendor",
+            displayName: vendor?.name ?? "Vendor organization",
+            isActive: true,
+            createdAt: assignment.createdAt,
+          };
+        }),
+      )).filter((row): row is {
+        _id: Id<"projectVendors">;
+        projectId: Id<"projects">;
+        userId: Id<"vendorOrganizations">;
+        role: "vendor";
+        displayName: string;
+        isActive: true;
+        createdAt: number;
+      } => row !== null);
+
+      return assignedVendorRows;
     }
 
     const members = await ctx.db
