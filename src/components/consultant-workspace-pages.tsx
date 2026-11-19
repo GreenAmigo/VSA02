@@ -8,7 +8,6 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { ConsultantHomeHeader } from "./consultant-home-header";
 import { parseRequirementFileWithIssues } from "../lib/projectRequirements";
 
 type WorkspaceShellWorkspace = {
@@ -1429,6 +1428,7 @@ function WorkspaceShell({
     ],
     "company-admin": [
       { key: "overview", label: "Overview", href: `/workspaces/${workspace.slug}` },
+      { key: "projects", label: "Projects", href: `/workspaces/${workspace.slug}/projects` },
       { key: "people", label: "People", href: `/workspaces/${workspace.slug}/people` },
       { key: "departments", label: "Departments", href: `/workspaces/${workspace.slug}/departments` },
       { key: "vendors", label: "Vendors", href: `/workspaces/${workspace.slug}/vendors` },
@@ -1600,6 +1600,7 @@ function WorkspaceShell({
 export function ConsultantWorkspaceDirectoryPage() {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [workspaceFilter, setWorkspaceFilter] = useState<"active" | "archived">("active");
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
@@ -1750,23 +1751,108 @@ export function ConsultantWorkspaceDirectoryPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <ConsultantHomeHeader
-        isConsultant={Boolean(access.isConsultant)}
-        displayRole={displayRole}
-        email={access.email ?? user?.email ?? "Unknown user"}
-        onToggleCreate={() => {
-          setShowCreateForm((value) => !value);
-          setWorkspaceNotice(null);
-        }}
-      />
+      {menuOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
+        />
+      ) : null}
 
-      {access.isConsultant ? (
-        <div className="border-b border-slate-800 bg-slate-950/40 px-6 py-3">
-          <Link href="/workspaces/activity" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
-            Activity log
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="mb-8">
+          <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold text-white">Workspace directory</h2>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300 lg:hidden"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-300">
+            <Link href="/workspaces" className="block rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sky-100 hover:border-sky-400">
+              All workspaces
+            </Link>
+            {access.isConsultant ? (
+              <Link href="/workspaces/activity" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
+                Activity log
+              </Link>
+            ) : null}
+            {access.isConsultant ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm((value) => !value);
+                  setWorkspaceNotice(null);
+                }}
+                className="w-full rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
+              >
+                {showCreateForm ? "Hide create form" : "New workspace"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-300">
+            <p className="truncate" title={access.email ?? user?.email ?? "Unknown user"}>{access.email ?? user?.email ?? "Unknown user"}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{displayRole}</p>
+          </div>
+          <Link
+            href="/api/auth/logout"
+            className="mt-2 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+          >
+            Sign out
           </Link>
         </div>
-      ) : null}
+      </aside>
+
+      <main className="min-h-screen lg:ml-80">
+      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-3 flex items-center gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
+              >
+                Menu
+              </button>
+            </div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">{displayRole}</p>
+            <h1 className="mt-2 text-2xl font-semibold text-white">{access.isConsultant ? "Consultant home" : "Workspace directory"}</h1>
+          </div>
+          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+            <p className="truncate text-sm font-medium text-white" title={access.email ?? user?.email ?? "Unknown user"}>{access.email ?? user?.email ?? "Unknown user"}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{displayRole}</p>
+            {access.isConsultant ? (
+              <Link
+                href="/workspaces/activity"
+                className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
+              >
+                Activity log
+              </Link>
+            ) : null}
+            <Link
+              href="/api/auth/logout"
+              className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+            >
+              Sign out
+            </Link>
+          </div>
+        </div>
+      </header>
 
       <div className="space-y-6 p-6">
         {workspaceNotice ? (
@@ -1960,6 +2046,7 @@ export function ConsultantWorkspaceDirectoryPage() {
           </section>
         ) : null}
       </div>
+      </main>
     </div>
   );
 }
@@ -2974,6 +3061,146 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
 
+      {!isVendorView ? (
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-white">Requirements</h3>
+          <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+            Open workspace summary
+          </Link>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Active rows</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{requirements.filter((row) => row.status === "active").length}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Access</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Consultant / admin" : "Read-only"}</p>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Import</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Allowed" : "Blocked"}</p>
+          </div>
+        </div>
+
+        {canManageProjects ? (
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-100">Import requirements for this project</p>
+              {importFileName ? <StatusPill label={importFileName} className="border-slate-700 bg-slate-900 text-slate-200" /> : null}
+            </div>
+            <p className="text-xs text-slate-400">Upload CSV or XLSX. Preview runs first, then apply when the summary looks correct.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                Choose file
+                <input
+                  type="file"
+                  accept=".csv,.xlsx"
+                  onChange={(event) => void handleImportFileSelected(event)}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleApplyRequirementImport()}
+                disabled={busy || importRows.length === 0}
+                className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Apply import
+              </button>
+            </div>
+
+            {importSummary ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-300">
+                  <p className="text-slate-400">Rows parsed</p>
+                  <p className="mt-1 text-base font-semibold text-white">{importSummary.total}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
+                  <p className="text-emerald-200/80">Added</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.added}</p>
+                </div>
+                <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
+                  <p className="text-sky-200/80">Updated</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.updated}</p>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+                  <p className="text-amber-200/80">Will be withdrawn</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {importIssues.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                <p className="font-medium">Rows skipped during parsing</p>
+                <div className="mt-1 space-y-1">
+                  {importIssues.slice(0, 5).map((issue, index) => (
+                    <p key={`${issue.requirementId ?? "unknown"}-${index}`}>{issue.reason}</p>
+                  ))}
+                  {importIssues.length > 5 ? <p>+ {importIssues.length - 5} more issue(s)</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-400">Only consultants and company admins can import requirements.</p>
+        )}
+      </section>
+      ) : null}
+
+      {canManageProjects ? (
+        <>
+          <section className="grid gap-6 xl:grid-cols-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
+              <div className="mt-4 space-y-3">
+                <select
+                  value={scorerDraft.selectedUserId}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, selectedUserId: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="">Select a workspace person</option>
+                  {assignableScorers.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name} — {person.email} — {person.departmentName}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400">Project scoring assignments are individual only. Each person keeps their workspace department.</p>
+                <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
+                  Add scorer
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
+              <div className="mt-4 space-y-3">
+                <select
+                  value={vendorDraft.selectedVendorId}
+                  onChange={(event) => setVendorDraft((current) => ({ ...current, selectedVendorId: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="">Select a workspace vendor</option>
+                  {assignableVendors.map((vendor) => (
+                    <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.name}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => void handleAddVendor()} disabled={busy || !selectedVendor} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
+                  Add vendor
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {notice ? (
+            <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+              {notice.message}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
       {!isVendorView && canManageProjects ? <ScoringSettingsPanel companyId={companyId} projectId={projectId} project={project} /> : null}
 
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
@@ -3066,146 +3293,6 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </Link>
           </div>
         </section>
-      ) : null}
-
-      {canManageProjects ? (
-        <>
-          <section className="grid gap-6 xl:grid-cols-2">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
-              <div className="mt-4 space-y-3">
-                <select
-                  value={scorerDraft.selectedUserId}
-                  onChange={(event) => setScorerDraft((current) => ({ ...current, selectedUserId: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                >
-                  <option value="">Select a workspace person</option>
-                  {assignableScorers.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name} — {person.email} — {person.departmentName}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400">Project scoring assignments are individual only. Each person keeps their workspace department.</p>
-                <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
-                  Add scorer
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
-              <div className="mt-4 space-y-3">
-                <select
-                  value={vendorDraft.selectedVendorId}
-                  onChange={(event) => setVendorDraft((current) => ({ ...current, selectedVendorId: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                >
-                  <option value="">Select a workspace vendor</option>
-                  {assignableVendors.map((vendor) => (
-                    <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.name}</option>
-                  ))}
-                </select>
-                <button type="button" onClick={() => void handleAddVendor()} disabled={busy || !selectedVendor} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
-                  Add vendor
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {notice ? (
-            <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
-              {notice.message}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {!isVendorView ? (
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold text-white">Requirements</h3>
-          <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
-            Open workspace summary
-          </Link>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Active rows</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{requirements.filter((row) => row.status === "active").length}</p>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Access</p>
-            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Consultant / admin" : "Read-only"}</p>
-          </div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Import</p>
-            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Allowed" : "Blocked"}</p>
-          </div>
-        </div>
-
-        {canManageProjects ? (
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-slate-100">Import requirements for this project</p>
-              {importFileName ? <StatusPill label={importFileName} className="border-slate-700 bg-slate-900 text-slate-200" /> : null}
-            </div>
-            <p className="text-xs text-slate-400">Upload CSV or XLSX. Preview runs first, then apply when the summary looks correct.</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
-                Choose file
-                <input
-                  type="file"
-                  accept=".csv,.xlsx"
-                  onChange={(event) => void handleImportFileSelected(event)}
-                  className="hidden"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void handleApplyRequirementImport()}
-                disabled={busy || importRows.length === 0}
-                className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
-              >
-                Apply import
-              </button>
-            </div>
-
-            {importSummary ? (
-              <div className="mt-3 grid gap-3 md:grid-cols-4">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-300">
-                  <p className="text-slate-400">Rows parsed</p>
-                  <p className="mt-1 text-base font-semibold text-white">{importSummary.total}</p>
-                </div>
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
-                  <p className="text-emerald-200/80">Added</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.added}</p>
-                </div>
-                <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
-                  <p className="text-sky-200/80">Updated</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.updated}</p>
-                </div>
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-                  <p className="text-amber-200/80">Will be withdrawn</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
-                </div>
-              </div>
-            ) : null}
-
-            {importIssues.length > 0 ? (
-              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                <p className="font-medium">Rows skipped during parsing</p>
-                <div className="mt-1 space-y-1">
-                  {importIssues.slice(0, 5).map((issue, index) => (
-                    <p key={`${issue.requirementId ?? "unknown"}-${index}`}>{issue.reason}</p>
-                  ))}
-                  {importIssues.length > 5 ? <p>+ {importIssues.length - 5} more issue(s)</p> : null}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-slate-400">Only consultants and company admins can import requirements.</p>
-        )}
-      </section>
       ) : null}
 
       {!isVendorView ? (

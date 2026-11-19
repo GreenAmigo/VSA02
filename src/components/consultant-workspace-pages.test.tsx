@@ -298,6 +298,9 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       <ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />,
     );
 
+    expect(html).toContain("Projects");
+    expect(html.indexOf("Requirements")).toBeLessThan(html.indexOf("Scoring settings"));
+    expect(html.indexOf("Assign scorers")).toBeLessThan(html.indexOf("Vendor responses"));
     expect(html).toContain("Vendor responses");
   });
 

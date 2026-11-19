@@ -18,6 +18,7 @@ export function WorkspaceImportForm() {
   const access = useQuery(api.access.getCurrentUserAccess, {}) as
     | { email?: string | null; role?: string | null; isConsultant?: boolean }
     | undefined;
+  const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState<ImportMode>("json");
   const [jsonText, setJsonText] = useState(emptyJsonTemplate);
   const [csvText, setCsvText] = useState(emptyCsvTemplate);
@@ -69,10 +70,28 @@ export function WorkspaceImportForm() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <aside className="fixed inset-y-0 left-0 hidden w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 lg:block">
+      {menuOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/50 lg:hidden"
+        />
+      ) : null}
+
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
-          <h2 className="mt-3 text-xl font-semibold text-white">Workspace navigation</h2>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold text-white">Workspace navigation</h2>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300 lg:hidden"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -92,24 +111,52 @@ export function WorkspaceImportForm() {
 
         <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
           <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-          <p className="mt-2 truncate text-sm text-white" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
-          <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
+          <div className="mt-3 space-y-2 text-sm text-slate-300">
+            <p className="truncate" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
+          </div>
+          <Link
+            href="/api/auth/logout"
+            className="mt-2 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+          >
+            Sign out
+          </Link>
         </div>
       </aside>
 
       <main className="min-h-screen lg:ml-80">
       <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-3 flex items-center gap-2 lg:hidden">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
+              >
+                Menu
+              </button>
+            </div>
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Seed import</p>
             <h1 className="mt-2 text-2xl font-semibold text-white">Bulk data import</h1>
           </div>
-          <Link
-            href="/workspaces"
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-500 hover:text-white"
-          >
-            Back to workspaces
-          </Link>
+          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
+            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
+            <p className="truncate text-sm font-medium text-white" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
+            <Link
+              href="/workspaces"
+              className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
+            >
+              All workspaces
+            </Link>
+            <Link
+              href="/api/auth/logout"
+              className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+            >
+              Sign out
+            </Link>
+          </div>
         </div>
       </header>
 
