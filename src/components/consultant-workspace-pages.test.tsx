@@ -21,6 +21,10 @@ vi.mock("@workos-inc/authkit-nextjs/components", () => ({
   useAuth: useAuthMock,
 }));
 
+vi.mock("./sign-out-button", () => ({
+  SignOutButton: ({ className = "" }: { className?: string }) => <button type="button" className={className}>Sign out</button>,
+}));
+
 describe("ConsultantHomeHeader", () => {
   test("shows New workspace button for a consultant", () => {
     const html = renderToStaticMarkup(
@@ -131,6 +135,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
 
     expect(html).toContain("New project");
     expect(html).toContain("ERP RFP");
+    expect(html).not.toContain("/api/auth/logout");
   });
 
   test("renders vendor home in the new frame without developer cards or consultant breadcrumb", () => {

@@ -148,6 +148,7 @@ The app uses a single canonical consultant home route for the workspace director
 ## Deployment to-do
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.
 - Later, add the live address to WorkOS Production Redirects.
+- At launch, set the WorkOS Production Sign-out Redirect to the live app home URL.
 - The custom domain vspreview.maxwellknight.co.uk is temporarily pointed at the consultant-admin branch. When consultant-admin is merged into preview, point the domain back at the preview branch in Vercel (Settings > Domains).
 
 ## Technology

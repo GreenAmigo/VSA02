@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 
 import { api } from "../../convex/_generated/api";
 import { parseWorkspaceCsv } from "@/lib/workspaceImport";
+import { SignOutButton } from "./sign-out-button";
 
 const emptyJsonTemplate = "[]";
 const emptyCsvTemplate = `workspace_id,workspace_slug,workspace_name,project_name
@@ -115,12 +116,7 @@ export function WorkspaceImportForm() {
             <p className="truncate" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
             <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
           </div>
-          <Link
-            href="/api/auth/logout"
-            className="mt-2 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-          >
-            Sign out
-          </Link>
+          <SignOutButton className="mt-2" />
         </div>
       </aside>
 
@@ -150,12 +146,7 @@ export function WorkspaceImportForm() {
             >
               All workspaces
             </Link>
-            <Link
-              href="/api/auth/logout"
-              className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-            >
-              Sign out
-            </Link>
+            <SignOutButton className="mt-1" />
           </div>
         </div>
       </header>

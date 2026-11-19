@@ -9,6 +9,7 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { parseRequirementFileWithIssues, toRequirementImportRows, type RequirementImportRow } from "../lib/projectRequirements";
+import { SignOutButton } from "./sign-out-button";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -32,21 +33,6 @@ function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-sla
     <span className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${className}`}>
       {label}
     </span>
-  );
-}
-
-function SignOutButton({ className = "" }: { className?: string }) {
-  return (
-    <Link
-      href="/api/auth/logout"
-      className={`inline-flex items-center gap-2 rounded-xl border border-rose-400/50 bg-rose-500/15 px-4 py-2.5 text-sm font-semibold text-rose-100 hover:border-rose-300 hover:bg-rose-500/25 ${className}`}
-      aria-label="Sign out"
-    >
-      <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 fill-current">
-        <path d="M11 2h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5v-2h5V4h-5V2Zm-1 4 1.4 1.4-1.6 1.6H2v2h7.8l1.6 1.6L10 14l-4-4 4-4Z" />
-      </svg>
-      Sign out
-    </Link>
   );
 }
 
@@ -1884,12 +1870,7 @@ export function ConsultantWorkspaceDirectoryPage() {
             <p className="truncate" title={access.email ?? user?.email ?? "Unknown user"}>{access.email ?? user?.email ?? "Unknown user"}</p>
             <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{displayRole}</p>
           </div>
-          <Link
-            href="/api/auth/logout"
-            className="mt-2 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-          >
-            Sign out
-          </Link>
+          <SignOutButton className="mt-2" />
         </div>
       </aside>
 
