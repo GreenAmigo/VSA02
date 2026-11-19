@@ -51,6 +51,34 @@ describe("Phase 6 project view isolation", () => {
     await expect(scorer.mutation(api.projectViews.saveProjectView, args)).rejects.toThrow("Vendor not found on this project");
   });
 
+  test("vendor view access follows the organisation assignment and never exposes scorer views", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await t.run(async (ctx) => {
+      const membership = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
+      if (!membership) throw new Error("Missing test membership");
+      await ctx.db.delete(membership._id);
+    });
+    const views = await vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(views.rows).toHaveLength(0);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("projectMembers", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "northwind-vendor",
+        role: "vendor", displayName: "Northwind Labs", isActive: true, createdAt: Date.now(),
+      });
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.delete(assignment._id);
+    });
+    await expect(vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+  });
+
   test("scorers can autosave views until scorer deadline and each change is activity logged", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

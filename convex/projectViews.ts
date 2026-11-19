@@ -75,7 +75,12 @@ async function assertProjectViewAccess(ctx: any, projectId: string) {
     ))
     .first();
 
-  if (!member && !consultant) {
+  if ((!member || member.role === "vendor") && !consultant) {
+    const vendors = await getProjectVendors(ctx, project);
+    const contact = vendors.flatMap((vendor) => vendor.contacts).find((candidate) => userIds.includes(candidate.userId));
+    if (contact) {
+      return { project, identity, member: { ...contact, role: "vendor" as const }, consultant, actorUserId: contact.userId };
+    }
     throw new Error("Project access denied");
   }
 
