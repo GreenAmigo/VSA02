@@ -35,6 +35,21 @@ function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-sla
   );
 }
 
+function SignOutButton({ className = "" }: { className?: string }) {
+  return (
+    <Link
+      href="/api/auth/logout"
+      className={`inline-flex items-center gap-2 rounded-xl border border-rose-400/50 bg-rose-500/15 px-4 py-2.5 text-sm font-semibold text-rose-100 hover:border-rose-300 hover:bg-rose-500/25 ${className}`}
+      aria-label="Sign out"
+    >
+      <svg viewBox="0 0 20 20" aria-hidden="true" className="h-4 w-4 fill-current">
+        <path d="M11 2h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5v-2h5V4h-5V2Zm-1 4 1.4 1.4-1.6 1.6H2v2h7.8l1.6 1.6L10 14l-4-4 4-4Z" />
+      </svg>
+      Sign out
+    </Link>
+  );
+}
+
 function toDateInputValue(timestamp?: number | null) {
   if (!timestamp) {
     return "";
@@ -72,15 +87,15 @@ function requirementCardClassName(type: "user-story" | "nfr") {
 
 function priorityLabel(priority: 9 | 3 | 1 | 0) {
   if (priority === 9) {
-    return "P9 Critical";
+    return "Must";
   }
   if (priority === 3) {
-    return "P3 High";
+    return "Should";
   }
   if (priority === 1) {
-    return "P1 Low";
+    return "Could";
   }
-  return "P0 Out of scope";
+  return "Out of scope";
 }
 
 function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
@@ -94,6 +109,34 @@ function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
     return "border-sky-500/50 bg-sky-500/10 text-sky-200";
   }
   return "border-slate-700 bg-slate-900 text-slate-300";
+}
+
+function parsePriorityValue(value: string | number | null | undefined): 9 | 3 | 1 | 0 | null {
+  if (typeof value === "number") {
+    if (value === 9 || value === 3 || value === 1 || value === 0) {
+      return value;
+    }
+    return null;
+  }
+
+  const raw = `${value ?? ""}`.trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  if (raw.includes("must") || raw.includes("critical") || raw === "9" || raw.includes("p9")) {
+    return 9;
+  }
+  if (raw.includes("should") || raw.includes("high") || raw === "3" || raw.includes("p3")) {
+    return 3;
+  }
+  if (raw.includes("could") || raw.includes("low") || raw === "1" || raw.includes("p1")) {
+    return 1;
+  }
+  if (raw.includes("out of scope") || raw.includes("wont") || raw.includes("won't") || raw === "0" || raw.includes("p0")) {
+    return 0;
+  }
+
+  return null;
 }
 
 function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
@@ -1500,10 +1543,6 @@ function WorkspaceShell({
   const sanitizedBreadcrumbs = isVendorShell || role !== "consultant"
     ? (breadcrumbs ?? []).filter((item) => item.label !== "All workspaces")
     : breadcrumbs;
-  const projectNavHref = isVendorShell
-    ? `/workspaces/${workspace.slug}`
-    : `/workspaces/${workspace.slug}/projects`;
-  const canSeeProjectsLink = role === "consultant" || role === "company-admin" || role === "company-scorer";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -1605,24 +1644,8 @@ function WorkspaceShell({
                 {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
               </div>
             </div>
-            <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
-              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-              <p className="truncate text-sm font-medium text-white" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
-              <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
-              {canSeeProjectsLink ? (
-                <Link
-                  href={projectNavHref}
-                  className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
-                >
-                  Projects
-                </Link>
-              ) : null}
-              <Link
-                href="/api/auth/logout"
-                className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-              >
-                Sign out
-              </Link>
+            <div className="flex w-full justify-start xl:w-auto xl:justify-end xl:ml-auto">
+              <SignOutButton />
             </div>
           </div>
         </header>
@@ -1886,24 +1909,8 @@ export function ConsultantWorkspaceDirectoryPage() {
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">{displayRole}</p>
             <h1 className="mt-2 text-2xl font-semibold text-white">{access.isConsultant ? "Consultant home" : "Workspace directory"}</h1>
           </div>
-          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
-            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-            <p className="truncate text-sm font-medium text-white" title={access.email ?? user?.email ?? "Unknown user"}>{access.email ?? user?.email ?? "Unknown user"}</p>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{displayRole}</p>
-            {access.isConsultant ? (
-              <Link
-                href="/workspaces/activity"
-                className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
-              >
-                Activity log
-              </Link>
-            ) : null}
-            <Link
-              href="/api/auth/logout"
-              className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
-            >
-              Sign out
-            </Link>
+          <div className="flex w-full justify-start xl:w-auto xl:justify-end xl:ml-auto">
+            <SignOutButton />
           </div>
         </div>
       </header>
@@ -2156,9 +2163,12 @@ export function ConsultantActivityLogPage() {
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Consultant view</p>
             <h1 className="mt-2 text-2xl font-semibold text-white">Activity log</h1>
           </div>
-          <Link href="/workspaces" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
-            Back to consultant home
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/workspaces" className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-200 hover:border-slate-500">
+              Back to consultant home
+            </Link>
+            <SignOutButton />
+          </div>
         </div>
       </header>
 
@@ -2201,8 +2211,33 @@ export function ConsultantActivityLogPage() {
                         {log.changedFields.map((field) => (
                           <div key={`${log._id}-${field.label}`} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
                             <p className="font-medium text-slate-200">{field.label}</p>
-                            <p className="text-slate-400">Before: {field.before}</p>
-                            <p className="text-slate-400">After: {field.after}</p>
+                            {/priority/i.test(field.label) ? (
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-400">
+                                <span>Before:</span>
+                                {parsePriorityValue(field.before) === null ? (
+                                  <span>{field.before}</span>
+                                ) : (
+                                  <StatusPill
+                                    label={priorityLabel(parsePriorityValue(field.before) as 9 | 3 | 1 | 0)}
+                                    className={priorityPillClassName(parsePriorityValue(field.before) as 9 | 3 | 1 | 0)}
+                                  />
+                                )}
+                                <span>After:</span>
+                                {parsePriorityValue(field.after) === null ? (
+                                  <span>{field.after}</span>
+                                ) : (
+                                  <StatusPill
+                                    label={priorityLabel(parsePriorityValue(field.after) as 9 | 3 | 1 | 0)}
+                                    className={priorityPillClassName(parsePriorityValue(field.after) as 9 | 3 | 1 | 0)}
+                                  />
+                                )}
+                              </div>
+                            ) : (
+                              <>
+                                <p className="text-slate-400">Before: {field.before}</p>
+                                <p className="text-slate-400">After: {field.after}</p>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -3287,6 +3322,25 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
                   <p className="text-amber-200/80">Will be withdrawn</p>
                   <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {importRows.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-300">Import preview</p>
+                <div className="mt-2 space-y-2">
+                  {importRows.slice(0, 8).map((row) => (
+                    <div key={row.id} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.id}</p>
+                      <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
+                        <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                      </div>
+                    </div>
+                  ))}
+                  {importRows.length > 8 ? <p className="text-xs text-slate-400">+ {importRows.length - 8} more rows in preview</p> : null}
                 </div>
               </div>
             ) : null}
