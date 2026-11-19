@@ -478,6 +478,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const [collapsedRequirementIds, setCollapsedRequirementIds] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shouldScrollSelectedReview, setShouldScrollSelectedReview] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -488,6 +489,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
     const linkedVendorUserId = params.get("vendorUserId")?.trim();
     if (linkedVendorUserId) {
       setSelectedVendorUserId(linkedVendorUserId);
+      setShouldScrollSelectedReview(true);
     }
   }, []);
 
@@ -507,12 +509,13 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   }, [vendorResponses, selectedVendorUserId]);
 
   useEffect(() => {
-    if (!selectedVendorUserId || !selectedReviewRef.current) {
+    if (!shouldScrollSelectedReview || !selectedVendorUserId || !selectedReviewRef.current) {
       return;
     }
 
     selectedReviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [selectedVendorUserId]);
+    setShouldScrollSelectedReview(false);
+  }, [selectedVendorUserId, shouldScrollSelectedReview]);
 
   const selectedReview = useQuery(
     (api as any).scores.getVendorResponseReview,
@@ -699,10 +702,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                     type="button"
                     onClick={() => {
                       const targetVendorUserId = vendor.vendorUserId as string;
-                      if (targetVendorUserId === selectedVendorUserId) {
-                        selectedReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                      }
                       setSelectedVendorUserId(targetVendorUserId);
+                      setShouldScrollSelectedReview(true);
                       setEditingRequirementId("");
                       setNotice(null);
                       setReopenDate("");
@@ -896,12 +897,14 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
 
                       {row.scorerScores.length > 0 ? (
                         <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-slate-300">Scorer scores (with recorded department)</p>
-                          <div className="mt-2 space-y-1 text-xs text-slate-300">
+                          <p className="text-xs uppercase tracking-[0.14em] text-slate-300">Scorer scores</p>
+                          <div className="mt-2 space-y-2 text-xs text-slate-300">
                             {row.scorerScores.map((entry) => (
-                              <p key={`${row.requirementId}-${entry.scopeKey}-${entry.enteredAt}`}>
-                                {entry.scopeLabel}: {entry.score} ({entry.enteredByDisplayName}) - Department: {entry.scorerDepartmentName}
-                              </p>
+                              <div key={`${row.requirementId}-${entry.scopeKey}-${entry.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                                <p className="text-slate-100">{entry.enteredByDisplayName} score: {entry.score}</p>
+                                <p className="text-slate-400">Date: {new Date(entry.enteredAt).toLocaleDateString()}</p>
+                                <p className="mt-1 text-slate-300">Comment: {entry.comment || "(no comment)"}</p>
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -1365,9 +1368,9 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                         <div className="space-y-2">
                           {row.peerScores.map((peer) => (
                             <div key={`${row.requirementId}-${peer.scopeKey}-${peer.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
-                              <p className="text-slate-100">{peer.scopeLabel} - {peer.score === 1 ? "Met" : "Not met"}</p>
-                              <p className="text-slate-400">{peer.enteredByDisplayName} ({new Date(peer.enteredAt).toLocaleDateString()})</p>
-                              <p className="mt-1 text-slate-300">{peer.comment || "(no comment)"}</p>
+                              <p className="text-slate-100">{peer.enteredByDisplayName} score: {peer.score}</p>
+                              <p className="text-slate-400">Date: {new Date(peer.enteredAt).toLocaleDateString()}</p>
+                              <p className="mt-1 text-slate-300">Comment: {peer.comment || "(no comment)"}</p>
                             </div>
                           ))}
                         </div>
@@ -2354,9 +2357,6 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
                     <div className="mt-3 flex gap-3">
                       <Link href={`/workspaces/${workspace.slug}/projects/${project._id}`} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
                         Open project
-                      </Link>
-                      <Link href={`/workspaces/${workspace.slug}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
-                        Score requirements
                       </Link>
                     </div>
                   </div>
@@ -4401,9 +4401,6 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
                   <div className="mt-3 flex gap-3">
                     <Link href={`/workspaces/${companyId}/projects/${project._id}`} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
                       Open project
-                    </Link>
-                    <Link href={`/workspaces/${companyId}/projects/${project._id}/answer-requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
-                      Score requirements
                     </Link>
                   </div>
                 </div>
