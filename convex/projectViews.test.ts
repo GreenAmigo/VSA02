@@ -8,6 +8,49 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 6 project view isolation", () => {
+  test("scorer views require an active contact of an assigned vendor organisation, not a legacy project member", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const assignmentId = await t.run(async (ctx) => {
+      const membership = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor"))
+        .unique();
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId))
+        .first();
+      if (!membership || !assignment) throw new Error("Missing test setup");
+      await ctx.db.delete(membership._id);
+      return assignment._id;
+    });
+    const args = { projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "A view" };
+    await expect(scorer.mutation(api.projectViews.saveProjectView, args)).resolves.toMatchObject({ updated: false });
+
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor"))
+        .unique();
+      if (!contact) throw new Error("Missing test contact");
+      await ctx.db.patch(contact._id, { isActive: false });
+    });
+    await expect(scorer.mutation(api.projectViews.saveProjectView, args)).rejects.toThrow("Vendor not found on this project");
+
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor"))
+        .unique();
+      if (!contact) throw new Error("Missing test contact");
+      await ctx.db.patch(contact._id, { isActive: true });
+      await ctx.db.delete(assignmentId);
+    });
+    await expect(scorer.mutation(api.projectViews.saveProjectView, args)).rejects.toThrow("Vendor not found on this project");
+  });
+
   test("scorers can autosave views until scorer deadline and each change is activity logged", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

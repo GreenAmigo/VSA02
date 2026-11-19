@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
 
 const projectViewValidator = v.object({
   projectId: v.id("projects"),
@@ -193,16 +194,12 @@ export const saveProjectView = mutation({
       throw new Error("Scorer deadline has passed. Reopen the deadline before editing scorer views.");
     }
 
-    const vendorMembership = await ctx.db
-      .query("projectMembers")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("userId"), args.vendorUserId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    if (!vendorMembership || vendorMembership.role !== "vendor") {
+    const vendors = await getProjectVendors(ctx, project);
+    const vendor = findProjectVendorByUserId(vendors, args.vendorUserId);
+    if (!vendor) {
       throw new Error("Vendor not found on this project");
     }
+    const vendorContact = vendor.contacts.find((contact) => contact.userId === args.vendorUserId)!;
 
     const scorerDepartmentSnapshot = await resolveScorerDepartmentSnapshot(ctx, project.companyId, member.userId);
     const normalizedViewText = args.viewText.trim();
@@ -232,7 +229,7 @@ export const saveProjectView = mutation({
         actorUserId,
         actorEmail: identity.email,
         action: "save_scorer_view",
-        details: `${member.displayName} updated scorer views for ${vendorMembership.displayName}.`,
+        details: `${member.displayName} updated scorer views for ${vendorContact.displayName}.`,
         workspaceName: "workspace",
         companyId: project.companyId,
         projectId: args.projectId,
@@ -246,7 +243,7 @@ export const saveProjectView = mutation({
       actorUserId,
       actorEmail: identity.email,
       action: "save_scorer_view",
-      details: `${member.displayName} added scorer views for ${vendorMembership.displayName}.`,
+      details: `${member.displayName} added scorer views for ${vendorContact.displayName}.`,
       workspaceName: "workspace",
       companyId: project.companyId,
       projectId: args.projectId,
