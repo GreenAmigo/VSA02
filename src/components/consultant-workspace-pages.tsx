@@ -55,7 +55,19 @@ function fromDateInputValue(value: string) {
 }
 
 function requirementTypeLabel(type: "user-story" | "nfr") {
-  return type === "user-story" ? "Requirement/User story" : "NFR";
+  return type === "user-story" ? "Requirement" : "NFR";
+}
+
+function requirementTypePillClassName(type: "user-story" | "nfr") {
+  return type === "user-story"
+    ? "border-sky-500/40 bg-sky-500/10 text-sky-200"
+    : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+}
+
+function requirementCardClassName(type: "user-story" | "nfr") {
+  return type === "user-story"
+    ? "border-sky-500/25 bg-sky-500/5"
+    : "border-emerald-500/25 bg-emerald-500/5";
 }
 
 function priorityLabel(priority: 9 | 3 | 1 | 0) {
@@ -82,6 +94,30 @@ function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
     return "border-sky-500/50 bg-sky-500/10 text-sky-200";
   }
   return "border-slate-700 bg-slate-900 text-slate-300";
+}
+
+function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
+  if (params.deadlineLocked) {
+    return "CLOSED";
+  }
+
+  if (params.status === "submitted") {
+    return "SUBMITTED";
+  }
+
+  return "OPEN";
+}
+
+function getVendorScoreCtaLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
+  if (params.deadlineLocked) {
+    return "View submitted requirements";
+  }
+
+  if (params.status === "submitted") {
+    return "Re-score requirements";
+  }
+
+  return "Score requirements";
 }
 
 type ProjectDetailProject = {
@@ -608,6 +644,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
         <div className="space-y-3">
           {vendorResponses.map((vendor) => (
             <div key={vendor.vendorId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+              {(() => {
+                const deadlineLocked = Boolean(vendor.deadlineAt && vendor.deadlineAt <= Date.now());
+                const lifecycleLabel = getVendorLifecycleLabel({ status: vendor.status, deadlineLocked });
+                return (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-base font-semibold text-white">{vendor.vendorName}</p>
@@ -615,12 +655,14 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <StatusPill label={vendor.status === "not-started" ? "Not started" : vendor.status === "in-progress" ? "In progress" : "Submitted"} className="border-slate-700 bg-slate-900 text-slate-100" />
+                  <StatusPill label={lifecycleLabel} className={lifecycleLabel === "CLOSED" ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : lifecycleLabel === "SUBMITTED" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-sky-500/40 bg-sky-500/10 text-sky-200"} />
                   <StatusPill label={`${vendor.answeredCount} / ${vendor.totalRequirements} answered`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
                   {vendor.submittedAt ? <StatusPill label={`Submitted ${new Date(vendor.submittedAt).toLocaleDateString()}`} className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200" /> : null}
                   {vendor.deadlineAt ? <StatusPill label={`Due ${new Date(vendor.deadlineAt).toLocaleDateString()}`} className="border-amber-500/40 bg-amber-500/10 text-amber-200" /> : null}
                 </div>
               </div>
+                );
+              })()}
 
               <div className="mt-3">
                 {vendor.vendorUserId ? (
@@ -629,7 +671,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                     onClick={() => {
                       const targetVendorUserId = vendor.vendorUserId as string;
                       if (targetVendorUserId === selectedVendorUserId) {
-                        return;
+                        selectedReviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                       }
                       setSelectedVendorUserId(targetVendorUserId);
                       setEditingRequirementId("");
@@ -719,13 +761,13 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                   const isEditing = editingRequirementId === row.requirementId;
 
                   return (
-                    <div key={row.requirementId} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+                    <div key={row.requirementId} className={`rounded-xl border p-3 ${requirementCardClassName(row.type)}`}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
                           <p className="mt-1 text-sm text-slate-100">{row.text}</p>
                           <div className="mt-2 flex flex-wrap gap-2">
-                            <StatusPill label={requirementTypeLabel(row.type)} className="border-slate-700 bg-slate-900 text-slate-200" />
+                            <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
                             <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
                           </div>
                         </div>
@@ -1193,7 +1235,123 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 <p className="mb-3 text-xs text-slate-400">Peer scorer columns are enabled for this project.</p>
               ) : null}
 
-              <div className="mb-4 rounded-xl border border-slate-700 bg-slate-950/85 p-3">
+              <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCollapsedRequirementIds(() => Object.fromEntries(grid.rows.map((row) => [row.requirementId, true])))}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                >
+                  Collapse all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCollapsedRequirementIds({})}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+                >
+                  Expand all
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {grid.rows.map((row) => {
+                  const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
+                  return (
+                    <div key={row.requirementId} className={`rounded-xl border bg-slate-900 p-3 ${requirementCardClassName(row.type)}`}>
+                    <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                        <p className="text-sm text-slate-100">{row.text}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
+                          <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCollapsedRequirementIds((current) => ({ ...current, [row.requirementId]: !isCollapsed }))}
+                        className="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
+                      >
+                        {isCollapsed ? "Expand" : "Collapse"}
+                      </button>
+                    </div>
+
+                    {isCollapsed ? null : (
+                      <>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="text-sm text-slate-300">
+                        <span className="mb-1 block">Your score</span>
+                        <div className="mt-1 flex flex-wrap gap-4 text-sm text-slate-200">
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name={`scorer-score-${row.requirementId}`}
+                              checked={row.ownScore === 0}
+                              disabled={busyKey.startsWith(`${row.requirementId}:`)}
+                              onChange={() => void saveScore({ requirementId: row.requirementId, score: 0, comment: row.ownComment })}
+                            />
+                            0
+                          </label>
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name={`scorer-score-${row.requirementId}`}
+                              checked={row.ownScore === 1}
+                              disabled={busyKey.startsWith(`${row.requirementId}:`)}
+                              onChange={() => void saveScore({ requirementId: row.requirementId, score: 1, comment: row.ownComment })}
+                            />
+                            1
+                          </label>
+                        </div>
+                      </div>
+
+                      <label className="text-sm text-slate-300">
+                        <span className="mb-1 block">Your comment</span>
+                        <textarea
+                          defaultValue={row.ownComment}
+                          onBlur={(event) => {
+                            if (row.ownScore === null) {
+                              setNotice({ kind: "error", message: "Choose 0 or 1 before saving a scorer comment." });
+                              return;
+                            }
+
+                            void saveScore({ requirementId: row.requirementId, score: row.ownScore, comment: event.target.value });
+                          }}
+                          rows={2}
+                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                        />
+                      </label>
+                    </div>
+
+                    {grid.isCompleted ? (
+                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-200">
+                        <p>Vendor score: {row.vendorScore === null ? "-" : row.vendorScore}</p>
+                        <p className="mt-1 truncate" title={row.vendorComment ?? ""}>Vendor comment: {row.vendorComment || "(none)"}</p>
+                      </div>
+                    ) : null}
+
+                    {grid.canSeePeerScores && row.peerScores.length > 0 ? (
+                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
+                        <p className="mb-2 uppercase tracking-[0.14em] text-slate-400">Peer scores</p>
+                        <div className="space-y-2">
+                          {row.peerScores.map((peer) => (
+                            <div key={`${row.requirementId}-${peer.scopeKey}-${peer.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
+                              <p className="text-slate-100">{peer.scopeLabel} - {peer.score === 1 ? "Met" : "Not met"}</p>
+                              <p className="text-slate-400">{peer.enteredByDisplayName} ({new Date(peer.enteredAt).toLocaleDateString()})</p>
+                              <p className="mt-1 text-slate-300">{peer.comment || "(no comment)"}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                      </>
+                    )}
+                  </div>
+                );
+                })}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/85 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-medium text-slate-100">Overall views (separate from requirement scoring)</p>
                   <span className="text-xs text-slate-400">
@@ -1240,110 +1398,6 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 ) : (
                   <p className="mt-2 text-xs text-slate-400">No peer scorer views saved yet.</p>
                 )}
-              </div>
-
-              <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCollapsedRequirementIds(() => Object.fromEntries(grid.rows.map((row) => [row.requirementId, true])))}
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
-                >
-                  Collapse all
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCollapsedRequirementIds({})}
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
-                >
-                  Expand all
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {grid.rows.map((row) => {
-                  const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
-                  return (
-                  <div key={row.requirementId} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-                    <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
-                        <p className="text-sm text-slate-100">{row.text}</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <StatusPill label={requirementTypeLabel(row.type)} className="border-slate-700 bg-slate-900 text-slate-200" />
-                          <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setCollapsedRequirementIds((current) => ({ ...current, [row.requirementId]: !isCollapsed }))}
-                        className="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 hover:border-slate-500"
-                      >
-                        {isCollapsed ? "Expand" : "Collapse"}
-                      </button>
-                    </div>
-
-                    {isCollapsed ? null : (
-                      <>
-
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="text-sm text-slate-300">
-                        <span className="mb-1 block">Your score</span>
-                        <select
-                          value={row.ownScore ?? ""}
-                          onChange={(event) => void saveScore({ requirementId: row.requirementId, score: Number(event.target.value) as 0 | 1, comment: row.ownComment })}
-                          disabled={busyKey.startsWith(`${row.requirementId}:`)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                        >
-                          <option value="">Choose</option>
-                          <option value={0}>0</option>
-                          <option value={1}>1</option>
-                        </select>
-                      </label>
-
-                      <label className="text-sm text-slate-300">
-                        <span className="mb-1 block">Your comment</span>
-                        <textarea
-                          defaultValue={row.ownComment}
-                          onBlur={(event) => {
-                            if (row.ownScore === null) {
-                              setNotice({ kind: "error", message: "Choose 0 or 1 before saving a scorer comment." });
-                              return;
-                            }
-
-                            void saveScore({ requirementId: row.requirementId, score: row.ownScore, comment: event.target.value });
-                          }}
-                          rows={2}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                        />
-                      </label>
-                    </div>
-
-                    {grid.isCompleted ? (
-                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-sm text-slate-200">
-                        <p>Vendor score: {row.vendorScore === null ? "-" : row.vendorScore}</p>
-                        <p className="mt-1 truncate" title={row.vendorComment ?? ""}>Vendor comment: {row.vendorComment || "(none)"}</p>
-                      </div>
-                    ) : null}
-
-                    {grid.canSeePeerScores && row.peerScores.length > 0 ? (
-                      <div className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-                        <p className="mb-2 uppercase tracking-[0.14em] text-slate-400">Peer scores</p>
-                        <div className="space-y-2">
-                          {row.peerScores.map((peer) => (
-                            <div key={`${row.requirementId}-${peer.scopeKey}-${peer.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
-                              <p className="text-slate-100">{peer.scopeLabel}: {peer.score}</p>
-                              <p className="text-slate-400">By {peer.enteredByDisplayName} on {new Date(peer.enteredAt).toLocaleDateString()}</p>
-                              <p className="mt-1 text-slate-300">{peer.comment || "(no comment)"}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                      </>
-                    )}
-                  </div>
-                );
-                })}
               </div>
             </div>
           ) : null}
@@ -2119,11 +2173,21 @@ export function ConsultantActivityLogPage() {
             <div className="space-y-3">
               {logs.map((log) => (
                 <div key={log._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  {(() => {
+                    const actorName = (log.actorLabel ?? "").split("<")[0]?.split("(")[0]?.trim();
+                    const rawDetails = log.detailLines && log.detailLines.length > 0 ? log.detailLines : [log.details];
+                    const dedupedDetails = Array.from(new Set(rawDetails.map((line) => line.trim()).filter((line) => line.length > 0)));
+                    const summaryLine = (log.summary ?? log.details).trim();
+                    const extraDetails = dedupedDetails.filter((line) => line !== summaryLine);
+
+                    return (
+                      <>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <StatusPill label={log.action.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
                       <span className="text-sm font-medium text-white">{log.workspaceLabel ?? log.workspaceName ?? "Deleted workspace"}</span>
                       {log.projectName ? <span className="text-xs text-slate-400">Project: {log.projectName}</span> : null}
+                      {actorName ? <span className="text-xs text-slate-400">By {actorName}</span> : null}
                     </div>
                     <span className="text-xs text-slate-400">{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(log.createdAt))}</span>
                   </div>
@@ -2143,20 +2207,19 @@ export function ConsultantActivityLogPage() {
                         ))}
                       </div>
                     </details>
-                  ) : (
+                  ) : extraDetails.length > 0 ? (
                     <details className="mt-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
                       <summary className="cursor-pointer text-xs uppercase tracking-[0.14em] text-slate-300">Details</summary>
                       <div className="mt-2 space-y-1 text-xs text-slate-300">
-                        {(log.detailLines && log.detailLines.length > 0 ? log.detailLines : [log.details]).map((line, index) => (
+                        {extraDetails.map((line, index) => (
                           <p key={`${log._id}-detail-${index}`}>{line}</p>
                         ))}
                       </div>
                     </details>
-                  )}
-
-                  <div className="mt-2 flex flex-wrap gap-4 text-xs text-slate-400">
-                    <span>Actor: {log.actorLabel ?? log.actorEmail ?? log.actorUserId ?? "Unknown actor"}</span>
-                  </div>
+                  ) : null}
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -3009,6 +3072,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     }
   };
 
+  const activeRequirements = requirements.filter((row) => row.status === "active");
+  const userStoryRequirements = activeRequirements.filter((row) => row.type === "user-story");
+  const nfrRequirements = activeRequirements.filter((row) => row.type === "nfr");
+
 
   return (
     <WorkspaceShell
@@ -3062,6 +3129,59 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
 
+      {!isVendorView && canManageProjects ? <ScoringSettingsPanel companyId={companyId} projectId={projectId} project={project} /> : null}
+
+      {canManageProjects ? (
+        <>
+          <section className="grid gap-6 xl:grid-cols-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
+              <div className="mt-4 space-y-3">
+                <select
+                  value={scorerDraft.selectedUserId}
+                  onChange={(event) => setScorerDraft((current) => ({ ...current, selectedUserId: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="">Select a workspace person</option>
+                  {assignableScorers.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name} — {person.email} — {person.departmentName}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400">Project scoring assignments are individual only. Each person keeps their workspace department.</p>
+                <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
+                  Add scorer
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+              <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
+              <div className="mt-4 space-y-3">
+                <select
+                  value={vendorDraft.selectedVendorId}
+                  onChange={(event) => setVendorDraft((current) => ({ ...current, selectedVendorId: event.target.value }))}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="">Select a workspace vendor</option>
+                  {assignableVendors.map((vendor) => (
+                    <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.name}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => void handleAddVendor()} disabled={busy || !selectedVendor} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
+                  Add vendor
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {notice ? (
+            <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
+              {notice.message}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
       {!isVendorView ? (
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -3073,15 +3193,53 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
             <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Active rows</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{requirements.filter((row) => row.status === "active").length}</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{activeRequirements.length}</p>
           </div>
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Access</p>
-            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Consultant / admin" : "Read-only"}</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Requirements</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{userStoryRequirements.length} items</p>
           </div>
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Import</p>
-            <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Allowed" : "Blocked"}</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">NFRs</p>
+            <p className="mt-2 text-base font-medium text-slate-200">{nfrRequirements.length} items</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-sky-200">Requirements</p>
+            <div className="mt-2 space-y-2">
+              {userStoryRequirements.length === 0 ? (
+                <p className="text-sm text-slate-400">No requirement rows.</p>
+              ) : userStoryRequirements.map((row) => (
+                <div key={row._id} className={`rounded-lg border p-2 ${requirementCardClassName("user-story")}`}>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                  <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StatusPill label={requirementTypeLabel("user-story")} className={requirementTypePillClassName("user-story")} />
+                    {typeof row.priority === "number" ? <StatusPill label={priorityLabel(row.priority as 9 | 3 | 1 | 0)} className={priorityPillClassName(row.priority as 9 | 3 | 1 | 0)} /> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-emerald-200">NFRs</p>
+            <div className="mt-2 space-y-2">
+              {nfrRequirements.length === 0 ? (
+                <p className="text-sm text-slate-400">No NFR rows.</p>
+              ) : nfrRequirements.map((row) => (
+                <div key={row._id} className={`rounded-lg border p-2 ${requirementCardClassName("nfr")}`}>
+                  <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                  <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <StatusPill label={requirementTypeLabel("nfr")} className={requirementTypePillClassName("nfr")} />
+                    {typeof row.priority === "number" ? <StatusPill label={priorityLabel(row.priority as 9 | 3 | 1 | 0)} className={priorityPillClassName(row.priority as 9 | 3 | 1 | 0)} /> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -3151,59 +3309,6 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       </section>
       ) : null}
 
-      {canManageProjects ? (
-        <>
-          <section className="grid gap-6 xl:grid-cols-2">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <h3 className="text-lg font-semibold text-white">Assign scorers</h3>
-              <div className="mt-4 space-y-3">
-                <select
-                  value={scorerDraft.selectedUserId}
-                  onChange={(event) => setScorerDraft((current) => ({ ...current, selectedUserId: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                >
-                  <option value="">Select a workspace person</option>
-                  {assignableScorers.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name} — {person.email} — {person.departmentName}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400">Project scoring assignments are individual only. Each person keeps their workspace department.</p>
-                <button type="button" onClick={() => void handleAddScorer()} disabled={busy || !selectedScorer} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">
-                  Add scorer
-                </button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-              <h3 className="text-lg font-semibold text-white">Assign vendors</h3>
-              <div className="mt-4 space-y-3">
-                <select
-                  value={vendorDraft.selectedVendorId}
-                  onChange={(event) => setVendorDraft((current) => ({ ...current, selectedVendorId: event.target.value }))}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
-                >
-                  <option value="">Select a workspace vendor</option>
-                  {assignableVendors.map((vendor) => (
-                    <option key={vendor.vendorId} value={vendor.vendorId}>{vendor.name}</option>
-                  ))}
-                </select>
-                <button type="button" onClick={() => void handleAddVendor()} disabled={busy || !selectedVendor} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60">
-                  Add vendor
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {notice ? (
-            <div className={`rounded-xl border px-3 py-2 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-rose-500/40 bg-rose-500/10 text-rose-200"}`}>
-              {notice.message}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {!isVendorView && canManageProjects ? <ScoringSettingsPanel companyId={companyId} projectId={projectId} project={project} /> : null}
-
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
 
       {!isVendorView && canManageProjects ? (
@@ -3266,6 +3371,14 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
       {isVendorView ? (
         <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+          {(() => {
+            const status = vendorScoringPanel?.status ?? "not-started";
+            const deadlineLocked = Boolean(vendorScoringPanel?.deadlineLocked);
+            const lifecycleLabel = getVendorLifecycleLabel({ status, deadlineLocked });
+            const scoreCtaLabel = getVendorScoreCtaLabel({ status, deadlineLocked });
+
+            return (
+              <>
           <div className="grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
               <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Vendor organisation</p>
@@ -3274,7 +3387,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
               <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Progress</p>
               <p className="mt-2 text-lg font-semibold text-white">{vendorScoringPanel?.answeredCount ?? 0} of {vendorScoringPanel?.totalRequirements ?? 0} answered</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-400">Status: {(vendorScoringPanel?.status ?? "not-started").replace("-", " ")}</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-400">Status: {lifecycleLabel}</p>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
               <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Deadline</p>
@@ -3290,9 +3403,12 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
               href={`/workspaces/${companyId}/projects/${projectId}/answer-requirements`}
               className="inline-flex rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
             >
-              Score requirements
+              {scoreCtaLabel}
             </Link>
           </div>
+              </>
+            );
+          })()}
         </section>
       ) : null}
 
@@ -3443,6 +3559,8 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
     }
   };
 
+  const lifecycleLabel = getVendorLifecycleLabel({ status: panel.status, deadlineLocked: panel.deadlineLocked });
+
   return (
     <WorkspaceShell
       workspace={{
@@ -3477,7 +3595,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
           </div>
           <div className="space-y-2 text-right text-sm text-slate-300">
             <p>{panel.answeredCount} of {panel.totalRequirements} answered</p>
-            <p className="uppercase tracking-[0.14em] text-slate-400">Status: {panel.status.replace("-", " ")}</p>
+            <p className="uppercase tracking-[0.14em] text-slate-400">Status: {lifecycleLabel}</p>
             <p>Vendor due: {panel.deadlineAt ? new Date(panel.deadlineAt).toLocaleDateString() : "Not set"}</p>
           </div>
         </div>

@@ -299,7 +299,9 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     );
 
     expect(html).toContain("Projects");
-    expect(html.indexOf("Requirements")).toBeLessThan(html.indexOf("Scoring settings"));
+    expect(html.indexOf("Scoring settings")).toBeLessThan(html.indexOf("Assign scorers"));
+    expect(html.indexOf("Assign scorers")).toBeLessThan(html.indexOf("Assign vendors"));
+    expect(html.indexOf("Assign vendors")).toBeLessThan(html.indexOf("Requirements"));
     expect(html.indexOf("Assign scorers")).toBeLessThan(html.indexOf("Vendor responses"));
     expect(html).toContain("Vendor responses");
   });
