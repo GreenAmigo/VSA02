@@ -1,6 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -235,7 +236,7 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     ))
     .first();
 
-  if (member && member.companyId === project.companyId && (member.role === "company-admin" || member.role === "company-scorer" || member.role === "vendor")) {
+  if (member && member.companyId === project.companyId && (member.role === "company-admin" || member.role === "company-scorer")) {
     return { project, identity, member };
   }
 
@@ -264,16 +265,12 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     };
   }
 
+  const vendors = await getProjectVendors(ctx, project);
   const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
   for (const vendorMembership of vendorMemberships) {
-    const assignment = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("projectId"), projectId))
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
-      .first();
+    const assignment = findProjectVendorByUserId(vendors, vendorMembership.userId);
 
-    if (assignment) {
+    if (assignment && assignment.vendorId === vendorMembership.vendorId) {
       return {
         project,
         identity,
@@ -370,35 +367,17 @@ async function resolveVendorReviewContext(ctx: any, project: any, vendorUserId: 
     throw new Error("Select a vendor before opening vendor responses");
   }
 
-  const companyVendorMembership = await ctx.db
-    .query("companyMembers")
-    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-    .filter((q: any) => q.eq(q.field("role"), "vendor"))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .filter((q: any) => q.eq(q.field("userId"), trimmedVendorUserId))
-    .first();
-
-  if (!companyVendorMembership?.vendorId) {
-    throw new Error("Vendor not assigned to this workspace");
-  }
-
-  const projectVendor = await ctx.db
-    .query("projectVendors")
-    .filter((q: any) => q.eq(q.field("projectId"), project._id))
-    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-    .filter((q: any) => q.eq(q.field("vendorId"), companyVendorMembership.vendorId))
-    .first();
-
-  if (!projectVendor) {
+  const vendor = findProjectVendorByUserId(await getProjectVendors(ctx, project), trimmedVendorUserId);
+  if (!vendor) {
     throw new Error("Vendor not assigned to this project");
   }
 
-  const vendorOrg = await ctx.db.get(projectVendor.vendorId);
+  const contact = vendor.contacts.find((row) => row.userId === trimmedVendorUserId)!;
   return {
     vendorUserId: trimmedVendorUserId,
-    vendorId: projectVendor.vendorId,
-    vendorName: vendorOrg?.name ?? companyVendorMembership.displayName ?? "Vendor",
-    vendorDisplayName: companyVendorMembership.displayName ?? vendorOrg?.name ?? "Vendor",
+    vendorId: vendor.vendorId,
+    vendorName: vendor.vendorName,
+    vendorDisplayName: contact.displayName,
   };
 }
 
@@ -532,32 +511,13 @@ async function listScoringRequirements(ctx: any, project: any) {
 }
 
 async function listAssignedVendorUsers(ctx: any, project: any) {
-  const assignments = await ctx.db
-    .query("projectVendors")
-    .filter((q: any) => q.eq(q.field("projectId"), project._id))
-    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-    .collect();
-
-  const vendorRows = await Promise.all(assignments.map(async (assignment: any) => {
-    const vendorOrg = await ctx.db.get(assignment.vendorId);
-    const contacts = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("role"), "vendor"))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .filter((q: any) => q.eq(q.field("vendorId"), assignment.vendorId))
-      .collect();
-
-    const selectedContact = contacts.sort((a: any, b: any) => a.createdAt - b.createdAt)[0] ?? null;
-    return {
-      vendorId: assignment.vendorId,
-      vendorName: vendorOrg?.name ?? "Vendor",
-      vendorUserId: selectedContact?.userId ?? null,
-      vendorContactName: selectedContact?.displayName ?? null,
-    };
-  }));
-
-  return vendorRows.filter((row) => Boolean(row.vendorUserId));
+  const vendors = await getProjectVendors(ctx, project);
+  return vendors.flatMap((vendor) => vendor.primaryContact ? [{
+    vendorId: vendor.vendorId,
+    vendorName: vendor.vendorName,
+    vendorUserId: vendor.primaryContact.userId,
+    vendorContactName: vendor.primaryContact.displayName,
+  }] : []);
 }
 
 export const listScoreHistory = query({
@@ -893,25 +853,10 @@ export const listProjectVendorResponses = query({
       .collect();
     const totalRequirements = allRequirements.filter((row) => row.status === "active" && row.priority !== 0).length;
 
-    const assignments = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .collect();
-
-    const rows = await Promise.all(assignments.map(async (assignment) => {
-      const vendorOrg = await ctx.db.get(assignment.vendorId);
-      const contacts = await ctx.db
-        .query("companyMembers")
-        .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-        .filter((q: any) => q.eq(q.field("role"), "vendor"))
-        .filter((q: any) => q.eq(q.field("isActive"), true))
-        .filter((q: any) => q.eq(q.field("vendorId"), assignment.vendorId))
-        .collect();
-
-      const sortedContacts = contacts.sort((a, b) => a.createdAt - b.createdAt);
-      const selectedContact = sortedContacts[0] ?? null;
-      const vendorUserIds = sortedContacts.map((contact) => contact.userId);
+    const vendors = await getProjectVendors(ctx, project);
+    const rows = await Promise.all(vendors.map(async (vendor) => {
+      const selectedContact = vendor.primaryContact;
+      const vendorUserIds = vendor.contacts.map((contact) => contact.userId);
       const scoresByVendor = await Promise.all(vendorUserIds.map((vendorUserId) =>
         ctx.db
           .query("scores")
@@ -941,8 +886,8 @@ export const listProjectVendorResponses = query({
           : "not-started";
 
       return {
-        vendorId: assignment.vendorId,
-        vendorName: vendorOrg?.name ?? "Vendor",
+        vendorId: vendor.vendorId,
+        vendorName: vendor.vendorName,
         vendorUserId: selectedContact?.userId ?? null,
         vendorContactName: selectedContact?.displayName ?? null,
         answeredCount,

@@ -256,6 +256,27 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("vendor scoring access follows organisation assignment rather than legacy project membership", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await expect(vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId }))
+      .resolves.toMatchObject({ vendorUserId: "northwind-vendor" });
+
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId))
+        .first();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.delete(assignment._id);
+    });
+    await expect(vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId }))
+      .rejects.toThrow("Project access denied");
+  });
+
   test("requirement comparison rejects scorers and vendors at the server", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
