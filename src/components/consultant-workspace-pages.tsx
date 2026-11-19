@@ -150,6 +150,10 @@ function safeDisplayName(value: string | null | undefined, fallback = "Scorer") 
   return normalized;
 }
 
+function formatScoreValue(value: number) {
+  return `${Math.round(value * 100) / 100}`;
+}
+
 function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
   if (params.deadlineLocked) {
     return "CLOSED";
@@ -2951,6 +2955,59 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       }>;
     }
     | undefined;
+  const requirementComparison = useQuery(
+    (api as any).scores.getProjectRequirementComparison,
+    isProtectedLoading || !projectId || !canManageProjects
+      ? "skip"
+      : { projectId: projectId as any },
+  ) as
+    | {
+      projectId: string;
+      vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string; vendorContactName: string | null }>;
+      rows: Array<{
+        requirementId: string;
+        text: string;
+        type: "user-story" | "nfr";
+        priority: 9 | 3 | 1 | 0;
+        status: "active" | "withdrawn";
+        cells: Array<{
+          vendorUserId: string;
+          scorerAverage: number | null;
+          scorerScoredCount: number;
+          totalScorers: number;
+          scorerDetails: Array<{ scorerName: string; scorerDepartmentName: string; score: 0 | 1; comment: string; enteredAt: number }>;
+          vendorScore: 0 | 1 | null;
+          vendorComment: string;
+          vendorEnteredAt: number | null;
+          vendorIsAmended: boolean;
+          vendorAmendedByDisplayName: string | null;
+          vendorAmendedAt: number | null;
+          vendorAmendmentReason: string | null;
+          amendmentHistory: Array<{
+            originalScore: 0 | 1;
+            newScore: 0 | 1;
+            originalComment: string;
+            newComment: string;
+            amendedByDisplayName: string;
+            amendedAt: number;
+            reason: string;
+          }>;
+        }>;
+      }>;
+      totalsByVendor: Array<{
+        vendorUserId: string;
+        scorer: { requirements: number; nfr: number; combined: number };
+        vendor: { requirements: number; nfr: number; combined: number };
+      }>;
+      scorerBestVendorUserIds: string[];
+      vendorBestVendorUserIds: string[];
+    }
+    | undefined;
+  const [comparisonMode, setComparisonMode] = useState<"scorer" | "vendor">("scorer");
+  const [comparisonTypeFilter, setComparisonTypeFilter] = useState<"all" | "user-story" | "nfr">("all");
+  const [comparisonPriorityFilter, setComparisonPriorityFilter] = useState<"all" | 9 | 3 | 1 | 0>("all");
+  const [comparisonShowWithdrawn, setComparisonShowWithdrawn] = useState(false);
+  const [selectedComparisonCell, setSelectedComparisonCell] = useState<{ requirementId: string; vendorUserId: string } | null>(null);
 
   if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || projectMembers === undefined || requirements === undefined || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -3117,6 +3174,63 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const activeRequirements = requirements.filter((row) => row.status === "active");
   const userStoryRequirements = activeRequirements.filter((row) => row.type === "user-story");
   const nfrRequirements = activeRequirements.filter((row) => row.type === "nfr");
+  const comparisonRows = (requirementComparison?.rows ?? []).filter((row) => {
+    if (!comparisonShowWithdrawn && row.status === "withdrawn") {
+      return false;
+    }
+    if (comparisonTypeFilter !== "all" && row.type !== comparisonTypeFilter) {
+      return false;
+    }
+    if (comparisonPriorityFilter !== "all" && row.priority !== comparisonPriorityFilter) {
+      return false;
+    }
+    return true;
+  });
+  const comparisonUserStoryRows = comparisonRows.filter((row) => row.type === "user-story");
+  const comparisonNfrRows = comparisonRows.filter((row) => row.type === "nfr");
+  const comparisonTotalsByVendor = (requirementComparison?.vendors ?? []).map((vendor) => {
+    let requirementsTotal = 0;
+    let nfrTotal = 0;
+    for (const requirement of comparisonRows) {
+      if (requirement.status === "withdrawn" || requirement.priority === 0) {
+        continue;
+      }
+
+      const cell = requirement.cells.find((item) => item.vendorUserId === vendor.vendorUserId);
+      if (!cell) {
+        continue;
+      }
+
+      const value = comparisonMode === "scorer" ? cell.scorerAverage : cell.vendorScore;
+      if (typeof value !== "number") {
+        continue;
+      }
+
+      const weighted = requirement.priority * value;
+      if (requirement.type === "nfr") {
+        nfrTotal += weighted;
+      } else {
+        requirementsTotal += weighted;
+      }
+    }
+
+    return {
+      vendorUserId: vendor.vendorUserId,
+      requirementsTotal,
+      nfrTotal,
+      combinedTotal: requirementsTotal + nfrTotal,
+    };
+  });
+  const bestComparisonCombined = comparisonTotalsByVendor.reduce((max, row) => Math.max(max, row.combinedTotal), Number.NEGATIVE_INFINITY);
+  const selectedComparisonRow = selectedComparisonCell
+    ? (requirementComparison?.rows ?? []).find((row) => row.requirementId === selectedComparisonCell.requirementId) ?? null
+    : null;
+  const selectedComparisonVendor = selectedComparisonCell
+    ? (requirementComparison?.vendors ?? []).find((vendor) => vendor.vendorUserId === selectedComparisonCell.vendorUserId) ?? null
+    : null;
+  const selectedComparisonCellData = selectedComparisonRow && selectedComparisonCell
+    ? selectedComparisonRow.cells.find((cell) => cell.vendorUserId === selectedComparisonCell.vendorUserId) ?? null
+    : null;
 
 
   return (
@@ -3284,6 +3398,282 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
           </div>
         </div>
+
+        {canManageProjects ? (
+          <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Vendor comparison</p>
+                <p className="text-xs text-slate-400">Rows are requirements. Columns are assigned vendors (up to 10).</p>
+              </div>
+              <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setComparisonMode("scorer")}
+                  className={`rounded-lg px-3 py-1.5 ${comparisonMode === "scorer" ? "bg-sky-500 text-slate-950" : "text-slate-300"}`}
+                >
+                  Scorers' scores
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComparisonMode("vendor")}
+                  className={`rounded-lg px-3 py-1.5 ${comparisonMode === "vendor" ? "bg-sky-500 text-slate-950" : "text-slate-300"}`}
+                >
+                  Vendor self-scores
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-3 grid gap-3 md:grid-cols-4">
+              <label className="text-xs text-slate-300">
+                <span className="mb-1 block uppercase tracking-[0.14em] text-slate-400">Type</span>
+                <select
+                  value={comparisonTypeFilter}
+                  onChange={(event) => setComparisonTypeFilter(event.target.value as "all" | "user-story" | "nfr")}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="all">Requirements + NFRs</option>
+                  <option value="user-story">Requirements</option>
+                  <option value="nfr">NFRs</option>
+                </select>
+              </label>
+
+              <label className="text-xs text-slate-300">
+                <span className="mb-1 block uppercase tracking-[0.14em] text-slate-400">Priority</span>
+                <select
+                  value={comparisonPriorityFilter === "all" ? "all" : String(comparisonPriorityFilter)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (next === "all") {
+                      setComparisonPriorityFilter("all");
+                      return;
+                    }
+                    setComparisonPriorityFilter(Number(next) as 9 | 3 | 1 | 0);
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                >
+                  <option value="all">All priorities</option>
+                  <option value="9">Must</option>
+                  <option value="3">Should</option>
+                  <option value="1">Could</option>
+                  <option value="0">Out of scope</option>
+                </select>
+              </label>
+
+              <label className="inline-flex items-center gap-2 text-xs text-slate-300 md:col-span-2 md:mt-6">
+                <input
+                  type="checkbox"
+                  checked={comparisonShowWithdrawn}
+                  onChange={(event) => setComparisonShowWithdrawn(event.target.checked)}
+                />
+                Show withdrawn requirements
+              </label>
+            </div>
+
+            {requirementComparison === undefined ? (
+              <p className="text-sm text-slate-400">Loading comparison grid...</p>
+            ) : requirementComparison.vendors.length === 0 ? (
+              <p className="text-sm text-slate-400">Assign vendor contacts to this project to view comparison data.</p>
+            ) : comparisonRows.length === 0 ? (
+              <p className="text-sm text-slate-400">No rows match the selected filters.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="min-w-[1100px] border-collapse text-xs text-slate-200">
+                  <thead>
+                    <tr className="bg-slate-900/95">
+                      <th className="sticky left-0 top-0 z-30 min-w-[300px] border-b border-r border-slate-800 bg-slate-900 px-3 py-2 text-left">Requirement</th>
+                      {requirementComparison.vendors.map((vendor) => (
+                        <th key={vendor.vendorUserId} className="sticky top-0 z-20 min-w-[170px] border-b border-slate-800 bg-slate-900 px-3 py-2 text-left">
+                          <p className="font-medium text-white">{vendor.vendorName}</p>
+                          <p className="text-[11px] text-slate-400">{vendor.vendorContactName || "No contact"}</p>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {comparisonUserStoryRows.length > 0 ? (
+                      <tr>
+                        <td colSpan={requirementComparison.vendors.length + 1} className="bg-sky-500/10 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-sky-200">
+                          Requirements / User Stories
+                        </td>
+                      </tr>
+                    ) : null}
+
+                    {comparisonUserStoryRows.map((row) => (
+                      <tr key={row.requirementId} className={row.status === "withdrawn" || row.priority === 0 ? "opacity-70" : ""}>
+                        <td className="sticky left-0 z-10 border-r border-t border-slate-800 bg-slate-950 px-3 py-2 align-top">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                          <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
+                            <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                            {row.status === "withdrawn" ? <StatusPill label="Withdrawn" className="border-slate-700 bg-slate-900 text-slate-300" /> : null}
+                          </div>
+                        </td>
+                        {row.cells.map((cell) => {
+                          const isUnscored = comparisonMode === "scorer" ? cell.scorerAverage === null : cell.vendorScore === null;
+                          const valueText = comparisonMode === "scorer"
+                            ? (cell.scorerAverage === null
+                              ? "Unscored"
+                              : `${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                            : (cell.vendorScore === null
+                              ? "Unscored"
+                              : `${cell.vendorScore}`);
+                          return (
+                            <td key={`${row.requirementId}-${cell.vendorUserId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorUserId: cell.vendorUserId })}
+                                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
+                              >
+                                <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
+                                {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+
+                    {comparisonNfrRows.length > 0 ? (
+                      <tr>
+                        <td colSpan={requirementComparison.vendors.length + 1} className="bg-emerald-500/10 px-3 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-emerald-200">
+                          NFRs
+                        </td>
+                      </tr>
+                    ) : null}
+
+                    {comparisonNfrRows.map((row) => (
+                      <tr key={row.requirementId} className={row.status === "withdrawn" || row.priority === 0 ? "opacity-70" : ""}>
+                        <td className="sticky left-0 z-10 border-r border-t border-slate-800 bg-slate-950 px-3 py-2 align-top">
+                          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-400">{row.requirementId}</p>
+                          <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
+                            <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                            {row.status === "withdrawn" ? <StatusPill label="Withdrawn" className="border-slate-700 bg-slate-900 text-slate-300" /> : null}
+                          </div>
+                        </td>
+                        {row.cells.map((cell) => {
+                          const isUnscored = comparisonMode === "scorer" ? cell.scorerAverage === null : cell.vendorScore === null;
+                          const valueText = comparisonMode === "scorer"
+                            ? (cell.scorerAverage === null
+                              ? "Unscored"
+                              : `${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                            : (cell.vendorScore === null
+                              ? "Unscored"
+                              : `${cell.vendorScore}`);
+                          return (
+                            <td key={`${row.requirementId}-${cell.vendorUserId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorUserId: cell.vendorUserId })}
+                                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
+                              >
+                                <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
+                                {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
+                              </button>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+
+                  <tfoot>
+                    <tr className="bg-slate-900/95">
+                      <td className="sticky left-0 z-20 border-r border-t border-slate-700 bg-slate-900 px-3 py-2 font-semibold text-white">Totals (weighted)</td>
+                      {requirementComparison.vendors.map((vendor) => {
+                        const totals = comparisonTotalsByVendor.find((row) => row.vendorUserId === vendor.vendorUserId);
+                        const isBest = (totals?.combinedTotal ?? Number.NEGATIVE_INFINITY) === bestComparisonCombined;
+                        return (
+                          <td key={`totals-${vendor.vendorUserId}`} className={`border-t border-slate-700 px-3 py-2 ${isBest ? "bg-emerald-500/15" : "bg-slate-900/70"}`}>
+                            <p className="text-slate-100">Requirements: {formatScoreValue(totals?.requirementsTotal ?? 0)}</p>
+                            <p className="text-slate-300">NFRs: {formatScoreValue(totals?.nfrTotal ?? 0)}</p>
+                            <p className={`font-semibold ${isBest ? "text-emerald-200" : "text-slate-100"}`}>Combined: {formatScoreValue(totals?.combinedTotal ?? 0)}</p>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {selectedComparisonCell && selectedComparisonCellData && selectedComparisonRow && selectedComparisonVendor ? (
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/80 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Detail view</p>
+                <p className="text-sm font-semibold text-white">{selectedComparisonRow.requirementId} • {selectedComparisonVendor.vendorName}</p>
+                <p className="text-xs text-slate-400">{selectedComparisonRow.text}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedComparisonCell(null)}
+                className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-500"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Scorer entries</p>
+                {selectedComparisonCellData.scorerDetails.length === 0 ? (
+                  <p className="mt-2 text-sm text-amber-200">Unscored</p>
+                ) : (
+                  <div className="mt-2 space-y-2 text-xs text-slate-300">
+                    {selectedComparisonCellData.scorerDetails.map((entry, index) => (
+                      <div key={`${entry.scorerName}-${entry.enteredAt}-${index}`} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+                        <p className="text-slate-100">{safeDisplayName(entry.scorerName)} score: {entry.score}</p>
+                        <p className="text-slate-400">Department: {entry.scorerDepartmentName}</p>
+                        <p className="text-slate-400">Date: {new Date(entry.enteredAt).toLocaleDateString()}</p>
+                        <p className="mt-1">Comment: {entry.comment || "(no comment)"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Vendor answer</p>
+                {selectedComparisonCellData.vendorScore === null ? (
+                  <p className="mt-2 text-sm text-amber-200">Unscored</p>
+                ) : (
+                  <div className="mt-2 space-y-1 text-xs text-slate-300">
+                    <p className="text-slate-100">Score: {selectedComparisonCellData.vendorScore}{selectedComparisonCellData.vendorIsAmended ? " (amended)" : ""}</p>
+                    <p>Comment: {selectedComparisonCellData.vendorComment || "(no comment)"}</p>
+                    {selectedComparisonCellData.vendorEnteredAt ? <p>Date: {new Date(selectedComparisonCellData.vendorEnteredAt).toLocaleDateString()}</p> : null}
+                    {selectedComparisonCellData.vendorAmendedAt ? (
+                      <p>
+                        Amended by {safeDisplayName(selectedComparisonCellData.vendorAmendedByDisplayName, "Admin")} on {new Date(selectedComparisonCellData.vendorAmendedAt).toLocaleDateString()}
+                      </p>
+                    ) : null}
+                    {selectedComparisonCellData.vendorAmendmentReason ? <p>Reason: {selectedComparisonCellData.vendorAmendmentReason}</p> : null}
+                  </div>
+                )}
+
+                {selectedComparisonCellData.amendmentHistory.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Amendment history</p>
+                    {selectedComparisonCellData.amendmentHistory.map((entry, index) => (
+                      <div key={`${entry.amendedAt}-${index}`} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2 text-xs text-slate-300">
+                        <p>Score: {entry.originalScore} → {entry.newScore}</p>
+                        <p>Comment: {entry.originalComment || "(none)"} → {entry.newComment || "(none)"}</p>
+                        <p>By {safeDisplayName(entry.amendedByDisplayName, "Admin")} on {new Date(entry.amendedAt).toLocaleDateString()}</p>
+                        <p>Reason: {entry.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {canManageProjects ? (
           <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">

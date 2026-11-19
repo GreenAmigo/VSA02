@@ -336,6 +336,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => undefined);
     useQueryMock.mockImplementationOnce(() => ({
       projectId: "project-1",
       scorerCanSeePeerScores: false,
@@ -416,6 +417,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => []);
     useQueryMock.mockImplementationOnce(() => []);
+    useQueryMock.mockImplementationOnce(() => undefined);
     useQueryMock.mockImplementationOnce(() => undefined);
     useQueryMock.mockImplementationOnce(() => ({
       projectId: "project-1",

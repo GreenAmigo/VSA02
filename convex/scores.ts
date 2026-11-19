@@ -24,6 +24,10 @@ const vendorResponseReviewValidator = v.object({
   vendorUserId: v.string(),
 });
 
+const requirementComparisonValidator = v.object({
+  projectId: v.id("projects"),
+});
+
 const reopenVendorAnswersValidator = v.object({
   projectId: v.id("projects"),
   vendorUserId: v.string(),
@@ -1169,6 +1173,208 @@ export const getVendorResponseReview = query({
       deadlineAt,
       deadlineLocked,
       rows,
+    };
+  },
+});
+
+export const getProjectRequirementComparison = query({
+  args: requirementComparisonValidator,
+  handler: async (ctx, args) => {
+    const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
+
+    const requirements = await ctx.db
+      .query("requirements")
+      .withIndex("by_company_project", (q: any) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
+      .collect();
+    const requirementRows = requirements.sort((a, b) => a.requirementId.localeCompare(b.requirementId));
+
+    const vendors = await listAssignedVendorUsers(ctx, project);
+    const scorerAssignments = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("role"), "company-scorer"))
+      .filter((q: any) => q.eq(q.field("isActive"), true))
+      .collect();
+    const totalScorers = new Set(scorerAssignments.map((row: any) => row.userId)).size;
+
+    const vendorComparison = await Promise.all(vendors.map(async (vendor) => {
+      const scorerRows = await ctx.db
+        .query("scorerScores")
+        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
+        .collect();
+      const vendorRows = await ctx.db
+        .query("scores")
+        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
+        .collect();
+      const amendmentRows = await ctx.db
+        .query("scoreAmendments")
+        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
+        .collect();
+
+      const scorerByRequirementId = new Map<string, Array<{
+        scorerName: string;
+        scorerDepartmentName: string;
+        score: 0 | 1;
+        comment: string;
+        enteredAt: number;
+      }>>();
+      for (const row of scorerRows) {
+        const current = scorerByRequirementId.get(row.requirementId) ?? [];
+        current.push({
+          scorerName: resolveScorerDisplayName({
+            enteredByUserId: row.enteredByUserId,
+            enteredByDisplayName: row.enteredByDisplayName,
+            displayNameByUserId: scorerDisplayNamesByUserId,
+          }),
+          scorerDepartmentName: row.scorerDepartmentName ?? "No department snapshot",
+          score: row.score,
+          comment: row.comment ?? "",
+          enteredAt: row.enteredAt,
+        });
+        scorerByRequirementId.set(row.requirementId, current);
+      }
+
+      const vendorByRequirementId = new Map(vendorRows.map((row) => [row.requirementId, row]));
+      const amendmentsByRequirementId = new Map<string, Array<{
+        originalScore: 0 | 1;
+        newScore: 0 | 1;
+        originalComment: string;
+        newComment: string;
+        amendedByDisplayName: string;
+        amendedAt: number;
+        reason: string;
+      }>>();
+      for (const row of amendmentRows) {
+        const current = amendmentsByRequirementId.get(row.requirementId) ?? [];
+        current.push({
+          originalScore: row.originalScore,
+          newScore: row.newScore,
+          originalComment: row.originalComment ?? "",
+          newComment: row.newComment ?? "",
+          amendedByDisplayName: row.amendedByDisplayName,
+          amendedAt: row.amendedAt,
+          reason: row.reason,
+        });
+        amendmentsByRequirementId.set(row.requirementId, current);
+      }
+
+      return {
+        vendorId: vendor.vendorId,
+        vendorName: vendor.vendorName,
+        vendorUserId: vendor.vendorUserId as string,
+        vendorContactName: vendor.vendorContactName,
+        scorerByRequirementId,
+        vendorByRequirementId,
+        amendmentsByRequirementId,
+      };
+    }));
+
+    const rows = requirementRows.map((requirement) => {
+      const cells = vendorComparison.map((vendor) => {
+        const scorerDetails = (vendor.scorerByRequirementId.get(requirement.requirementId) ?? [])
+          .sort((a, b) => a.scorerName.localeCompare(b.scorerName) || a.enteredAt - b.enteredAt);
+        const scorerScoredCount = scorerDetails.length;
+        const scorerAverage = scorerScoredCount > 0
+          ? scorerDetails.reduce((sum, item) => sum + item.score, 0) / scorerScoredCount
+          : null;
+
+        const vendorAnswer = vendor.vendorByRequirementId.get(requirement.requirementId);
+        const amendmentHistory = (vendor.amendmentsByRequirementId.get(requirement.requirementId) ?? [])
+          .sort((a, b) => b.amendedAt - a.amendedAt);
+
+        return {
+          vendorUserId: vendor.vendorUserId,
+          scorerAverage,
+          scorerScoredCount,
+          totalScorers,
+          scorerDetails,
+          vendorScore: vendorAnswer?.score ?? null,
+          vendorComment: vendorAnswer?.comment ?? "",
+          vendorEnteredAt: vendorAnswer?.enteredAt ?? null,
+          vendorIsAmended: Boolean(vendorAnswer?.amendedAt || vendorAnswer?.amendedByDisplayName || vendorAnswer?.amendmentReason),
+          vendorAmendedByDisplayName: vendorAnswer?.amendedByDisplayName ?? null,
+          vendorAmendedAt: vendorAnswer?.amendedAt ?? null,
+          vendorAmendmentReason: vendorAnswer?.amendmentReason ?? null,
+          amendmentHistory,
+        };
+      });
+
+      return {
+        requirementId: requirement.requirementId,
+        text: requirement.text,
+        type: requirement.type,
+        priority: requirement.priority,
+        status: requirement.status,
+        cells,
+      };
+    });
+
+    const totalsByVendor = vendorComparison.map((vendor) => {
+      let scorerRequirementsTotal = 0;
+      let scorerNfrTotal = 0;
+      let vendorRequirementsTotal = 0;
+      let vendorNfrTotal = 0;
+
+      for (const requirement of rows) {
+        if (requirement.status === "withdrawn" || requirement.priority === 0) {
+          continue;
+        }
+
+        const cell = requirement.cells.find((item) => item.vendorUserId === vendor.vendorUserId);
+        if (!cell) {
+          continue;
+        }
+
+        if (typeof cell.scorerAverage === "number") {
+          const weighted = requirement.priority * cell.scorerAverage;
+          if (requirement.type === "nfr") {
+            scorerNfrTotal += weighted;
+          } else {
+            scorerRequirementsTotal += weighted;
+          }
+        }
+
+        if (typeof cell.vendorScore === "number") {
+          const weighted = requirement.priority * cell.vendorScore;
+          if (requirement.type === "nfr") {
+            vendorNfrTotal += weighted;
+          } else {
+            vendorRequirementsTotal += weighted;
+          }
+        }
+      }
+
+      return {
+        vendorUserId: vendor.vendorUserId,
+        scorer: {
+          requirements: scorerRequirementsTotal,
+          nfr: scorerNfrTotal,
+          combined: scorerRequirementsTotal + scorerNfrTotal,
+        },
+        vendor: {
+          requirements: vendorRequirementsTotal,
+          nfr: vendorNfrTotal,
+          combined: vendorRequirementsTotal + vendorNfrTotal,
+        },
+      };
+    });
+
+    const scorerBestCombined = totalsByVendor.reduce((max, row) => Math.max(max, row.scorer.combined), Number.NEGATIVE_INFINITY);
+    const vendorBestCombined = totalsByVendor.reduce((max, row) => Math.max(max, row.vendor.combined), Number.NEGATIVE_INFINITY);
+
+    return {
+      projectId: args.projectId,
+      vendors: vendorComparison.map((vendor) => ({
+        vendorId: vendor.vendorId,
+        vendorName: vendor.vendorName,
+        vendorUserId: vendor.vendorUserId,
+        vendorContactName: vendor.vendorContactName,
+      })),
+      rows,
+      totalsByVendor,
+      scorerBestVendorUserIds: totalsByVendor.filter((row) => row.scorer.combined === scorerBestCombined).map((row) => row.vendorUserId),
+      vendorBestVendorUserIds: totalsByVendor.filter((row) => row.vendor.combined === vendorBestCombined).map((row) => row.vendorUserId),
     };
   },
 });

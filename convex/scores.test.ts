@@ -2,12 +2,347 @@
 
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
+import { v } from "convex/values";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { mutation } from "./_generated/server";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
+const seedRequirementComparisonFixture = mutation({
+  args: {
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+
+    const departments = await ctx.db
+      .query("workspaceDepartments")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .collect();
+    const defaultDepartment = departments[0] ?? null;
+
+    const northwindMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("role"), "vendor"))
+      .filter((q: any) => q.eq(q.field("userId"), "northwind-vendor"))
+      .first();
+
+    if (!northwindMembership?.vendorId) {
+      throw new Error("Northwind vendor membership is required for this fixture");
+    }
+
+    const existingProjectVendors = await ctx.db
+      .query("projectVendors")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .collect();
+
+    if (!existingProjectVendors.some((row: any) => row.vendorId === northwindMembership.vendorId)) {
+      await ctx.db.insert("projectVendors", {
+        companyId: args.companyId,
+        projectId: args.projectId,
+        vendorId: northwindMembership.vendorId,
+        createdAt: now,
+      });
+    }
+
+    const southwindVendorId = await ctx.db.insert("vendorOrganizations", {
+      companyId: args.companyId,
+      name: "Southwind Systems",
+      contactEmail: "contact@southwind.example",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+      createdByUserId: "beta-admin",
+    });
+
+    await ctx.db.insert("companyMembers", {
+      companyId: args.companyId,
+      userId: "southwind-vendor",
+      email: "vendor@southwind.example",
+      displayName: "Southwind Contact",
+      role: "vendor",
+      isActive: true,
+      createdAt: now,
+      vendorId: southwindVendorId,
+    });
+
+    await ctx.db.insert("projectVendors", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      vendorId: southwindVendorId,
+      createdAt: now,
+    });
+
+    const scorerTwoMembership = await ctx.db
+      .query("companyMembers")
+      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
+      .filter((q: any) => q.eq(q.field("userId"), "beta-scorer-2"))
+      .first();
+
+    if (!scorerTwoMembership) {
+      await ctx.db.insert("companyMembers", {
+        companyId: args.companyId,
+        userId: "beta-scorer-2",
+        email: "scorer2@beta.example",
+        displayName: "Green Test2",
+        role: "company-scorer",
+        isActive: true,
+        createdAt: now,
+        departmentId: defaultDepartment?._id,
+      });
+    }
+
+    const scorerOneProjectMembership = await ctx.db
+      .query("projectMembers")
+      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
+      .filter((q: any) => q.eq(q.field("userId"), "beta-scorer"))
+      .first();
+    if (!scorerOneProjectMembership) {
+      await ctx.db.insert("projectMembers", {
+        companyId: args.companyId,
+        projectId: args.projectId,
+        userId: "beta-scorer",
+        role: "company-scorer",
+        displayName: "Green Test1",
+        isActive: true,
+        createdAt: now,
+        departmentId: defaultDepartment?._id,
+        departmentName: defaultDepartment?.name,
+      });
+    }
+
+    await ctx.db.insert("projectMembers", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      userId: "beta-scorer-2",
+      role: "company-scorer",
+      displayName: "Green Test2",
+      isActive: true,
+      createdAt: now,
+      departmentId: defaultDepartment?._id,
+      departmentName: defaultDepartment?.name,
+    });
+
+    await ctx.db.insert("requirements", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      requirementId: "CMP-REQ-001",
+      text: "Core requirement",
+      type: "user-story",
+      priority: 9,
+      status: "active",
+      createdAt: now,
+    });
+    await ctx.db.insert("requirements", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      requirementId: "CMP-NFR-001",
+      text: "Latency nfr",
+      type: "nfr",
+      priority: 3,
+      status: "active",
+      createdAt: now,
+    });
+    await ctx.db.insert("requirements", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      requirementId: "CMP-REQ-000",
+      text: "Out of scope item",
+      type: "user-story",
+      priority: 0,
+      status: "active",
+      createdAt: now,
+    });
+    await ctx.db.insert("requirements", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      requirementId: "CMP-NFR-999",
+      text: "Withdrawn nfr",
+      type: "nfr",
+      priority: 9,
+      status: "withdrawn",
+      createdAt: now,
+    });
+
+    const insertVendorScore = async (payload: {
+      vendorUserId: string;
+      requirementId: string;
+      score: 0 | 1;
+      comment: string;
+      amended?: boolean;
+    }) => {
+      await ctx.db.insert("scores", {
+        companyId: args.companyId,
+        projectId: args.projectId,
+        vendorUserId: payload.vendorUserId,
+        requirementId: payload.requirementId,
+        score: payload.score,
+        comment: payload.comment,
+        enteredBy: payload.vendorUserId,
+        enteredAt: now,
+        amendedByUserId: payload.amended ? "beta-admin" : undefined,
+        amendedByDisplayName: payload.amended ? "Beta Admin" : undefined,
+        amendedAt: payload.amended ? now : undefined,
+        amendmentReason: payload.amended ? "Manual correction" : undefined,
+      });
+    };
+
+    await insertVendorScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-REQ-001", score: 1, comment: "Northwind req" });
+    await insertVendorScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-NFR-001", score: 1, comment: "Northwind nfr", amended: true });
+    await insertVendorScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-REQ-000", score: 1, comment: "Northwind oos" });
+    await insertVendorScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-NFR-999", score: 1, comment: "Northwind withdrawn" });
+
+    await insertVendorScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-REQ-001", score: 0, comment: "Southwind req" });
+    await insertVendorScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-NFR-001", score: 1, comment: "Southwind nfr" });
+    await insertVendorScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-REQ-000", score: 1, comment: "Southwind oos" });
+    await insertVendorScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-NFR-999", score: 1, comment: "Southwind withdrawn" });
+
+    await ctx.db.insert("scoreAmendments", {
+      companyId: args.companyId,
+      projectId: args.projectId,
+      vendorUserId: "northwind-vendor",
+      requirementId: "CMP-NFR-001",
+      originalScore: 0,
+      newScore: 1,
+      originalComment: "Initial",
+      newComment: "Corrected",
+      amendedByUserId: "beta-admin",
+      amendedByDisplayName: "Beta Admin",
+      reason: "Manual correction",
+      amendedAt: now,
+    });
+
+    const insertScorerScore = async (payload: {
+      vendorUserId: string;
+      requirementId: string;
+      scorerUserId: string;
+      scorerName: string;
+      score: 0 | 1;
+      comment: string;
+    }) => {
+      await ctx.db.insert("scorerScores", {
+        companyId: args.companyId,
+        projectId: args.projectId,
+        vendorUserId: payload.vendorUserId,
+        scorerScopeKey: `individual:${payload.scorerUserId}`,
+        scorerScopeLabel: payload.scorerName,
+        scorerScopeType: "individual",
+        requirementId: payload.requirementId,
+        score: payload.score,
+        comment: payload.comment,
+        enteredByUserId: payload.scorerUserId,
+        enteredByDisplayName: payload.scorerName,
+        scorerDepartmentId: defaultDepartment?._id,
+        scorerDepartmentName: defaultDepartment?.name ?? "Operations",
+        enteredAt: now,
+        updatedAt: now,
+      });
+    };
+
+    await insertScorerScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-REQ-001", scorerUserId: "beta-scorer", scorerName: "workos_user_fake_1", score: 1, comment: "Met" });
+    await insertScorerScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-REQ-001", scorerUserId: "beta-scorer-2", scorerName: "Green Test2", score: 0, comment: "Partly" });
+    await insertScorerScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-NFR-001", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 1, comment: "Good" });
+    await insertScorerScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-REQ-000", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 1, comment: "Ignored" });
+    await insertScorerScore({ vendorUserId: "northwind-vendor", requirementId: "CMP-NFR-999", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 1, comment: "Withdrawn" });
+
+    await insertScorerScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-REQ-001", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 0, comment: "Not met" });
+    await insertScorerScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-REQ-001", scorerUserId: "beta-scorer-2", scorerName: "Green Test2", score: 0, comment: "Still not met" });
+    await insertScorerScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-REQ-000", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 1, comment: "Ignored" });
+    await insertScorerScore({ vendorUserId: "southwind-vendor", requirementId: "CMP-NFR-999", scorerUserId: "beta-scorer", scorerName: "Green Test1", score: 1, comment: "Withdrawn" });
+  },
+});
+
 describe("Phase 5 score audit trail", () => {
+  test("requirement comparison rejects scorers and vendors at the server", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+
+    await expect(
+      scorer.query((api as any).scores.getProjectRequirementComparison, { projectId: seeded.projectBId }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+
+    await expect(
+      vendor.query((api as any).scores.getProjectRequirementComparison, { projectId: seeded.projectBId }),
+    ).rejects.toThrow("Only consultants and company admins can review vendor responses");
+  });
+
+  test("requirement comparison returns correct averages, weighted totals, exclusions, and mode-specific values", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health",
+      companyBName: "Beta Logistics",
+      projectAName: "HR Platform",
+      projectBName: "Supply Chain",
+    });
+
+    await t.mutation(seedRequirementComparisonFixture as any, {
+      companyId: seeded.companyBId,
+      projectId: seeded.projectBId,
+    });
+
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const comparison = await admin.query((api as any).scores.getProjectRequirementComparison, {
+      projectId: seeded.projectBId,
+    });
+
+    const northwind = comparison.vendors.find((vendor: any) => vendor.vendorUserId === "northwind-vendor");
+    const southwind = comparison.vendors.find((vendor: any) => vendor.vendorUserId === "southwind-vendor");
+    expect(northwind).toBeTruthy();
+    expect(southwind).toBeTruthy();
+
+    const reqRow = comparison.rows.find((row: any) => row.requirementId === "CMP-REQ-001");
+    const nfrRow = comparison.rows.find((row: any) => row.requirementId === "CMP-NFR-001");
+    expect(reqRow).toBeTruthy();
+    expect(nfrRow).toBeTruthy();
+
+    const northwindReqCell = reqRow.cells.find((cell: any) => cell.vendorUserId === "northwind-vendor");
+    expect(northwindReqCell.scorerAverage).toBe(0.5);
+    expect(northwindReqCell.scorerScoredCount).toBe(2);
+    expect(northwindReqCell.totalScorers).toBe(2);
+    expect(northwindReqCell.vendorScore).toBe(1);
+
+    const northwindNfrCell = nfrRow.cells.find((cell: any) => cell.vendorUserId === "northwind-vendor");
+    expect(northwindNfrCell.vendorScore).toBe(1);
+    expect(northwindNfrCell.vendorIsAmended).toBe(true);
+
+    const northwindTotals = comparison.totalsByVendor.find((row: any) => row.vendorUserId === "northwind-vendor");
+    const southwindTotals = comparison.totalsByVendor.find((row: any) => row.vendorUserId === "southwind-vendor");
+
+    // Hand-checked scorer totals: (REQ p9 * 0.5) + (NFR p3 * 1) = 7.5
+    expect(northwindTotals.scorer.requirements).toBe(4.5);
+    expect(northwindTotals.scorer.nfr).toBe(3);
+    expect(northwindTotals.scorer.combined).toBe(7.5);
+
+    // Hand-checked vendor totals: (REQ p9 * 1) + (NFR p3 * 1) = 12
+    expect(northwindTotals.vendor.requirements).toBe(9);
+    expect(northwindTotals.vendor.nfr).toBe(3);
+    expect(northwindTotals.vendor.combined).toBe(12);
+
+    // Out-of-scope (priority 0) and withdrawn rows are present but excluded from totals
+    expect(southwindTotals.scorer.combined).toBe(0);
+    expect(southwindTotals.vendor.combined).toBe(3);
+
+    // Mode switch changes values (scorer average vs vendor self-score)
+    expect(northwindTotals.scorer.combined).not.toBe(northwindTotals.vendor.combined);
+    expect(comparison.scorerBestVendorUserIds).toContain("northwind-vendor");
+    expect(comparison.vendorBestVendorUserIds).toContain("northwind-vendor");
+
+    // Display names are resolved from membership records, not ID-like scorer labels
+    expect(northwindReqCell.scorerDetails.some((entry: any) => entry.scorerName === "Beta Scorer")).toBe(true);
+    expect(northwindReqCell.scorerDetails.some((entry: any) => entry.scorerName === "workos_user_fake_1")).toBe(false);
+  });
+
   test("a scorer can submit a score and the audit trail records who entered it and when", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
