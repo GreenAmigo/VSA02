@@ -16,6 +16,27 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("legacy vendor project memberships do not grant project or requirement access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await expect(vendor.query(api.access.getProject, { projectId: seeded.projectBId })).resolves.toBeTruthy();
+    await expect(vendor.query(api.access.listProjectRequirements, { projectId: seeded.projectBId })).resolves.toBeTruthy();
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.delete(assignment._id);
+    });
+    await expect(vendor.query(api.access.getProject, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+    await expect(vendor.query(api.access.listProjectRequirements, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+    const projects = await vendor.query(api.access.listDashboardProjects, { companyId: seeded.companyBId });
+    expect(projects).toHaveLength(0);
+  });
+
   test("scoring summary counts assigned vendor organisations with active contacts", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

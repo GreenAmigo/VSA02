@@ -2,7 +2,7 @@ import { query, mutation, action, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { getProjectVendors } from "./projectVendors";
+import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -782,7 +782,9 @@ async function getAccessibleProjectIdsForUser(
     .collect();
 
   for (const membership of directMemberships) {
-    allowedProjectIds.add(membership.projectId);
+    if (membership.role !== "vendor") {
+      allowedProjectIds.add(membership.projectId);
+    }
   }
 
   const vendorMemberships = await ctx.db
@@ -809,7 +811,11 @@ async function getAccessibleProjectIdsForUser(
       .collect();
 
     for (const assignment of vendorAssignments) {
-      allowedProjectIds.add(assignment.projectId);
+      const project = await ctx.db.get(assignment.projectId);
+      if (project && project.companyId === companyId &&
+          findProjectVendorByUserId(await getProjectVendors(ctx, project), vendorMembership.userId)) {
+        allowedProjectIds.add(assignment.projectId);
+      }
     }
   }
 
@@ -834,7 +840,9 @@ async function getAccessibleProjectIdsForUser(
       .collect();
 
     for (const membership of departmentProjectMemberships) {
-      allowedProjectIds.add(membership.projectId);
+      if (membership.role !== "vendor") {
+        allowedProjectIds.add(membership.projectId);
+      }
     }
 
     if (departmentProjectMemberships.length === 0) {
@@ -1153,10 +1161,6 @@ export async function canViewRequirements(
     return { allowed: true, visibility: "scorer" as const };
   }
 
-  if (projectMembership && projectMembership.role === "vendor") {
-    return { allowed: true, visibility: "vendor" as const };
-  }
-
   const vendorCompanyMembership = await ctx.db
     .query("companyMembers")
     .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
@@ -1170,14 +1174,9 @@ export async function canViewRequirements(
     .first();
 
   if (vendorCompanyMembership && vendorCompanyMembership.vendorId) {
-    const vendorAssignment = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("projectId"), projectId))
-      .filter((q: any) => q.eq(q.field("vendorId"), vendorCompanyMembership.vendorId))
-      .first();
+    const vendorAssignment = findProjectVendorByUserId(await getProjectVendors(ctx, project), vendorCompanyMembership.userId);
 
-    if (vendorAssignment) {
+    if (vendorAssignment && vendorAssignment.vendorId === vendorCompanyMembership.vendorId) {
       return { allowed: true, visibility: "vendor" as const };
     }
   }
