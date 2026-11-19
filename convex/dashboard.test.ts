@@ -63,6 +63,18 @@ describe("Phase 7 dashboard totals", () => {
       comment: "Self-score",
     });
 
+    await t.run(async (ctx) => {
+      const legacyMember = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor"))
+        .unique();
+      if (!legacyMember) throw new Error("Missing test membership");
+      await ctx.db.delete(legacyMember._id);
+      await ctx.db.insert("projectMembers", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "unassigned-vendor",
+        role: "vendor", displayName: "Unassigned vendor", isActive: true, createdAt: Date.now(),
+      });
+    });
+
     const dashboard = await scorer.query(api.dashboard.getProjectDashboard, {
       projectId: seeded.projectBId,
     });

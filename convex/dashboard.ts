@@ -1,5 +1,6 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { getProjectVendors } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -80,15 +81,11 @@ export const getProjectDashboard = query({
       .withIndex("by_project_requirement", (q) => q.eq("projectId", args.projectId))
       .collect();
 
-    const vendors = await ctx.db
-      .query("projectMembers")
-      .withIndex("by_project_user", (q) => q.eq("projectId", args.projectId))
-      .filter((q: any) => q.eq(q.field("role"), "vendor"))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .collect();
+    const vendors = (await getProjectVendors(ctx, project)).filter((vendor) => vendor.primaryContact !== null);
 
     const rows = vendors.map((vendor) => {
-      const vendorScores = scores.filter((entry) => entry.vendorUserId === vendor.userId);
+      const vendorUserId = vendor.primaryContact!.userId;
+      const vendorScores = scores.filter((entry) => entry.vendorUserId === vendorUserId);
       const userStoryTotal = vendorScores
         .filter((entry) => {
           const requirement = requirements.find((item) => item.requirementId === entry.requirementId);
@@ -121,8 +118,8 @@ export const getProjectDashboard = query({
       const total = userStoryTotal + nfrTotal - unmetCount;
 
       return {
-        vendorUserId: vendor.userId,
-        vendorName: vendor.displayName,
+        vendorUserId,
+        vendorName: vendor.vendorName,
         userStoryTotal,
         nfrTotal,
         total,
