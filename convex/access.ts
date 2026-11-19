@@ -2,6 +2,7 @@ import { query, mutation, action, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { getProjectVendors } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -1013,22 +1014,9 @@ export const listWorkspaceScoringSummary = query({
       : allProjects;
 
     const rows = await Promise.all(scopedProjects.map(async (project) => {
-      const assignments = await ctx.db
-        .query("projectVendors")
-        .filter((q: any) => q.eq(q.field("projectId"), project._id))
-        .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-        .collect();
-
-      const vendors = await Promise.all(assignments.map(async (assignment) => {
-        const contacts = await ctx.db
-          .query("companyMembers")
-          .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-          .filter((q: any) => q.eq(q.field("role"), "vendor"))
-          .filter((q: any) => q.eq(q.field("isActive"), true))
-          .filter((q: any) => q.eq(q.field("vendorId"), assignment.vendorId))
-          .collect();
-
-        const selectedContact = contacts.sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+      const projectVendors = await getProjectVendors(ctx, project);
+      const vendors = await Promise.all(projectVendors.map(async (vendor) => {
+        const selectedContact = vendor.primaryContact;
         if (!selectedContact) {
           return null;
         }

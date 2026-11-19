@@ -16,6 +16,38 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("scoring summary counts assigned vendor organisations with active contacts", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await t.run(async (ctx) => {
+      const member = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
+      if (!member) throw new Error("Missing test membership");
+      await ctx.db.delete(member._id);
+      await ctx.db.insert("projectDeadlines", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor",
+        targetUserId: "northwind-vendor", dueAt: Date.now(), status: "submitted",
+        submittedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
+      });
+    });
+    const summary = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
+    expect(summary.find((row) => row.projectId === seeded.projectBId))
+      .toMatchObject({ totalVendors: 1, submittedVendors: 1 });
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact) throw new Error("Missing test contact");
+      await ctx.db.patch(contact._id, { isActive: false });
+    });
+    const afterDeactivation = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
+    expect(afterDeactivation.find((row) => row.projectId === seeded.projectBId))
+      .toMatchObject({ totalVendors: 0, submittedVendors: 0 });
+  });
+
   test("a user can only see companies and projects they belong to", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
