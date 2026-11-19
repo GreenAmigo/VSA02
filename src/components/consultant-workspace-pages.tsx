@@ -9,6 +9,7 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { ConsultantHomeHeader } from "./consultant-home-header";
+import { parseRequirementFileWithIssues } from "../lib/projectRequirements";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -628,6 +629,9 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                     type="button"
                     onClick={() => {
                       const targetVendorUserId = vendor.vendorUserId as string;
+                      if (targetVendorUserId === selectedVendorUserId) {
+                        return;
+                      }
                       setSelectedVendorUserId(targetVendorUserId);
                       setEditingRequirementId("");
                       setNotice(null);
@@ -640,7 +644,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                     }}
                     className={`rounded-xl border px-3 py-2 text-sm ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/60 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"}`}
                   >
-                    View scores
+                    {selectedVendorUserId === vendor.vendorUserId ? "Viewing scores" : "View scores"}
                   </button>
                 ) : (
                   <p className="text-xs text-slate-400">Add an active vendor contact to view and amend scores.</p>
@@ -1391,16 +1395,6 @@ function WorkspaceBreadcrumbs({ items }: { items: WorkspaceBreadcrumb[] }) {
   );
 }
 
-function shouldShowPreviewDebugLine() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const environment = process.env.NEXT_PUBLIC_APP_ENVIRONMENT?.trim().toLowerCase() ?? "";
-  const hostname = window.location.hostname.toLowerCase();
-  return environment === "preview" || hostname.includes("preview") || hostname.includes("vspreview");
-}
-
 function WorkspaceShell({
   workspace,
   activeTab,
@@ -1455,7 +1449,7 @@ function WorkspaceShell({
   const projectNavHref = isVendorShell
     ? `/workspaces/${workspace.slug}`
     : `/workspaces/${workspace.slug}/projects`;
-  const canSeeProjectsLink = role === "consultant" || role === "company-admin" || role === "company-scorer" || role === "vendor";
+  const canSeeProjectsLink = role === "consultant" || role === "company-admin" || role === "company-scorer";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -1530,9 +1524,6 @@ function WorkspaceShell({
               <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
                 My workspaces
               </Link>
-              <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
-                My projects
-              </Link>
             </div>
           </div>
         ) : null}
@@ -1572,11 +1563,12 @@ function WorkspaceShell({
                   Projects
                 </Link>
               ) : null}
-              {shouldShowPreviewDebugLine() ? (
-                <p className="text-[10px] text-slate-400">
-                  Preview debug: role {serverRole ?? roleLabel}, lookup {serverLookupId ?? "unknown"}
-                </p>
-              ) : null}
+              <Link
+                href="/api/auth/logout"
+                className="mt-1 inline-flex w-fit rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 hover:border-slate-500"
+              >
+                Sign out
+              </Link>
             </div>
           </div>
         </header>
@@ -2737,9 +2729,15 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     | undefined;
   const addProjectScorer = useMutation(api.admin.addProjectScorer);
   const addProjectVendor = useMutation(api.admin.addProjectVendor);
+  const previewRequirementImport = useMutation((api as any).requirements.previewRequirementImport);
+  const applyRequirementImport = useMutation((api as any).requirements.applyRequirementImport);
   const [scorerDraft, setScorerDraft] = useState({ selectedUserId: "" });
   const [selectedProgressDepartmentId, setSelectedProgressDepartmentId] = useState("");
   const [vendorDraft, setVendorDraft] = useState({ selectedVendorId: "" });
+  const [importFileName, setImportFileName] = useState("");
+  const [importRows, setImportRows] = useState<Array<{ id: string; text: string; type: "user-story" | "nfr"; priority: 9 | 3 | 1 | 0; status?: "active" | "withdrawn" }>>([]);
+  const [importIssues, setImportIssues] = useState<Array<{ requirementId?: string; reason: string }>>([]);
+  const [importSummary, setImportSummary] = useState<{ added: number; updated: number; withdrawn: number; total: number } | null>(null);
   const [notice, setNotice] = useState<{ kind: "error" | "success"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const scoringProgress = useQuery(
@@ -2846,6 +2844,78 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       setNotice({ kind: "success", message: "Vendor added to the project." });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to assign vendor." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleImportFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+    setImportSummary(null);
+    try {
+      const parsed = await parseRequirementFileWithIssues(file);
+      setImportFileName(file.name);
+      setImportRows(parsed.rows);
+      setImportIssues(parsed.issues);
+
+      if (parsed.rows.length === 0) {
+        setNotice({ kind: "error", message: "No valid requirement rows were found in the selected file." });
+        return;
+      }
+
+      const preview = await previewRequirementImport({
+        projectId: projectId as any,
+        rows: parsed.rows,
+      });
+      setImportSummary(preview.summary ?? null);
+      if (parsed.issues.length > 0) {
+        setNotice({ kind: "error", message: `${parsed.issues.length} rows were skipped. Review the issues before applying import.` });
+      } else {
+        setNotice({ kind: "success", message: "File parsed successfully. Review the summary and apply import when ready." });
+      }
+    } catch (error) {
+      setImportRows([]);
+      setImportIssues([]);
+      setImportSummary(null);
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to parse this file." });
+    } finally {
+      setBusy(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleApplyRequirementImport = async () => {
+    if (importRows.length === 0) {
+      setNotice({ kind: "error", message: "Upload a requirements file before applying import." });
+      return;
+    }
+
+    const confirmed = window.confirm("Apply this requirement import now? Existing rows are updated by Requirement ID and missing rows are marked withdrawn.");
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    setNotice(null);
+    try {
+      const result = await applyRequirementImport({
+        projectId: projectId as any,
+        rows: importRows,
+        confirm: true,
+      });
+      setNotice({
+        kind: "success",
+        message: `Requirements imported: ${result.summary.added} added, ${result.summary.updated} updated, ${result.summary.withdrawn} withdrawn, ${result.rejected.length} rejected.`,
+      });
+      setImportSummary(result.summary ?? null);
+    } catch (error) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "Unable to apply requirement import." });
     } finally {
       setBusy(false);
     }
@@ -3053,8 +3123,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-white">Requirements</h3>
-          <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400">
-            Open import / requirements
+          <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+            Open workspace summary
           </Link>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
@@ -3071,7 +3141,70 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <p className="mt-2 text-base font-medium text-slate-200">{canManageProjects ? "Allowed" : "Blocked"}</p>
           </div>
         </div>
-        <p className="mt-3 text-sm text-slate-400">The canonical import flow is in the project requirements screen and remains restricted to consultants and company admins.</p>
+
+        {canManageProjects ? (
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-100">Import requirements for this project</p>
+              {importFileName ? <StatusPill label={importFileName} className="border-slate-700 bg-slate-900 text-slate-200" /> : null}
+            </div>
+            <p className="text-xs text-slate-400">Upload CSV or XLSX. Preview runs first, then apply when the summary looks correct.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                Choose file
+                <input
+                  type="file"
+                  accept=".csv,.xlsx"
+                  onChange={(event) => void handleImportFileSelected(event)}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleApplyRequirementImport()}
+                disabled={busy || importRows.length === 0}
+                className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Apply import
+              </button>
+            </div>
+
+            {importSummary ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-300">
+                  <p className="text-slate-400">Rows parsed</p>
+                  <p className="mt-1 text-base font-semibold text-white">{importSummary.total}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
+                  <p className="text-emerald-200/80">Added</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.added}</p>
+                </div>
+                <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
+                  <p className="text-sky-200/80">Updated</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.updated}</p>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+                  <p className="text-amber-200/80">Will be withdrawn</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {importIssues.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                <p className="font-medium">Rows skipped during parsing</p>
+                <div className="mt-1 space-y-1">
+                  {importIssues.slice(0, 5).map((issue, index) => (
+                    <p key={`${issue.requirementId ?? "unknown"}-${index}`}>{issue.reason}</p>
+                  ))}
+                  {importIssues.length > 5 ? <p>+ {importIssues.length - 5} more issue(s)</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-400">Only consultants and company admins can import requirements.</p>
+        )}
       </section>
       ) : null}
 
