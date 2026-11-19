@@ -2,6 +2,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 
 export type ProjectVendor = {
+  assignmentId: Id<"projectVendors">;
+  assignedAt: number;
   vendorId: Id<"vendorOrganizations">;
   vendorName: string;
   contacts: Doc<"companyMembers">[];
@@ -34,6 +36,8 @@ export async function getProjectVendors(
     const contacts = contactsByVendor.get(assignment.vendorId) ?? [];
     contacts.sort((a, b) => a.createdAt - b.createdAt);
     vendors.push({
+      assignmentId: assignment._id,
+      assignedAt: assignment.createdAt,
       vendorId: organization._id,
       vendorName: organization.name,
       contacts,
