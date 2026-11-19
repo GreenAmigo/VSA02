@@ -125,6 +125,31 @@ function parsePriorityValue(value: string | number | null | undefined): 9 | 3 | 
   return null;
 }
 
+function looksLikeIdentityValue(value: string | null | undefined) {
+  const normalized = `${value ?? ""}`.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("|")
+    || normalized.includes("@")
+    || /^workos[_-]/i.test(normalized)
+    || /^user[_:-]/i.test(normalized)
+    || /^org[_:-]/i.test(normalized)
+    || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(normalized)
+  );
+}
+
+function safeDisplayName(value: string | null | undefined, fallback = "Scorer") {
+  const normalized = `${value ?? ""}`.trim();
+  if (!normalized || looksLikeIdentityValue(normalized)) {
+    return fallback;
+  }
+
+  return normalized;
+}
+
 function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
   if (params.deadlineLocked) {
     return "CLOSED";
@@ -901,7 +926,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                           <div className="mt-2 space-y-2 text-xs text-slate-300">
                             {row.scorerScores.map((entry) => (
                               <div key={`${row.requirementId}-${entry.scopeKey}-${entry.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
-                                <p className="text-slate-100">{entry.enteredByDisplayName} score: {entry.score}</p>
+                                <p className="text-slate-100">{safeDisplayName(entry.enteredByDisplayName)} score: {entry.score}</p>
                                 <p className="text-slate-400">Date: {new Date(entry.enteredAt).toLocaleDateString()}</p>
                                 <p className="mt-1 text-slate-300">Comment: {entry.comment || "(no comment)"}</p>
                               </div>
@@ -1368,7 +1393,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                         <div className="space-y-2">
                           {row.peerScores.map((peer) => (
                             <div key={`${row.requirementId}-${peer.scopeKey}-${peer.enteredAt}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
-                              <p className="text-slate-100">{peer.enteredByDisplayName} score: {peer.score}</p>
+                              <p className="text-slate-100">{safeDisplayName(peer.enteredByDisplayName)} score: {peer.score}</p>
                               <p className="text-slate-400">Date: {new Date(peer.enteredAt).toLocaleDateString()}</p>
                               <p className="mt-1 text-slate-300">Comment: {peer.comment || "(no comment)"}</p>
                             </div>
@@ -2168,7 +2193,8 @@ export function ConsultantActivityLogPage() {
               {logs.map((log) => (
                 <div key={log._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   {(() => {
-                    const actorName = (log.actorLabel ?? "").split("<")[0]?.split("(")[0]?.trim();
+                    const actorNameRaw = (log.actorLabel ?? "").split("<")[0]?.split("(")[0]?.trim();
+                    const actorName = actorNameRaw && !looksLikeIdentityValue(actorNameRaw) ? actorNameRaw : "";
                     const rawDetails = log.detailLines && log.detailLines.length > 0 ? log.detailLines : [log.details];
                     const dedupedDetails = Array.from(new Set(rawDetails.map((line) => line.trim()).filter((line) => line.length > 0)));
                     const summaryLine = (log.summary ?? log.details).trim();

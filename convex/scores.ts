@@ -86,6 +86,59 @@ function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: stri
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
 }
 
+function looksLikeIdentityValue(value: string | null | undefined) {
+  const normalized = `${value ?? ""}`.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes("|")
+    || normalized.includes("@")
+    || /^workos[_-]/i.test(normalized)
+    || /^user[_:-]/i.test(normalized)
+    || /^org[_:-]/i.test(normalized)
+    || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(normalized)
+  );
+}
+
+async function getProjectMemberDisplayNameByUserId(ctx: any, projectId: string) {
+  const rows = await ctx.db
+    .query("projectMembers")
+    .filter((q: any) => q.eq(q.field("projectId"), projectId))
+    .collect();
+
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.userId || !row.displayName || looksLikeIdentityValue(row.displayName)) {
+      continue;
+    }
+    map.set(row.userId, row.displayName.trim());
+  }
+
+  return map;
+}
+
+function resolveScorerDisplayName(params: {
+  enteredByUserId?: string | null;
+  enteredByDisplayName?: string | null;
+  displayNameByUserId: Map<string, string>;
+}) {
+  if (params.enteredByUserId) {
+    const memberName = params.displayNameByUserId.get(params.enteredByUserId);
+    if (memberName) {
+      return memberName;
+    }
+  }
+
+  const fallback = params.enteredByDisplayName?.trim();
+  if (!fallback || looksLikeIdentityValue(fallback)) {
+    return "Scorer";
+  }
+
+  return fallback;
+}
+
 async function getProjectDeadlineForVendor(ctx: any, projectId: string, vendorUserId: string) {
   return await ctx.db
     .query("projectDeadlines")
@@ -271,7 +324,7 @@ async function resolveVendorReviewContext(ctx: any, project: any, vendorUserId: 
   };
 }
 
-async function assertScorerAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; userIds: string[]; displayName: string }> {
+async function assertScorerAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; userIds: string[] }> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     throw new Error("Not signed in");
@@ -283,9 +336,7 @@ async function assertScorerAccess(ctx: any, projectId: string): Promise<{ projec
   }
 
   const userIds = getIdentityUserIds(identity);
-  const displayName = identity.name?.trim() || identity.email?.trim() || identity.tokenIdentifier || "Scorer";
-
-  return { project, identity, userIds, displayName };
+  return { project, identity, userIds };
 }
 
 async function resolveScorerScopes(ctx: any, project: any, identity: any, userIds: string[]) {
@@ -1018,6 +1069,7 @@ export const getVendorResponseReview = query({
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
     const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
 
     const requirements = await ctx.db
       .query("requirements")
@@ -1053,7 +1105,11 @@ export const getVendorResponseReview = query({
         scopeLabel: scorerRow.scorerScopeLabel,
         score: scorerRow.score,
         comment: scorerRow.comment ?? "",
-        enteredByDisplayName: scorerRow.enteredByDisplayName,
+        enteredByDisplayName: resolveScorerDisplayName({
+          enteredByUserId: scorerRow.enteredByUserId,
+          enteredByDisplayName: scorerRow.enteredByDisplayName,
+          displayNameByUserId: scorerDisplayNamesByUserId,
+        }),
         scorerDepartmentName: scorerRow.scorerDepartmentName ?? "No department snapshot",
         enteredAt: scorerRow.enteredAt,
       });
@@ -1173,6 +1229,7 @@ export const getScorerVendorGrid = query({
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
     const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
+    const scorerDisplayNamesByUserId = await getProjectMemberDisplayNameByUserId(ctx, args.projectId);
     const vendorRows = await listAssignedVendorUsers(ctx, project);
     const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
 
@@ -1227,7 +1284,11 @@ export const getScorerVendorGrid = query({
           scopeLabel: row.scorerScopeLabel,
           score: row.score,
           comment: row.comment ?? "",
-          enteredByDisplayName: row.enteredByDisplayName,
+          enteredByDisplayName: resolveScorerDisplayName({
+            enteredByUserId: row.enteredByUserId,
+            enteredByDisplayName: row.enteredByDisplayName,
+            displayNameByUserId: scorerDisplayNamesByUserId,
+          }),
           enteredAt: row.enteredAt,
         });
         peerScoresByRequirementId.set(row.requirementId, current);
@@ -1275,7 +1336,7 @@ export const getScorerVendorGrid = query({
 export const saveScorerScore = mutation({
   args: scorerScoreValidator,
   handler: async (ctx, args) => {
-    const { project, identity, userIds, displayName } = await assertScorerAccess(ctx, args.projectId);
+    const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
     const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
@@ -1322,7 +1383,7 @@ export const saveScorerScore = mutation({
       score: args.score,
       comment: args.comment?.trim() || undefined,
       enteredByUserId: existing?.enteredByUserId ?? scorerUserId,
-      enteredByDisplayName: existing?.enteredByDisplayName ?? displayName,
+      enteredByDisplayName: existing?.enteredByDisplayName ?? activeScope.label,
       scorerDepartmentId: existing?.scorerDepartmentId ?? departmentSnapshot.scorerDepartmentId,
       scorerDepartmentName: existing?.scorerDepartmentName ?? departmentSnapshot.scorerDepartmentName,
       enteredAt: existing?.enteredAt ?? now,
@@ -1399,12 +1460,13 @@ export const saveScorerScore = mutation({
 export const completeScorerVendor = mutation({
   args: completeScorerVendorValidator,
   handler: async (ctx, args) => {
-    const { project, identity, userIds, displayName } = await assertScorerAccess(ctx, args.projectId);
+    const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
     const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
     const vendorRows = await listAssignedVendorUsers(ctx, project);
-    if (!vendorRows.some((row) => row.vendorUserId === args.vendorUserId)) {
+    const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
+    if (!selectedVendor) {
       throw new Error("Vendor is not assigned to this project");
     }
 
@@ -1436,7 +1498,7 @@ export const completeScorerVendor = mutation({
       lastScoredAt: completion?.lastScoredAt ?? now,
       completedAt: now,
       updatedByUserId: scorerUserId,
-      updatedByDisplayName: displayName,
+      updatedByDisplayName: activeScope.label,
       scorerDepartmentId: departmentSnapshot.scorerDepartmentId,
       scorerDepartmentName: departmentSnapshot.scorerDepartmentName,
       updatedAt: now,
@@ -1452,7 +1514,7 @@ export const completeScorerVendor = mutation({
       actorUserId: completionPayload.updatedByUserId,
       actorEmail: identity.email ?? undefined,
       action: "scorer_vendor_complete",
-      details: `Marked scorer scoring complete for ${args.vendorUserId} (${activeScope.label}).`,
+      details: `Marked scorer scoring complete for ${selectedVendor.vendorName} (${activeScope.label}).`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
@@ -1472,7 +1534,7 @@ export const completeScorerVendor = mutation({
 export const reopenScorerVendor = mutation({
   args: reopenScorerVendorValidator,
   handler: async (ctx, args) => {
-    const { project, identity, userIds, displayName } = await assertScorerAccess(ctx, args.projectId);
+    const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
     const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
@@ -1481,7 +1543,8 @@ export const reopenScorerVendor = mutation({
     }
 
     const vendorRows = await listAssignedVendorUsers(ctx, project);
-    if (!vendorRows.some((row) => row.vendorUserId === args.vendorUserId)) {
+    const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
+    if (!selectedVendor) {
       throw new Error("Vendor is not assigned to this project");
     }
 
@@ -1500,7 +1563,7 @@ export const reopenScorerVendor = mutation({
       status: "in-progress",
       completedAt: undefined,
       updatedByUserId: scorerUserId,
-      updatedByDisplayName: displayName,
+      updatedByDisplayName: activeScope.label,
       updatedAt: now,
     });
 
@@ -1508,7 +1571,7 @@ export const reopenScorerVendor = mutation({
       actorUserId: scorerUserId,
       actorEmail: identity.email ?? undefined,
       action: "scorer_vendor_reopen",
-      details: `Reopened scorer completion for ${args.vendorUserId} (${activeScope.label}).`,
+      details: `Reopened scorer completion for ${selectedVendor.vendorName} (${activeScope.label}).`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
