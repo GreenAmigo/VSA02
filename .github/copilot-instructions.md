@@ -6,6 +6,7 @@
 - Access rules are enforced on the server only; never rely on the UI to hide data.
 - Queries must never write to the database; data migrations and clean-ups are separate internal mutations that I run explicitly.
 - Before saying a task is done: run npx tsc --noEmit (zero errors) and the full test suite, show me both outputs, commit and push, and give me the commit code.
+- Before saying a task is done: run both npx tsc --noEmit and npx convex dev --once (or the equivalent Convex typecheck), show me both outputs, then run the full test suite, commit and push, and give me the commit code.
 - Tests must call the same Convex functions the pages use.
 - When giving me arguments to run in the Convex dashboard, use clearly marked placeholders like <REAL_WORKOS_USER_ID>, never realistic-looking example values.
 - Never put deploy keys or secrets in code, chat or .env.local.

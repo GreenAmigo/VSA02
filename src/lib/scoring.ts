@@ -1,4 +1,4 @@
-import { assertValidScoreValue } from "./security.ts";
+import { assertValidScoreValue } from "./security";
 
 export type ScoreValue = 0 | 1;
 export type RequirementType = "user-story" | "nfr";

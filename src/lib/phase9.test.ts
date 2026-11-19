@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 
-import { assertValidPriorityValue, assertValidScoreValue } from "./security.ts";
-import { buildRequirementImportPlan, type RequirementRecord } from "./projectRequirements.ts";
-import { calculateVendorTotals } from "./scoring.ts";
+import { assertValidPriorityValue, assertValidScoreValue } from "./security";
+import { buildRequirementImportPlan, type RequirementRecord } from "./projectRequirements";
+import { calculateVendorTotals } from "./scoring";
 
 describe("Phase 9 hardening", () => {
   test("sample vendor totals match the hand-worked dashboard figures", () => {

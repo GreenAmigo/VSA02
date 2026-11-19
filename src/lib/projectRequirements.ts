@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 
-import { assertValidPriorityValue } from "./security.ts";
+import { assertValidPriorityValue } from "./security";
 
 export type RequirementPriority = 9 | 3 | 1 | 0;
 export type RequirementType = "user-story" | "nfr";
