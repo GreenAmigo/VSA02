@@ -71,6 +71,31 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("project roster uses vendor assignments and limits vendors to their own contact", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const roster = await admin.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+    expect(roster.filter((row) => row.role === "vendor")).toHaveLength(1);
+    expect(roster.find((row) => row.role === "vendor")?.displayName).toBe("Northwind Labs");
+    const vendorRoster = await vendor.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+    expect(vendorRoster).toHaveLength(1);
+    expect(vendorRoster[0].userId).toBe("northwind-vendor");
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.delete(assignment._id);
+    });
+    await expect(vendor.query(api.admin.listProjectMembers, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+    const unassignedRoster = await admin.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+    expect(unassignedRoster.filter((row) => row.role === "vendor")).toHaveLength(0);
+  });
+
   test("company and project creation creates the expected company and project membership records", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

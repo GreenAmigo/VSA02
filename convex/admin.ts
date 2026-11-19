@@ -1,6 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { getProjectVendors } from "./projectVendors";
 
 const companyAdminRole = "company-admin" as const;
 const consultantRole = "vs-consultant" as const;
@@ -3100,93 +3101,34 @@ export const listProjectMembers = query({
       ))
       .collect();
 
-    const hasProjectAccess = projectMemberships.length > 0;
-    let hasVendorProjectAssignment = false;
-    for (const vendorMembership of vendorMemberships) {
-      if (!vendorMembership.vendorId) {
-        continue;
-      }
-
-      const vendorProjectAssignment = await ctx.db
-        .query("projectVendors")
-        .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-        .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-        .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
-        .first();
-
-      if (vendorProjectAssignment) {
-        hasVendorProjectAssignment = true;
-        break;
-      }
-    }
+    const hasProjectAccess = projectMemberships.some((member) => member.companyId === project.companyId && member.role !== "vendor");
+    const projectVendors = await getProjectVendors(ctx, project);
+    const matchingVendorContacts = projectVendors.flatMap((vendor) =>
+      vendor.contacts
+        .filter((contact) => vendorMemberships.some((membership) => membership._id === contact._id))
+        .map((contact) => ({ vendor, contact })),
+    );
+    const hasVendorProjectAssignment = matchingVendorContacts.length > 0;
 
     if (!hasCompanyAdminAccess && !hasProjectAccess && !hasVendorProjectAssignment && !consultantAccess) {
       throw new Error("Project access denied");
     }
 
     if (vendorMemberships.length > 0 && !hasCompanyAdminAccess && !consultantAccess) {
-      const matchingProjectMembership = projectMemberships.find((member) => member.role === "vendor") ?? null;
-      if (!matchingProjectMembership && !hasVendorProjectAssignment) {
+      if (!hasVendorProjectAssignment) {
         throw new Error("Project access denied");
       }
 
-      const allowedVendorMemberships = await ctx.db
-        .query("projectMembers")
-        .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
-        .filter((q: any) => q.eq(q.field("role"), "vendor"))
-        .filter((q: any) => q.eq(q.field("isActive"), true))
-        .filter((q: any) => q.or(
-          ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-          ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
-        ))
-        .collect();
-
-      const activeDirectVendorRows = allowedVendorMemberships.filter((entry) => !isLegacyGeneratedUserId(entry.userId));
-      if (activeDirectVendorRows.length > 0) {
-        return activeDirectVendorRows;
-      }
-
-      const allowedVendorIds = new Set(
-        vendorMemberships
-          .map((membership) => membership.vendorId)
-          .filter((vendorId): vendorId is Id<"vendorOrganizations"> => Boolean(vendorId)),
-      );
-
-      const assignedVendorRows = (await Promise.all(
-        Array.from(allowedVendorIds).map(async (vendorId) => {
-          const assignment = await ctx.db
-            .query("projectVendors")
-            .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-            .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-            .filter((q: any) => q.eq(q.field("vendorId"), vendorId))
-            .first();
-
-          if (!assignment) {
-            return null;
-          }
-
-          const vendor = await ctx.db.get(vendorId);
-          return {
-            _id: assignment._id,
-            projectId: assignment.projectId,
-            userId: vendorId,
-            role: "vendor",
-            displayName: vendor?.name ?? "Vendor organization",
-            isActive: true,
-            createdAt: assignment.createdAt,
-          };
-        }),
-      )).filter((row): row is {
-        _id: Id<"projectVendors">;
-        projectId: Id<"projects">;
-        userId: Id<"vendorOrganizations">;
-        role: "vendor";
-        displayName: string;
-        isActive: true;
-        createdAt: number;
-      } => row !== null);
-
-      return assignedVendorRows;
+      return matchingVendorContacts.map(({ vendor, contact }) => ({
+        _id: vendor.assignmentId,
+        companyId: project.companyId,
+        projectId: args.projectId,
+        userId: contact.userId,
+        role: "vendor" as const,
+        displayName: contact.displayName,
+        isActive: true,
+        createdAt: vendor.assignedAt,
+      }));
     }
 
     const members = await ctx.db
@@ -3194,25 +3136,16 @@ export const listProjectMembers = query({
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
 
-    const visibleMembers = members.filter((member) => !isLegacyGeneratedUserId(member.userId));
+    const visibleMembers = members.filter((member) => member.role !== "vendor" && !isLegacyGeneratedUserId(member.userId));
 
-    const projectVendorAssignments = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .collect();
-
-    const vendorRows = await Promise.all(projectVendorAssignments.map(async (assignment) => {
-      const vendor = await ctx.db.get(assignment.vendorId);
-      return {
-        _id: assignment._id,
-        projectId: assignment.projectId,
-        userId: assignment.vendorId,
-        role: "vendor",
-        displayName: vendor?.name ?? "Vendor organization",
-        isActive: true,
-        createdAt: assignment.createdAt,
-      };
+    const vendorRows = projectVendors.map((vendor) => ({
+      _id: vendor.assignmentId,
+      projectId: args.projectId,
+      userId: vendor.vendorId,
+      role: "vendor" as const,
+      displayName: vendor.vendorName,
+      isActive: true,
+      createdAt: vendor.assignedAt,
     }));
 
     return [...visibleMembers, ...vendorRows];
