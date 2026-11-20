@@ -29,6 +29,7 @@ describe("Phase 2 access checks", () => {
     });
     await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "northwind-vendor", email: "vendor@northwind.example" });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    expect((await vendor.query(api.access.getCurrentUserAccess, {})).vendorId).toBeNull();
     expect(await vendor.query(api.access.getWorkspaceVendorContact, { companyId: seeded.companyAId }))
       .toMatchObject({ vendorId: org.vendorId, vendorName: "Acme supplier" });
     expect(await vendor.query(api.access.getWorkspaceVendorContact, { companyId: seeded.companyBId }))

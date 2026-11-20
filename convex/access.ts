@@ -907,7 +907,7 @@ export const getCurrentUserAccess = query({
     const consultantRecord = await getActiveConsultantRecord(ctx, identity);
     const isConsultant = Boolean(consultantRecord);
     const primaryMembership = memberships[0] ?? null;
-    const vendorMembership = memberships.find((member) => member.role === "vendor") ?? null;
+    const vendorMemberships = memberships.filter((member) => member.role === "vendor");
     const role = isConsultant ? "vs-consultant" : primaryMembership?.role ?? null;
 
     const visibleCompanyIds = new Set<Id<"companies">>();
@@ -931,8 +931,8 @@ export const getCurrentUserAccess = query({
       subject: identity.subject,
       role,
       isConsultant,
-      isVendor: Boolean(vendorMembership),
-      vendorId: vendorMembership?.vendorId ?? null,
+      isVendor: vendorMemberships.length > 0,
+      vendorId: vendorMemberships.length === 1 ? vendorMemberships[0].vendorId ?? null : null,
       companyIds,
     };
   },
