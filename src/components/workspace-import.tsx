@@ -23,7 +23,7 @@ export function WorkspaceImportForm() {
   const [mode, setMode] = useState<ImportMode>("json");
   const [jsonText, setJsonText] = useState(emptyJsonTemplate);
   const [csvText, setCsvText] = useState(emptyCsvTemplate);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleDownloadTemplate = () => {
@@ -58,10 +58,10 @@ export function WorkspaceImportForm() {
       }
 
       const result = await importWorkspaceBundle({ workspaces: payload as any });
-      setStatus(`Imported ${result.importedCount} workspace(s) into Convex.`);
+      setStatus({ kind: "success", message: `Imported ${result.importedCount} workspace(s) into Convex.` });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import failed";
-      setStatus(message);
+      setStatus({ kind: "error", message });
     } finally {
       setIsSubmitting(false);
     }
@@ -175,6 +175,7 @@ export function WorkspaceImportForm() {
               ? "Paste a JSON array matching the workspace schema and import it directly into Convex."
               : "Paste Excel rows directly into the CSV box; the app converts them into the JSON workspace structure before importing."}
           </p>
+          <p className="mt-2 text-sm text-amber-200">Bundles containing scores cannot be imported yet. Remove the scores before importing.</p>
 
           <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-slate-300">
             <pre>{isJsonMode ? "[]" : "workspace_id,workspace_slug,workspace_name,project_name\n"}</pre>
@@ -229,8 +230,8 @@ export function WorkspaceImportForm() {
           </div>
 
           {status ? (
-            <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
-              {status}
+            <div role={status.kind === "error" ? "alert" : "status"} className={`mt-4 rounded-xl border p-3 text-sm ${status.kind === "error" ? "border-rose-500/30 bg-rose-500/10 text-rose-100" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"}`}>
+              {status.message}
             </div>
           ) : null}
         </div>

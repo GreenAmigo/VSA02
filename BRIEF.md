@@ -218,6 +218,7 @@ Phase 6b vendor-answer rule (planned):
 - Replacement contacts continue the organisation's existing answers.
 - After contact links are repaired, a separate development/preview-only backfill assigns organisations to existing answers. Unmatched answers and duplicate answers for the same organisation and requirement are reported for review, never guessed or included in totals.
 - Before backfill, show a clear migration-required message rather than assigning old answers using current contact links. Dashboard and comparison totals must never double-count.
+- The legacy workspace-bundle import must reject bundles containing scores until score import can identify the organisation and actual project requirement safely.
 
 ### Phase 1 status update
 - Consultant access and preview-only workspace visibility are in place and enforced on the server.

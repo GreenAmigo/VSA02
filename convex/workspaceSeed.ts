@@ -101,6 +101,10 @@ export const importWorkspaceBundle = mutation({
     }
     await assertConsultantAccess(ctx, identity);
 
+    if (workspaces.some((workspace) => workspace.scores.length > 0)) {
+      throw new Error("This import cannot safely match scores to vendor organisations and requirements. Remove the scores before importing; score import needs to be redesigned.");
+    }
+
     const actorUserId = identity?.tokenIdentifier ?? "seed-import";
     const actorEmail = identity?.email ?? undefined;
     const actorName = identity?.name ?? "Seed importer";
@@ -243,32 +247,6 @@ export const importWorkspaceBundle = mutation({
               priority: toRequirementPriority(requirement.priority),
               status: toRequirementStatus(requirement.status),
               createdAt: Date.now(),
-            });
-          }
-        }
-
-        for (const score of workspace.scores) {
-          const projectMatches = workspace.projects.find((item) => item.name === project.name);
-          if (!projectMatches) continue;
-
-          const existingScore = await ctx.db
-            .query("scores")
-            .filter((q) => q.eq(q.field("companyId"), company._id))
-            .filter((q) => q.eq(q.field("projectId"), projectDoc._id))
-            .filter((q) => q.eq(q.field("enteredBy"), score.scorer))
-            .filter((q) => q.eq(q.field("vendorUserId"), score.vendor))
-            .first();
-
-          if (!existingScore) {
-            await ctx.db.insert("scores", {
-              companyId: company._id,
-              projectId: projectDoc._id,
-              vendorUserId: score.vendor,
-              requirementId: `${project.id}-summary`,
-              score: score.score >= 50 ? 1 : 0,
-              comment: `${score.scorer} scored ${score.vendor}`,
-              enteredBy: score.scorer,
-              enteredAt: Date.now(),
             });
           }
         }

@@ -1045,8 +1045,11 @@ describe("admin console actions", () => {
         name: "Seed Importer",
       });
 
-      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspace] });
-      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [{ ...workspace, slug: "acme-health-v2" }] });
+      await expect(seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspace] }))
+        .rejects.toThrow("cannot safely match scores");
+      const workspaceWithoutScores = { ...workspace, scores: [] };
+      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [workspaceWithoutScores] });
+      await seededIdentity.mutation(api.workspaceSeed.importWorkspaceBundle, { workspaces: [{ ...workspaceWithoutScores, slug: "acme-health-v2" }] });
 
       const companies: ReadonlyArray<{ name: string; _id: string }> = await seededIdentity.query(api.access.listAccessibleCompanies, {});
       const acmeCompanies = companies.filter((company: { name: string; _id: string }) => company.name === "Acme Health");
