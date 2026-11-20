@@ -1522,32 +1522,31 @@ export const listVendorContacts = query({
       return [] as const;
     }
 
-    const memberRows = await ctx.db
+    const memberRows = ctx.db
       .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
-      .collect();
+      .withIndex("by_company_role", (q) => q.eq("companyId", args.companyId).eq("role", "vendor"));
+    const activeContacts = [];
+    for await (const member of memberRows) {
+      if (member.vendorId !== args.vendorId) continue;
+      activeContacts.push({
+        id: member._id,
+        userId: member.userId,
+        name: member.displayName,
+        email: member.email ?? "",
+        role: member.role,
+        status: member.isActive ? "active" : "deactivated",
+        source: "member",
+      });
+    }
 
-    const activeContacts = memberRows.map((member) => ({
-      id: member._id,
-      userId: member.userId,
-      name: member.displayName,
-      email: member.email ?? "",
-      role: member.role,
-      status: member.isActive ? "active" : "deactivated",
-      source: "member",
-    }));
-
-    const invites = await ctx.db
+    const invites = ctx.db
       .query("workspaceInvites")
-      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
-      .collect();
-
-    const inviteEntries = invites
-      .filter((invite) => invite.status !== "active")
-      .filter((invite) => !activeContacts.some((contact) => contact.email.trim().toLowerCase() === invite.email.trim().toLowerCase()))
-      .map((invite) => ({
+      .withIndex("by_company_status", (q) => q.eq("companyId", args.companyId));
+    const inviteEntries = [];
+    for await (const invite of invites) {
+      if (invite.vendorId !== args.vendorId || invite.role !== "vendor" || invite.status === "active"
+        || activeContacts.some((contact) => contact.email.trim().toLowerCase() === invite.email.trim().toLowerCase())) continue;
+      inviteEntries.push({
         id: invite._id,
         userId: null,
         name: invite.displayName,
@@ -1555,7 +1554,8 @@ export const listVendorContacts = query({
         role: invite.role,
         status: invite.status,
         source: "invite",
-      }));
+      });
+    }
 
     return [...activeContacts, ...inviteEntries].sort((a, b) => a.name.localeCompare(b.name));
   },
