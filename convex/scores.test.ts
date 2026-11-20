@@ -230,6 +230,7 @@ const seedRequirementComparisonFixture = mutation({
         companyId: args.companyId,
         projectId: args.projectId,
         vendorUserId: payload.vendorUserId,
+        vendorId: payload.vendorUserId === "northwind-vendor" ? northwindMembership.vendorId : southwindVendorId,
         scorerScopeKey: `individual:${payload.scorerUserId}`,
         scorerScopeLabel: payload.scorerName,
         scorerScopeType: "individual",
@@ -328,6 +329,11 @@ describe("Phase 5 score audit trail", () => {
     const initial = await oldContact.mutation(api.scores.saveVendorAnswer, {
       projectId: seeded.projectBId, requirementId: "REQ", score: 1, comment: "Original",
     });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    await scorer.mutation(api.scores.saveScorerScore, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1, comment: "Company score",
+    });
+    await scorer.mutation(api.scores.completeScorerVendor, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
     await admin.mutation(api.admin.deactivateVendorContact, {
       companyId: seeded.companyBId, vendorId, userId: "northwind-vendor",
     });
@@ -340,6 +346,11 @@ describe("Phase 5 score audit trail", () => {
     const replacement = t.withIdentity({ tokenIdentifier: "replacement", email: "replacement@example.com" });
     const page = await replacement.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
     expect(page.rows.find((row) => row.requirementId === "REQ")).toMatchObject({ score: 1, comment: "Original" });
+    const grid = await scorer.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "replacement" });
+    expect(grid.isCompleted).toBe(true);
+    expect(grid.rows.find((row: { requirementId: string }) => row.requirementId === "REQ")).toMatchObject({ ownScore: 1, ownComment: "Company score", vendorScore: 1 });
+    const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.rows[0].cells.find((cell) => cell.vendorUserId === "replacement")?.scorerAverage).toBe(1);
     await replacement.mutation(api.scores.saveVendorAnswer, {
       projectId: seeded.projectBId, requirementId: "REQ", score: 0, comment: "Updated",
     });

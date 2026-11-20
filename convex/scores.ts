@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, personDisplayName, recordedPersonName, resolveScorerDisplayName } from "./scorerNames";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers, requireWritableVendorAnswer } from "./vendorAnswers";
+import { assertWritableScorerHistory, getVendorScorerCompletion, getVendorScorerHistory, scorerHistoryNeedsMigration } from "./scorerHistory";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -866,6 +867,7 @@ export const getProjectScoringProgress = query({
 
     const vendors = await listAssignedVendorUsers(ctx, project);
     const vendorRows = vendors.map((vendor) => ({
+      vendorId: vendor.vendorId,
       vendorUserId: vendor.vendorUserId as string,
       vendorName: vendor.vendorName,
       vendorContactName: vendor.vendorContactName,
@@ -914,15 +916,9 @@ export const getProjectScoringProgress = query({
       const scorerVendorRows: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }> = [];
 
       for (const vendor of vendorRows) {
-        const completion = await ctx.db
-          .query("scorerCompletions")
-          .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId).eq("scorerScopeKey", scopeKey))
-          .first();
-
-        const scorerScoreRows = await ctx.db
-          .query("scorerScores")
-          .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId).eq("scorerScopeKey", scopeKey))
-          .collect();
+        const { completion } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, scopeKey);
+        const scorerScoreRows = (await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId)).scores
+          .filter((row) => row.scorerScopeKey === scopeKey);
         for (const scorerScoreRow of scorerScoreRows) {
           if (scorerScoreRow.scorerDepartmentName) {
             snapshotDepartments.add(scorerScoreRow.scorerDepartmentName);
@@ -1055,10 +1051,7 @@ export const getVendorResponseReview = query({
     const scoreByRequirementId = getUnconflictedVendorAnswers(answerState, vendorContext.vendorId);
     const scoreRows = [...scoreByRequirementId.values()];
 
-    const scorerRows = await ctx.db
-      .query("scorerScores")
-      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
-      .collect();
+    const scorerRows = (await getVendorScorerHistory(ctx, args.projectId, vendorContext.vendorId)).scores;
     const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
     const scorerRowsByRequirementId = new Map<string, Array<{
       scopeKey: string;
@@ -1180,10 +1173,8 @@ export const getProjectRequirementComparison = query({
 
     const answerState = await getProjectVendorAnswerState(ctx, project);
     const vendorComparison = await Promise.all(vendors.map(async (vendor) => {
-      const scorerRows = await ctx.db
-        .query("scorerScores")
-        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
-        .collect();
+      const scorerState = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
+      const scorerRows = scorerState.scores;
       const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
       const vendorRows = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
       const amendmentRows = await ctx.db
@@ -1251,6 +1242,7 @@ export const getProjectRequirementComparison = query({
         vendorUserId: vendor.vendorUserId as string,
         vendorContactName: vendor.vendorContactName,
         scorerByRequirementId,
+        scorerHasConflicts: scorerState.hasConflicts,
         vendorByRequirementId,
         amendmentsByRequirementId,
         amendmentNames,
@@ -1357,6 +1349,8 @@ export const getProjectRequirementComparison = query({
       migrationRequired: answerState.migrationRequired,
       hasVendorAnswerConflicts: [...answerState.grouped.values()].some((requirements) =>
         [...requirements.values()].some((answers) => answers.length > 1)),
+      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
+      hasScorerHistoryConflicts: vendorComparison.some((vendor) => vendor.scorerHasConflicts),
       vendors: vendorComparison.map((vendor) => ({
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
@@ -1381,16 +1375,11 @@ export const getScorerWorkboard = query({
     const vendorRows = await listAssignedVendorUsers(ctx, project);
 
     const rows = await Promise.all(vendorRows.map(async (vendor) => {
-      const scorerScores = await ctx.db
-        .query("scorerScores")
-        .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string).eq("scorerScopeKey", activeScope.scopeKey))
-        .collect();
+      const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
+      const scorerScores = scorerHistory.scores.filter((row) => row.scorerScopeKey === activeScope.scopeKey);
       const answeredCount = new Set(scorerScores.map((row) => row.requirementId)).size;
 
-      const completion = await ctx.db
-        .query("scorerCompletions")
-        .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string).eq("scorerScopeKey", activeScope.scopeKey))
-        .first();
+      const { completion, hasConflict } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, activeScope.scopeKey);
 
       const status = completion?.status === "completed"
         ? "completed"
@@ -1403,6 +1392,7 @@ export const getScorerWorkboard = query({
         vendorName: vendor.vendorName,
         vendorUserId: vendor.vendorUserId as string,
         vendorContactName: vendor.vendorContactName,
+        hasScorerHistoryConflicts: scorerHistory.hasConflicts || hasConflict,
         answeredCount,
         totalRequirements: requirements.length,
         status,
@@ -1413,6 +1403,7 @@ export const getScorerWorkboard = query({
 
     return {
       projectId: args.projectId,
+      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
       scorerCanSeePeerScores: Boolean(project.scorerCanSeePeerScores),
       scorerScopes: scopes.map((scope) => ({ scopeKey: scope.scopeKey, scopeType: scope.scopeType, label: scope.label })),
       activeScopeKey: activeScope.scopeKey,
@@ -1436,16 +1427,11 @@ export const getScorerVendorGrid = query({
     }
 
     const requirements = await listScoringRequirements(ctx, project);
-    const ownScores = await ctx.db
-      .query("scorerScores")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .collect();
+    const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, selectedVendor.vendorId);
+    const ownScores = scorerHistory.scores.filter((row) => row.scorerScopeKey === activeScope.scopeKey);
     const ownScoreByRequirementId = new Map(ownScores.map((row) => [row.requirementId, row]));
 
-    const completion = await ctx.db
-      .query("scorerCompletions")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .first();
+    const { completion, hasConflict } = await getVendorScorerCompletion(ctx, args.projectId, selectedVendor.vendorId, activeScope.scopeKey);
     const isCompleted = completion?.status === "completed";
 
     const answerState = await getProjectVendorAnswerState(ctx, project);
@@ -1463,10 +1449,7 @@ export const getScorerVendorGrid = query({
     }>>();
 
     if (project.scorerCanSeePeerScores && isCompleted) {
-      const allScorerScores = await ctx.db
-        .query("scorerScores")
-        .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId))
-        .collect();
+      const allScorerScores = scorerHistory.scores;
       scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, allScorerScores.map((row) => row.enteredByUserId));
 
       for (const row of allScorerScores) {
@@ -1527,6 +1510,8 @@ export const getScorerVendorGrid = query({
       migrationRequired: answerState.migrationRequired,
       hasVendorAnswerConflicts: [...(answerState.grouped.get(selectedVendor.vendorId)?.values() ?? [])]
         .some((answers) => answers.length > 1),
+      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
+      hasScorerHistoryConflicts: scorerHistory.hasConflicts || hasConflict,
       scorerScope: {
         scopeKey: activeScope.scopeKey,
         scopeType: activeScope.scopeType,
@@ -1548,7 +1533,8 @@ export const saveScorerScore = mutation({
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
     const vendorRows = await listAssignedVendorUsers(ctx, project);
-    if (!vendorRows.some((row) => row.vendorUserId === args.vendorUserId)) {
+    const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
+    if (!selectedVendor) {
       throw new Error("Vendor is not assigned to this project");
     }
 
@@ -1569,20 +1555,14 @@ export const saveScorerScore = mutation({
     const now = Date.now();
     const scorerUserId = resolveScorerUserId(activeScope, identity);
     const departmentSnapshot = await getScorerDepartmentSnapshot(ctx, project.companyId, scorerUserId);
-    const existing = await ctx.db
-      .query("scorerScores")
-      .withIndex("by_project_vendor_scope_requirement", (q) =>
-        q.eq("projectId", args.projectId)
-          .eq("vendorUserId", args.vendorUserId)
-          .eq("scorerScopeKey", activeScope.scopeKey)
-          .eq("requirementId", args.requirementId),
-      )
-      .first();
+    const history = await assertWritableScorerHistory(ctx, args.projectId, selectedVendor.vendorId, activeScope.scopeKey);
+    const existing = history.state.grouped.get(activeScope.scopeKey)?.get(args.requirementId)?.[0] ?? null;
 
     const payload = {
       companyId: project.companyId,
       projectId: args.projectId,
-      vendorUserId: args.vendorUserId,
+      vendorUserId: existing?.vendorUserId ?? args.vendorUserId,
+      vendorId: selectedVendor.vendorId,
       scorerScopeKey: activeScope.scopeKey,
       scorerScopeLabel: activeScope.label,
       scorerScopeType: activeScope.scopeType,
@@ -1604,21 +1584,17 @@ export const saveScorerScore = mutation({
     }
 
     const requirements = await listScoringRequirements(ctx, project);
-    const allScopeScores = await ctx.db
-      .query("scorerScores")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .collect();
+    const allScopeScores = (await getVendorScorerHistory(ctx, args.projectId, selectedVendor.vendorId)).scores
+      .filter((row) => row.scorerScopeKey === activeScope.scopeKey);
     const answeredCount = new Set(allScopeScores.map((row) => row.requirementId)).size;
 
-    const completion = await ctx.db
-      .query("scorerCompletions")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .first();
+    const completion = history.completion;
 
     const completionPayload = {
       companyId: project.companyId,
       projectId: args.projectId,
-      vendorUserId: args.vendorUserId,
+      vendorUserId: completion?.vendorUserId ?? args.vendorUserId,
+      vendorId: selectedVendor.vendorId,
       scorerScopeKey: activeScope.scopeKey,
       scorerScopeLabel: activeScope.label,
       scorerScopeType: activeScope.scopeType,
@@ -1678,24 +1654,20 @@ export const completeScorerVendor = mutation({
     }
 
     const requirements = await listScoringRequirements(ctx, project);
-    const scopeScores = await ctx.db
-      .query("scorerScores")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .collect();
+    const history = await assertWritableScorerHistory(ctx, args.projectId, selectedVendor.vendorId, activeScope.scopeKey);
+    const scopeScores = history.state.scores.filter((row) => row.scorerScopeKey === activeScope.scopeKey);
     const answeredCount = new Set(scopeScores.map((row) => row.requirementId)).size;
 
     const now = Date.now();
     const scorerUserId = resolveScorerUserId(activeScope, identity);
     const departmentSnapshot = await getScorerDepartmentSnapshot(ctx, project.companyId, scorerUserId);
-    const completion = await ctx.db
-      .query("scorerCompletions")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .first();
+    const completion = history.completion;
 
     const completionPayload = {
       companyId: project.companyId,
       projectId: args.projectId,
-      vendorUserId: args.vendorUserId,
+      vendorUserId: completion?.vendorUserId ?? args.vendorUserId,
+      vendorId: selectedVendor.vendorId,
       scorerScopeKey: activeScope.scopeKey,
       scorerScopeLabel: activeScope.label,
       scorerScopeType: activeScope.scopeType,
@@ -1755,10 +1727,7 @@ export const reopenScorerVendor = mutation({
       throw new Error("Vendor is not assigned to this project");
     }
 
-    const completion = await ctx.db
-      .query("scorerCompletions")
-      .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId).eq("scorerScopeKey", activeScope.scopeKey))
-      .first();
+    const { completion } = await assertWritableScorerHistory(ctx, args.projectId, selectedVendor.vendorId, activeScope.scopeKey);
 
     if (!completion || completion.status !== "completed") {
       throw new Error("This scorer vendor row is not completed.");
