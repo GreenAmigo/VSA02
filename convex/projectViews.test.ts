@@ -8,6 +8,20 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 6 project view isolation", () => {
+  test("a matching scorer name does not authorize project views", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Scorer" });
+    await expect(outsider.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId }))
+      .rejects.toThrow("Project access denied");
+    await expect(outsider.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Blocked",
+    })).rejects.toThrow("Project access denied");
+  });
+
   test("scorer views show workspace names and a safe fallback for missing names", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
