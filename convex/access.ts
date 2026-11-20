@@ -426,13 +426,14 @@ export const acceptPendingInvitesForUser = internalMutation({
 
     let accepted = 0;
     for (const invite of pendingInvites) {
+      if (invite.status === "active") continue;
       const invitedName = invite.displayName.trim();
       const workosName = args.displayName?.trim();
       const displayName = (invitedName && !invitedName.includes("@") ? invitedName : "")
         || (workosName && !workosName.includes("@") ? workosName : "")
         || targetEmail;
       const inviteNeedsDepartment = invite.role === "company-admin" || invite.role === "company-scorer";
-      const isExpired = invite.status === "invited" && invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
+      const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
       if (invite.cancelledAt || invite.deactivatedAt || isExpired) {
         await ctx.db.patch(invite._id, {
           status: isExpired ? "expired" : invite.cancelledAt ? "cancelled" : "deactivated",
@@ -646,7 +647,11 @@ function requirePreviewOrDevelopment() {
 }
 
 export const repairVendorContactLinks = internalMutation({
-  args: { companyId: v.id("companies"), cursor: v.optional(v.string()) },
+  args: {
+    companyId: v.id("companies"),
+    cursor: v.optional(v.string()),
+    confirmedMappings: v.optional(v.array(v.object({ userId: v.string(), vendorId: v.id("vendorOrganizations") }))),
+  },
   returns: v.object({
     changes: v.array(v.object({
       userId: v.string(),
@@ -654,6 +659,7 @@ export const repairVendorContactLinks = internalMutation({
       previousVendorId: v.union(v.id("vendorOrganizations"), v.null()),
       vendorId: v.id("vendorOrganizations"),
       vendorName: v.string(),
+      source: v.union(v.literal("invitation"), v.literal("confirmed")),
     })),
     unresolved: v.array(v.object({
       userId: v.string(),
@@ -668,6 +674,16 @@ export const repairVendorContactLinks = internalMutation({
       throw new Error("Vendor contact repair is only available in development or preview.");
     }
     if (!await ctx.db.get(args.companyId)) throw new Error("Workspace not found.");
+    const confirmedMappings = new Map<string, Id<"vendorOrganizations">>();
+    for (const mapping of args.confirmedMappings ?? []) {
+      if (confirmedMappings.has(mapping.userId)) throw new Error("A contact was listed more than once in confirmed mappings.");
+      const vendor = await ctx.db.get(mapping.vendorId);
+      if (!vendor || vendor.companyId !== args.companyId) throw new Error("A confirmed organisation is not in this workspace.");
+      const members = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId).eq("userId", mapping.userId)).take(2);
+      if (members.length !== 1 || members[0].role !== "vendor") throw new Error("A confirmed contact does not have exactly one vendor membership.");
+      confirmedMappings.set(mapping.userId, mapping.vendorId);
+    }
     const page = await ctx.db.query("companyMembers")
       .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId))
       .paginate({ numItems: 50, cursor: args.cursor ?? null });
@@ -688,6 +704,20 @@ export const repairVendorContactLinks = internalMutation({
       }
       if (memberCount !== 1) {
         unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Multiple memberships match this contact." });
+        continue;
+      }
+      const confirmedVendorId = confirmedMappings.get(member.userId);
+      if (confirmedVendorId) {
+        const vendor = await ctx.db.get(confirmedVendorId);
+        if (!vendor) throw new Error("Confirmed organisation not found.");
+        if (member.vendorId !== confirmedVendorId) {
+          await ctx.db.patch(member._id, { vendorId: confirmedVendorId });
+          changes.push({
+            userId: member.userId, displayName: member.displayName,
+            previousVendorId: member.vendorId ?? null, vendorId: confirmedVendorId, vendorName: vendor.name,
+            source: "confirmed" as const,
+          });
+        }
         continue;
       }
       const invites = ctx.db.query("workspaceInvites")
@@ -713,11 +743,16 @@ export const repairVendorContactLinks = internalMutation({
         unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Invitation organisation is not in this workspace." });
         continue;
       }
+      if (member.vendorId && member.vendorId !== vendorId) {
+        unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Existing link conflicts with the invitation; a confirmed mapping is required." });
+        continue;
+      }
       if (member.vendorId !== vendorId) {
         await ctx.db.patch(member._id, { vendorId });
         changes.push({
           userId: member.userId, displayName: member.displayName,
           previousVendorId: member.vendorId ?? null, vendorId, vendorName: vendor.name,
+          source: "invitation" as const,
         });
       }
     }

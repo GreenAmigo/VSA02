@@ -34,7 +34,7 @@ describe("Phase 2 access checks", () => {
         const member = await ctx.db.query("companyMembers")
           .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).unique();
         if (!member) throw new Error("Missing contact");
-        await ctx.db.patch(member._id, { vendorId: second.vendorId });
+        await ctx.db.patch(member._id, { vendorId: userId === "repair-contact" ? undefined : second.vendorId });
       });
     }
     await t.run(async (ctx) => {
@@ -49,13 +49,21 @@ describe("Phase 2 access checks", () => {
       process.env.APP_ENVIRONMENT = "preview";
       const result = await t.mutation(internal.access.repairVendorContactLinks, { companyId: seeded.companyBId });
       expect(result.changes).toContainEqual({
-        userId: "repair-contact", displayName: "repair-contact", previousVendorId: second.vendorId,
-        vendorId: first.vendorId, vendorName: "First organisation",
+        userId: "repair-contact", displayName: "repair-contact", previousVendorId: null,
+        vendorId: first.vendorId, vendorName: "First organisation", source: "invitation",
       });
       expect(result.unresolved).toContainEqual(expect.objectContaining({ userId: "ambiguous-contact" }));
       const ambiguous = await t.run((ctx) => ctx.db.query("companyMembers")
         .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "ambiguous-contact")).unique());
       expect(ambiguous?.vendorId).toBe(second.vendorId);
+      const confirmed = await t.mutation(internal.access.repairVendorContactLinks, {
+        companyId: seeded.companyBId,
+        confirmedMappings: [{ userId: "ambiguous-contact", vendorId: first.vendorId }],
+      });
+      expect(confirmed.changes).toContainEqual({
+        userId: "ambiguous-contact", displayName: "ambiguous-contact", previousVendorId: second.vendorId,
+        vendorId: first.vendorId, vendorName: "First organisation", source: "confirmed",
+      });
       process.env.APP_ENVIRONMENT = "production";
       await expect(t.mutation(internal.access.repairVendorContactLinks, { companyId: seeded.companyBId }))
         .rejects.toThrow("only available in development or preview");
@@ -85,22 +93,24 @@ describe("Phase 2 access checks", () => {
         });
       }
     });
-    const user = t.withIdentity({ subject: "contact-user", tokenIdentifier: "contact-user", email: "contact@example.com", emailVerified: true });
-    await user.action(api.access.acceptPendingInvites, {});
-    expect(await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: first.vendorId }))
-      .toEqual([expect.objectContaining({ userId: "contact-user", name: "Invited Contact", status: "active" })]);
-    expect(await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: second.vendorId })).toEqual([]);
-    await t.run(async (ctx) => {
+    const conflictingInvite = await t.run(async (ctx) => {
       const invite = await ctx.db.query("workspaceInvites")
         .withIndex("by_company_email", (q) => q.eq("companyId", seeded.companyBId).eq("email", "contact@example.com")).unique();
       if (!invite) throw new Error("Missing invite");
-      await ctx.db.insert("workspaceInvites", {
+      return await ctx.db.insert("workspaceInvites", {
         companyId: seeded.companyBId, email: invite.email, displayName: invite.displayName, role: "vendor",
-        vendorId: second.vendorId, status: "active", invitedByUserId: "beta-admin",
+        vendorId: second.vendorId, status: "invited", invitedByUserId: "beta-admin",
         invitedAt: Date.now(), expiresAt: Date.now() + 100000,
       });
     });
+    const user = t.withIdentity({ subject: "contact-user", tokenIdentifier: "contact-user", email: "contact@example.com", emailVerified: true });
     await expect(user.action(api.access.acceptPendingInvites, {})).rejects.toThrow("invitations conflict");
+    await t.run((ctx) => ctx.db.patch(conflictingInvite, { status: "cancelled" }));
+    await user.action(api.access.acceptPendingInvites, {});
+    expect(await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: first.vendorId }))
+      .toEqual([expect.objectContaining({ userId: "contact-user", name: "Invited Contact", status: "active" })]);
+    await t.run((ctx) => ctx.db.patch(conflictingInvite, { status: "active" }));
+    await user.action(api.access.acceptPendingInvites, {});
     const firstContacts = await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: first.vendorId });
     expect(firstContacts).toHaveLength(1);
     expect(firstContacts[0].userId).toBe("contact-user");
