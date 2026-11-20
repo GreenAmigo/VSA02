@@ -1394,15 +1394,18 @@ export const getProjectRequirementComparison = query({
 
     const scorerBestCombined = totalsByVendor.reduce((max, row) => Math.max(max, row.scorer.combined), Number.NEGATIVE_INFINITY);
     const vendorBestCombined = totalsByVendor.reduce((max, row) => Math.max(max, row.vendor.combined), Number.NEGATIVE_INFINITY);
+    const hasVendorAnswerConflicts = [...answerState.grouped.values()].some((requirements) =>
+      [...requirements.values()].some((answers) => answers.length > 1));
+    const scorerHistoryMigrationRequired = await scorerHistoryNeedsMigration(ctx, args.projectId);
+    const hasScorerHistoryConflicts = vendorComparison.some((vendor) => vendor.scorerHasConflicts);
 
     return {
       projectId: args.projectId,
       migrationRequired: answerState.migrationRequired,
       amendmentMigrationRequired,
-      hasVendorAnswerConflicts: [...answerState.grouped.values()].some((requirements) =>
-        [...requirements.values()].some((answers) => answers.length > 1)),
-      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
-      hasScorerHistoryConflicts: vendorComparison.some((vendor) => vendor.scorerHasConflicts),
+      hasVendorAnswerConflicts,
+      scorerHistoryMigrationRequired,
+      hasScorerHistoryConflicts,
       vendors: vendorComparison.map((vendor) => ({
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
@@ -1411,8 +1414,12 @@ export const getProjectRequirementComparison = query({
       })),
       rows,
       totalsByVendor,
-      scorerBestVendorUserIds: totalsByVendor.filter((row) => row.scorer.combined === scorerBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
-      vendorBestVendorUserIds: totalsByVendor.filter((row) => row.vendor.combined === vendorBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
+      scorerBestVendorUserIds: scorerHistoryMigrationRequired || hasScorerHistoryConflicts
+        ? []
+        : totalsByVendor.filter((row) => row.scorer.combined === scorerBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
+      vendorBestVendorUserIds: answerState.migrationRequired || hasVendorAnswerConflicts
+        ? []
+        : totalsByVendor.filter((row) => row.vendor.combined === vendorBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
     };
   },
 });

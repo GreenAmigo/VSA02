@@ -790,6 +790,63 @@ describe("Phase 5 score audit trail", () => {
     expect(northwindReqCell.scorerDetails.some((entry: any) => entry.scorerName === "workos_user_fake_1")).toBe(false);
   });
 
+  test("comparison suppresses winners only for the mode with incomplete or conflicting history", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    await t.mutation(seedRequirementComparisonFixture as any, {
+      companyId: seeded.companyBId, projectId: seeded.projectBId,
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const { answerId, scorerId, vendorId } = await t.run(async (ctx) => {
+      const answer = await ctx.db.query("scores")
+        .withIndex("by_project_vendor", (q) => q.eq("projectId", seeded.projectBId).eq("vendorUserId", "northwind-vendor")).first();
+      const scorer = await ctx.db.query("scorerScores")
+        .withIndex("by_project_vendor", (q) => q.eq("projectId", seeded.projectBId).eq("vendorUserId", "northwind-vendor")).first();
+      if (!answer?.vendorId || !scorer?.vendorId) throw new Error("Missing test history");
+      await ctx.db.patch(answer._id, { vendorId: undefined });
+      return { answerId: answer._id, scorerId: scorer._id, vendorId: answer.vendorId };
+    });
+    let comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.migrationRequired).toBe(true);
+    expect(comparison.vendorBestVendorUserIds).toEqual([]);
+    expect(comparison.scorerBestVendorUserIds).toContain("northwind-vendor");
+
+    const duplicateAnswerId = await t.run(async (ctx) => {
+      await ctx.db.patch(answerId, { vendorId });
+      const answer = await ctx.db.get(answerId);
+      if (!answer) throw new Error("Missing test answer");
+      const { _id, _creationTime, ...fields } = answer;
+      return await ctx.db.insert("scores", fields);
+    });
+    comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.hasVendorAnswerConflicts).toBe(true);
+    expect(comparison.vendorBestVendorUserIds).toEqual([]);
+    expect(comparison.scorerBestVendorUserIds).toContain("northwind-vendor");
+
+    await t.run(async (ctx) => {
+      await ctx.db.delete(duplicateAnswerId);
+      await ctx.db.patch(scorerId, { vendorId: undefined });
+    });
+    comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.scorerHistoryMigrationRequired).toBe(true);
+    expect(comparison.scorerBestVendorUserIds).toEqual([]);
+    expect(comparison.vendorBestVendorUserIds).toContain("northwind-vendor");
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(scorerId, { vendorId });
+      const scorer = await ctx.db.get(scorerId);
+      if (!scorer) throw new Error("Missing test scorer score");
+      const { _id, _creationTime, ...fields } = scorer;
+      await ctx.db.insert("scorerScores", fields);
+    });
+    comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.hasScorerHistoryConflicts).toBe(true);
+    expect(comparison.scorerBestVendorUserIds).toEqual([]);
+    expect(comparison.vendorBestVendorUserIds).toContain("northwind-vendor");
+  });
+
   test("a scorer can submit a score and the audit trail records who entered it and when", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
