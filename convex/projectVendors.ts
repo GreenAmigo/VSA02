@@ -86,5 +86,5 @@ export async function resolveProjectVendorContact(
     .withIndex("by_project_vendor", (q) => q.eq("projectId", project._id).eq("vendorId", vendorId))
     .unique();
   if (!assignment || assignment.companyId !== project.companyId) return null;
-  return { member, organization };
+  return { member, organization, assignment };
 }

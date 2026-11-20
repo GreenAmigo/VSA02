@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { getProjectVendors } from "./projectVendors";
+import { findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
@@ -190,6 +190,10 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
+
+  if (identityMatches.some((match) => match.role === "vendor")) {
+    throw new Error("Only company admins or VS Consultants can manage this company");
+  }
 
   const member = identityMatches.find((match) => match.role === companyAdminRole || match.role === consultantRole) ?? null;
   const consultantRow = await getActiveConsultantRow(ctx, userIds);
@@ -3093,6 +3097,21 @@ export const listProjectMembers = query({
       throw new Error("Project not found");
     }
 
+    if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+      const contact = await resolveProjectVendorContact(ctx, project, identity);
+      if (!contact) throw new Error("Project access denied");
+      return [{
+        _id: contact.assignment._id,
+        companyId: project.companyId,
+        projectId: args.projectId,
+        userId: contact.member.userId,
+        role: "vendor" as const,
+        displayName: contact.member.displayName,
+        isActive: true,
+        createdAt: contact.assignment.createdAt,
+      }];
+    }
+
     const userIds = getIdentityUserIds(identity);
     const companyMemberships = await ctx.db
       .query("companyMembers")
@@ -3105,7 +3124,6 @@ export const listProjectMembers = query({
       .collect();
 
     const hasCompanyAdminAccess = companyMemberships.some((member) => member.role === "company-admin");
-    const vendorMemberships = companyMemberships.filter((member) => member.role === "vendor" && Boolean(member.vendorId));
     const consultantAccess = await getActiveConsultantRow(ctx, userIds);
 
     const projectMemberships = await ctx.db
@@ -3119,32 +3137,8 @@ export const listProjectMembers = query({
 
     const hasProjectAccess = projectMemberships.some((member) => member.companyId === project.companyId && member.role !== "vendor");
     const projectVendors = await getProjectVendors(ctx, project);
-    const matchingVendorContacts = projectVendors.flatMap((vendor) =>
-      vendor.contacts
-        .filter((contact) => vendorMemberships.some((membership) => membership._id === contact._id))
-        .map((contact) => ({ vendor, contact })),
-    );
-    const hasVendorProjectAssignment = matchingVendorContacts.length > 0;
-
-    if (!hasCompanyAdminAccess && !hasProjectAccess && !hasVendorProjectAssignment && !consultantAccess) {
+    if (!hasCompanyAdminAccess && !hasProjectAccess && !consultantAccess) {
       throw new Error("Project access denied");
-    }
-
-    if (vendorMemberships.length > 0 && !hasCompanyAdminAccess && !consultantAccess) {
-      if (!hasVendorProjectAssignment) {
-        throw new Error("Project access denied");
-      }
-
-      return matchingVendorContacts.map(({ vendor, contact }) => ({
-        _id: vendor.assignmentId,
-        companyId: project.companyId,
-        projectId: args.projectId,
-        userId: contact.userId,
-        role: "vendor" as const,
-        displayName: contact.displayName,
-        isActive: true,
-        createdAt: vendor.assignedAt,
-      }));
     }
 
     const members = await ctx.db

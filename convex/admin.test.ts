@@ -1121,6 +1121,30 @@ describe("admin console actions", () => {
     });
   });
 
+  test("a vendor's stale admin or scorer rows do not expose activity or project rosters", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyBId, userId: "northwind-vendor", role: "company-admin",
+        displayName: "Stale admin", isActive: true, createdAt: Date.now(),
+      });
+      await ctx.db.insert("projectMembers", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "northwind-vendor",
+        role: "company-scorer", displayName: "Stale scorer", isActive: true, createdAt: Date.now(),
+      });
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await expect(vendor.query(api.admin.listActivityLogs, { companyId: seeded.companyBId }))
+      .rejects.toThrow("Only company admins");
+    const roster = await vendor.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toMatchObject({ userId: "northwind-vendor", role: "vendor" });
+  });
+
   test("only VS Consultants can create, archive, restore, and delete workspaces", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });
