@@ -412,6 +412,34 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Some older company scores and completion records need migration");
     expect(html).toContain("Some company scoring records conflict");
     expect(html).toContain("Older vendor answer change history needs migration");
+    expect(html).not.toContain("bg-emerald-500/15");
+  });
+
+  test.each([
+    [{ scorerHistoryMigrationRequired: true }, false],
+    [{ hasScorerHistoryConflicts: true }, false],
+    [{ migrationRequired: true, hasVendorAnswerConflicts: true }, true],
+    [{}, true],
+  ])("comparison highlights scorer totals only when scorer history is complete (%o)", (flags, showsWinner) => {
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "admin@example.com", role: "company-admin", isConsultant: false });
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => ({
+      ...flags,
+      vendors: [
+        { vendorId: "vendor-1", vendorName: "First vendor", vendorUserId: null, vendorContactName: null },
+        { vendorId: "vendor-2", vendorName: "Second vendor", vendorUserId: null, vendorContactName: null },
+      ],
+      rows: [{
+        requirementId: "REQ", text: "Requirement", type: "user-story", priority: 9, status: "active",
+        cells: [
+          { vendorId: "vendor-1", scorerAverage: 1, scorerScoredCount: 1, totalScorers: 1, vendorScore: 1 },
+          { vendorId: "vendor-2", scorerAverage: 0, scorerScoredCount: 1, totalScorers: 1, vendorScore: 0 },
+        ],
+      }],
+    }));
+    const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
+    expect(html.includes("bg-emerald-500/15")).toBe(showsWinner);
   });
 
   test("vendor responses can be opened when the organisation has no active contact", () => {

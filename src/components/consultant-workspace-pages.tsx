@@ -3323,6 +3323,9 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     };
   });
   const bestComparisonCombined = comparisonTotalsByVendor.reduce((max, row) => Math.max(max, row.combinedTotal), Number.NEGATIVE_INFINITY);
+  const comparisonHasIncompleteHistory = comparisonMode === "scorer"
+    ? requirementComparison?.scorerHistoryMigrationRequired || requirementComparison?.hasScorerHistoryConflicts
+    : requirementComparison?.migrationRequired || requirementComparison?.hasVendorAnswerConflicts;
   const selectedComparisonRow = selectedComparisonCell
     ? (requirementComparison?.rows ?? []).find((row) => row.requirementId === selectedComparisonCell.requirementId) ?? null
     : null;
@@ -3690,7 +3693,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                       <td className="sticky left-0 z-20 border-r border-t border-slate-700 bg-slate-900 px-3 py-2 font-semibold text-white">Totals (weighted)</td>
                       {requirementComparison.vendors.map((vendor) => {
                         const totals = comparisonTotalsByVendor.find((row) => row.vendorId === vendor.vendorId);
-                        const isBest = (totals?.combinedTotal ?? Number.NEGATIVE_INFINITY) === bestComparisonCombined;
+                        const isBest = !comparisonHasIncompleteHistory && (totals?.combinedTotal ?? Number.NEGATIVE_INFINITY) === bestComparisonCombined;
                         return (
                           <td key={`totals-${vendor.vendorId}`} className={`border-t border-slate-700 px-3 py-2 ${isBest ? "bg-emerald-500/15" : "bg-slate-900/70"}`}>
                             <p className="text-slate-100">Requirements: {formatScoreValue(totals?.requirementsTotal ?? 0)}</p>
