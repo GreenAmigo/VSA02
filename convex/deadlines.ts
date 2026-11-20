@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
-import { requireWritableVendorDeadline } from "./vendorDeadlines";
+import { requireWritableVendorDeadline, vendorDeadlinesNeedMigration } from "./vendorDeadlines";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -122,6 +122,9 @@ export const listProjectDeadlines = query({
     }
 
     const { member } = await assertProjectDeadlineAccess(ctx, args.projectId);
+    if (await vendorDeadlinesNeedMigration(ctx, args.projectId)) {
+      throw new Error("Vendor deadline history needs migration. Ask a workspace admin for help.");
+    }
 
     const rows = await ctx.db
       .query("projectDeadlines")
@@ -131,6 +134,14 @@ export const listProjectDeadlines = query({
     const visibleRows = member.role === "vendor"
       ? rows.filter((row) => row.targetType === "vendor" && row.vendorId === member.vendorId)
       : rows;
+    const seenVendors = new Set<string>();
+    for (const row of visibleRows) {
+      if (row.targetType !== "vendor" || !row.vendorId) continue;
+      if (seenVendors.has(row.vendorId)) {
+        throw new Error("Vendor deadlines conflict. Ask a workspace admin to resolve them.");
+      }
+      seenVendors.add(row.vendorId);
+    }
 
     return visibleRows.map((row) => ({
       _id: row._id,
@@ -142,7 +153,7 @@ export const listProjectDeadlines = query({
       status: getDeadlineStatus(row.status),
       submittedAt: row.submittedAt,
       lastReminderAt: row.lastReminderAt,
-      reminderMessage: getReminderMessage(row.targetUserId, row.status, row.dueAt),
+      reminderMessage: getReminderMessage(member.role === "vendor" ? member.userId : row.targetUserId, row.status, row.dueAt),
     }));
   },
 });

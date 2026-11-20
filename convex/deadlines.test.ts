@@ -20,8 +20,8 @@ describe("Phase 8 deadline and reminder logic", () => {
     await admin.mutation(api.deadlines.markDeadlineSubmitted, {
       projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
     });
-    await t.run(async (ctx) => {
-      await ctx.db.insert("projectDeadlines", {
+    const legacyId = await t.run(async (ctx) => {
+      return await ctx.db.insert("projectDeadlines", {
         companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor",
         targetUserId: "old-contact", dueAt: 1, status: "not-started", createdAt: 1, updatedAt: 1,
       });
@@ -33,6 +33,19 @@ describe("Phase 8 deadline and reminder logic", () => {
     const summary = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
     expect(summary.find((row) => row.projectId === seeded.projectBId))
       .toMatchObject({ deadlineMigrationRequired: true, submittedVendors: 0 });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await expect(vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId }))
+      .rejects.toThrow("deadline history needs migration");
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      await ctx.db.patch(legacyId, { vendorId: contact.vendorId });
+    });
+    await expect(vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId }))
+      .rejects.toThrow("deadlines conflict");
+    const conflicted = await vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(conflicted.deadlineConflict).toBe(true);
   });
 
   test("a replacement contact inherits the organisation's deadline and submission status", async () => {
@@ -64,6 +77,8 @@ describe("Phase 8 deadline and reminder logic", () => {
     const rows = await replacement.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ targetUserId: "replacement", dueAt, status: "submitted" });
+    expect(rows[0].reminderMessage).toContain("replacement");
+    expect(rows[0].reminderMessage).not.toContain("northwind-vendor");
     const page = await replacement.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
     expect(page).toMatchObject({ status: "submitted", deadlineAt: dueAt });
   });
