@@ -166,6 +166,7 @@ Access:
 - Company people: their own workspace only, according to their role.
 - Vendors: only the projects they are invited to, and only their own requirement view and scores (never priorities, company scores, scorer views or other vendors).
 - No company can ever see another company's workspace.
+- Server access checks must match the signed-in user by user ID or email, never by display name alone. Legacy users who depended only on a name match must have their membership linked to their actual sign-in identity.
 
 The VS Consultant can:
 - Create, archive and delete workspaces (archive = hidden/read-only and restorable; delete = permanent, only after archiving, confirmed by typing the workspace name)

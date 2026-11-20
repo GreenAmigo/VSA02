@@ -84,6 +84,10 @@ describe("admin console actions", () => {
     await expect(spoofedAdmin.mutation(api.admin.updateWorkspacePersonName, {
       companyId: seeded.companyBId, memberId: target._id, displayName: "Changed Name",
     })).rejects.toThrow("Only company admins");
+    const scorerWithAdminName = t.withIdentity({ tokenIdentifier: "beta-scorer", name: "Beta Admin" });
+    await expect(scorerWithAdminName.mutation(api.admin.updateWorkspacePersonName, {
+      companyId: seeded.companyBId, memberId: target._id, displayName: "Changed Name",
+    })).rejects.toThrow("Only company admins");
     const spoofedScorer = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Scorer" });
     await expect(spoofedScorer.query(api.admin.listProjectMembers, { projectId: seeded.projectBId }))
       .rejects.toThrow("Project access denied");

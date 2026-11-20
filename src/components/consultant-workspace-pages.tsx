@@ -3044,7 +3044,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       return;
     }
 
-    const isAlreadyAssigned = projectMembersList.some((member) => member.userId === selectedScorer.userId || member.displayName === selectedScorer.name);
+    const isAlreadyAssigned = projectMembersList.some((member) => member.userId === selectedScorer.userId);
     if (isAlreadyAssigned) {
       setNotice({ kind: "error", message: `${selectedScorer.name} is already assigned to this project.` });
       return;
