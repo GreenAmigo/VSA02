@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { api } from "../../convex/_generated/api";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
-import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage, ConsultantWorkspaceVendorsPage } from "./consultant-workspace-pages";
+import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage, ConsultantWorkspaceVendorsPage, VendorProjectAnswerRequirementsPage } from "./consultant-workspace-pages";
 
 const { useQueryMock, useMutationMock, useAuthMock, useConvexAuthMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -96,6 +96,26 @@ describe("ConsultantHomeHeader", () => {
 
     expect(html).toContain("Workspace directory");
     expect(html).not.toContain("New workspace");
+  });
+});
+
+describe("vendor answer migration warning", () => {
+  test("explains why legacy answers are hidden and editing is unavailable", () => {
+    useQueryMock.mockReset();
+    useAuthMock.mockReturnValue({ user: { email: "vendor@example.com" }, loading: false });
+    useConvexAuthMock.mockReturnValue({ isLoading: false, isAuthenticated: true });
+    useQueryMock.mockImplementationOnce(() => ({ isVendor: true, role: "vendor" }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Workspace" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      companyName: "Workspace", projectName: "Project", vendorOrganizationName: "Vendor",
+      deadlineLocked: false, status: "in-progress", answeredCount: 0, totalRequirements: 1,
+      migrationRequired: true, conflictingRequirementIds: [],
+      rows: [{ requirementId: "REQ", text: "Requirement", score: null, comment: "" }],
+    }));
+    const html = renderToStaticMarkup(<VendorProjectAnswerRequirementsPage companyId="company-1" projectId="project-1" />);
+    expect(html).toContain("Some older vendor answers need migration");
+    expect(html).toMatch(/type="radio"[^>]*disabled/);
+    expect(html).toContain("They are not included in the answers or totals shown");
   });
 });
 

@@ -1524,6 +1524,9 @@ export const getScorerVendorGrid = query({
       vendorUserId: args.vendorUserId,
       vendorName: selectedVendor.vendorName,
       vendorContactName: selectedVendor.vendorContactName,
+      migrationRequired: answerState.migrationRequired,
+      hasVendorAnswerConflicts: [...(answerState.grouped.get(selectedVendor.vendorId)?.values() ?? [])]
+        .some((answers) => answers.length > 1),
       scorerScope: {
         scopeKey: activeScope.scopeKey,
         scopeType: activeScope.scopeType,

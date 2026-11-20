@@ -484,6 +484,16 @@ function ScoringSettingsPanel({ companyId, projectId, project }: { companyId: st
   );
 }
 
+function VendorAnswerNotice({ migrationRequired, hasConflicts }: { migrationRequired?: boolean; hasConflicts?: boolean }) {
+  if (!migrationRequired && !hasConflicts) return null;
+  return (
+    <div role="alert" className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+      {migrationRequired ? <p>Some older vendor answers need migration. Ask a workspace admin for help. They are not included in the answers or totals shown.</p> : null}
+      {hasConflicts ? <p>Some vendor answers conflict. They are excluded from totals until a workspace admin resolves them.</p> : null}
+    </div>
+  );
+}
+
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const selectedReviewRef = useRef<HTMLDivElement | null>(null);
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
@@ -497,6 +507,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       totalRequirements: number;
       submittedAt: number | null;
       deadlineAt: number | null;
+      migrationRequired?: boolean;
+      hasConflicts?: boolean;
     }>
     | undefined;
 
@@ -696,6 +708,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold text-white">Vendor responses</h3>
       </div>
+      <VendorAnswerNotice
+        migrationRequired={vendorResponses?.some((vendor) => vendor.migrationRequired)}
+        hasConflicts={vendorResponses?.some((vendor) => vendor.hasConflicts)}
+      />
 
       {vendorResponses === undefined ? (
         <p className="text-sm text-slate-400">Loading vendor responses...</p>
@@ -1051,6 +1067,8 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       scorerScope: { scopeKey: string; scopeType: "individual" | "department"; label: string };
       canSeePeerScores: boolean;
       isCompleted: boolean;
+      migrationRequired?: boolean;
+      hasVendorAnswerConflicts?: boolean;
       completedAt: number | null;
       rows: Array<{
         requirementId: string;
@@ -1313,6 +1331,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 </button>
               </div>
 
+              {grid.isCompleted ? <VendorAnswerNotice migrationRequired={grid.migrationRequired} hasConflicts={grid.hasVendorAnswerConflicts} /> : null}
               <div className="space-y-3">
                 {grid.rows.map((row) => {
                   const isCollapsed = Boolean(collapsedRequirementIds[row.requirementId]);
@@ -2914,6 +2933,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       status: "not-started" | "in-progress" | "submitted";
       answeredCount: number;
       totalRequirements: number;
+      migrationRequired?: boolean;
+      conflictingRequirementIds?: string[];
     }
     | undefined;
   const workspacePeople = useQuery((api as any).admin.listWorkspacePeople, isProtectedLoading || !companyId || !canManageWorkspace ? "skip" : { companyId }) as
@@ -2965,6 +2986,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   ) as
     | {
       projectId: string;
+      migrationRequired?: boolean;
+      hasVendorAnswerConflicts?: boolean;
       vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string; vendorContactName: string | null }>;
       rows: Array<{
         requirementId: string;
@@ -3473,6 +3496,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
               </label>
             </div>
 
+            <VendorAnswerNotice migrationRequired={requirementComparison?.migrationRequired} hasConflicts={requirementComparison?.hasVendorAnswerConflicts} />
             {requirementComparison === undefined ? (
               <p className="text-sm text-slate-400">Loading comparison grid...</p>
             ) : requirementComparison.vendors.length === 0 ? (
@@ -3852,6 +3876,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
           </div>
 
+          <VendorAnswerNotice migrationRequired={vendorScoringPanel?.migrationRequired} hasConflicts={Boolean(vendorScoringPanel?.conflictingRequirementIds?.length)} />
           <div className="mt-5">
             <Link
               href={`/workspaces/${companyId}/projects/${projectId}/answer-requirements`}
@@ -3909,6 +3934,8 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
       status: "not-started" | "in-progress" | "submitted";
       answeredCount: number;
       totalRequirements: number;
+      migrationRequired?: boolean;
+      conflictingRequirementIds?: string[];
       rows: Array<{
         requirementId: string;
         text: string;
@@ -3969,7 +3996,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
     setDrafts((current) => ({ ...current, [requirementId]: nextDraft }));
     setNotice(null);
 
-    if (panel.deadlineLocked || nextDraft.score === null) {
+    if (panel.deadlineLocked || panel.migrationRequired || panel.conflictingRequirementIds?.includes(requirementId) || nextDraft.score === null) {
       return;
     }
 
@@ -3996,7 +4023,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
   };
 
   const handleSubmit = async () => {
-    if (panel.deadlineLocked) {
+    if (panel.deadlineLocked || panel.migrationRequired || panel.conflictingRequirementIds?.length) {
       return;
     }
 
@@ -4060,6 +4087,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
           </div>
         ) : null}
 
+        <VendorAnswerNotice migrationRequired={panel.migrationRequired} hasConflicts={Boolean(panel.conflictingRequirementIds?.length)} />
         {notice ? (
           <div className={`mt-4 rounded-xl border p-3 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -4089,6 +4117,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
           const draft = drafts[row.requirementId] ?? { score: row.score, comment: row.comment ?? "" };
           const unanswered = draft.score === null;
           const state = saveState[row.requirementId] ?? "idle";
+          const answerLocked = panel.deadlineLocked || Boolean(panel.migrationRequired) || Boolean(panel.conflictingRequirementIds?.includes(row.requirementId));
 
           return (
             <div key={row.requirementId} className={`rounded-2xl border p-4 ${unanswered ? "border-amber-500/40 bg-amber-500/5" : "border-slate-800 bg-slate-900"}`}>
@@ -4117,7 +4146,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
                         type="radio"
                         name={`score-${row.requirementId}`}
                         checked={draft.score === 0}
-                        disabled={panel.deadlineLocked}
+                        disabled={answerLocked}
                         onChange={() => saveRow(row.requirementId, { ...draft, score: 0 })}
                       />
                       0
@@ -4127,7 +4156,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
                         type="radio"
                         name={`score-${row.requirementId}`}
                         checked={draft.score === 1}
-                        disabled={panel.deadlineLocked}
+                        disabled={answerLocked}
                         onChange={() => saveRow(row.requirementId, { ...draft, score: 1 })}
                       />
                       1
@@ -4137,7 +4166,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
                   <textarea
                     value={draft.comment}
                     onChange={(event) => saveRow(row.requirementId, { ...draft, comment: event.target.value })}
-                    disabled={panel.deadlineLocked}
+                    disabled={answerLocked}
                     rows={2}
                     placeholder="Optional comment"
                     className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-70"
@@ -4157,7 +4186,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={panel.deadlineLocked}
+          disabled={panel.deadlineLocked || Boolean(panel.migrationRequired) || Boolean(panel.conflictingRequirementIds?.length)}
           className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
         >
           Submit
