@@ -16,6 +16,25 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("vendor home organisation is resolved within the requested workspace", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+    const org = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyAId, name: "Acme supplier" });
+    await admin.mutation(api.admin.inviteVendorContact, {
+      companyId: seeded.companyAId, vendorId: org.vendorId, name: "Northwind Contact", email: "vendor@northwind.example",
+    });
+    await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "northwind-vendor", email: "vendor@northwind.example" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    expect(await vendor.query(api.access.getWorkspaceVendorContact, { companyId: seeded.companyAId }))
+      .toMatchObject({ vendorId: org.vendorId, vendorName: "Acme supplier" });
+    expect(await vendor.query(api.access.getWorkspaceVendorContact, { companyId: seeded.companyBId }))
+      .toMatchObject({ vendorName: "Northwind Labs" });
+  });
+
   test("a vendor's stale scorer assignment cannot grant unassigned project access or priorities", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

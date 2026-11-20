@@ -938,6 +938,23 @@ export const getCurrentUserAccess = query({
   },
 });
 
+export const getWorkspaceVendorContact = query({
+  args: { companyId: v.id("companies") },
+  returns: v.union(v.null(), v.object({
+    vendorId: v.union(v.id("vendorOrganizations"), v.null()),
+    vendorName: v.union(v.string(), v.null()),
+  })),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not signed in");
+    const member = await findVendorMembershipForIdentity(ctx, args.companyId, identity);
+    if (!member) return null;
+    const vendor = member.vendorId ? await ctx.db.get(member.vendorId) : null;
+    if (!vendor || vendor.companyId !== args.companyId) return { vendorId: null, vendorName: null };
+    return { vendorId: vendor._id, vendorName: vendor.name };
+  },
+});
+
 export const listAccessibleCompanies = query({
   args: {},
   handler: async (ctx) => {
