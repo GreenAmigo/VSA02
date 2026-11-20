@@ -143,7 +143,6 @@ async function recordActivity(
 function isAllowedAdminOrConsultant(ctx: any, identity: any, companyId: string) {
   const userIds = [identity.subject, identity.tokenIdentifier].filter(Boolean) as string[];
   const normalizedEmail = identity.email?.trim().toLowerCase();
-  const normalizedName = identity.name?.trim();
 
   return ctx.db
     .query("companyMembers")
@@ -151,7 +150,6 @@ function isAllowedAdminOrConsultant(ctx: any, identity: any, companyId: string) 
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.eq(q.field("role"), "company-admin"))
@@ -172,7 +170,6 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
 
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
-  const normalizedName = identity.name?.trim();
 
   const member = await ctx.db
     .query("projectMembers")
@@ -180,7 +177,6 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .first();
 
@@ -194,7 +190,6 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -286,7 +281,6 @@ async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ 
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .first();
 
@@ -344,7 +338,7 @@ async function assertScorerAccess(ctx: any, projectId: string): Promise<{ projec
   return { project, identity, userIds };
 }
 
-async function resolveScorerScopes(ctx: any, project: any, identity: any, userIds: string[]) {
+async function resolveScorerScopes(ctx: any, project: any, userIds: string[]) {
   const scopeMap = new Map<string, { scopeKey: string; scopeType: "individual" | "department"; label: string }>();
 
   const projectScorerMemberships = await ctx.db
@@ -354,9 +348,7 @@ async function resolveScorerScopes(ctx: any, project: any, identity: any, userId
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
 
-  const individualAssignments = projectScorerMemberships.filter((row: any) =>
-    userIds.includes(row.userId) || (identity.name?.trim() ? row.displayName === identity.name.trim() : false),
-  );
+  const individualAssignments = projectScorerMemberships.filter((row: any) => userIds.includes(row.userId));
 
   const displayNameByUserId = await getScorerDisplayNames(ctx, project);
   for (const assignment of individualAssignments) {
@@ -1379,7 +1371,7 @@ export const getScorerWorkboard = query({
   args: scorerWorkboardValidator,
   handler: async (ctx, args) => {
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
-    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
     const requirements = await listScoringRequirements(ctx, project);
     const vendorRows = await listAssignedVendorUsers(ctx, project);
@@ -1429,7 +1421,7 @@ export const getScorerVendorGrid = query({
   args: scorerVendorGridValidator,
   handler: async (ctx, args) => {
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
-    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
     let scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project);
     const vendorRows = await listAssignedVendorUsers(ctx, project);
@@ -1548,7 +1540,7 @@ export const saveScorerScore = mutation({
   args: scorerScoreValidator,
   handler: async (ctx, args) => {
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
-    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
     const vendorRows = await listAssignedVendorUsers(ctx, project);
@@ -1672,7 +1664,7 @@ export const completeScorerVendor = mutation({
   args: completeScorerVendorValidator,
   handler: async (ctx, args) => {
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
-    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
     const vendorRows = await listAssignedVendorUsers(ctx, project);
@@ -1746,7 +1738,7 @@ export const reopenScorerVendor = mutation({
   args: reopenScorerVendorValidator,
   handler: async (ctx, args) => {
     const { project, identity, userIds } = await assertScorerAccess(ctx, args.projectId);
-    const scopes = await resolveScorerScopes(ctx, project, identity, userIds);
+    const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
 
     if (isDeadlineLocked(project.scorerDeadline ? { dueAt: project.scorerDeadline } : null)) {

@@ -257,6 +257,22 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("matching a scorer or admin name alone does not grant scoring access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const fakeScorer = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Scorer" });
+    await expect(fakeScorer.query(api.scores.getScorerVendorGrid, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    })).rejects.toThrow("Only assigned scorers");
+    const fakeAdmin = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Admin" });
+    await expect(fakeAdmin.query(api.scores.getVendorResponseReview, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    })).rejects.toThrow("Only consultants and company admins");
+  });
+
   test("scoring screens prefer workspace scorer names over stale assignment and score labels", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
