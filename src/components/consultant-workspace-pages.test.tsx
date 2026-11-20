@@ -371,6 +371,22 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Combined: 0");
   });
 
+  test("vendor responses can be opened when the organisation has no active contact", () => {
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "admin@example.com", role: "company-admin", isConsultant: false });
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => [{
+      vendorId: "vendor-1", vendorName: "Historical vendor", vendorUserId: null, vendorContactName: null,
+      status: "submitted", answeredCount: 1, totalRequirements: 1, submittedAt: 1, deadlineAt: 1,
+    }]);
+    const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
+    expect(html).toContain("Historical vendor");
+    expect(html).toContain("No active contact linked");
+    expect(html).toContain("View scores");
+    expect(html).not.toContain("Add an active vendor contact to view and amend scores");
+  });
+
   test("company admin project detail also shows Vendor responses section", () => {
     useQueryMock.mockReset();
     useQueryMock.mockImplementationOnce(() => ({

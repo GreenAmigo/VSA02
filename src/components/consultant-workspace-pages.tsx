@@ -523,7 +523,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
     }>
     | undefined;
 
-  const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
+  const [selectedVendorId, setSelectedVendorId] = useState("");
   const [editingRequirementId, setEditingRequirementId] = useState("");
   const [amendDraft, setAmendDraft] = useState<{ score: 0 | 1; comment: string; reason: string }>({ score: 1, comment: "", reason: "" });
   const [reopenDate, setReopenDate] = useState("");
@@ -533,51 +533,43 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const [shouldScrollSelectedReview, setShouldScrollSelectedReview] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const linkedVendorUserId = params.get("vendorUserId")?.trim();
-    if (linkedVendorUserId) {
-      setSelectedVendorUserId(linkedVendorUserId);
-      setShouldScrollSelectedReview(true);
-    }
-  }, []);
-
-  useEffect(() => {
     if (!vendorResponses || vendorResponses.length === 0) {
-      setSelectedVendorUserId("");
+      setSelectedVendorId("");
       return;
     }
 
-    const hasSelectedVendor = vendorResponses.some((row) => row.vendorUserId === selectedVendorUserId);
+    const hasSelectedVendor = vendorResponses.some((row) => row.vendorId === selectedVendorId);
     if (hasSelectedVendor) {
       return;
     }
 
-    const firstWithContact = vendorResponses.find((row) => Boolean(row.vendorUserId));
-    setSelectedVendorUserId(firstWithContact?.vendorUserId ?? "");
-  }, [vendorResponses, selectedVendorUserId]);
+    const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
+    const linked = vendorResponses.find((row) => row.vendorId === params?.get("vendorId")
+      || (row.vendorUserId && row.vendorUserId === params?.get("vendorUserId")));
+    setSelectedVendorId(linked?.vendorId ?? vendorResponses[0].vendorId);
+    if (linked) setShouldScrollSelectedReview(true);
+  }, [vendorResponses, selectedVendorId]);
+
+  const selectedVendorUserId = vendorResponses?.find((row) => row.vendorId === selectedVendorId)?.vendorUserId ?? "";
 
   useEffect(() => {
-    if (!shouldScrollSelectedReview || !selectedVendorUserId || !selectedReviewRef.current) {
+    if (!shouldScrollSelectedReview || !selectedVendorId || !selectedReviewRef.current) {
       return;
     }
 
     selectedReviewRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     setShouldScrollSelectedReview(false);
-  }, [selectedVendorUserId, shouldScrollSelectedReview]);
+  }, [selectedVendorId, shouldScrollSelectedReview]);
 
   const selectedReview = useQuery(
     (api as any).scores.getVendorResponseReview,
-    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+    selectedVendorId ? { projectId: projectId as any, vendorId: selectedVendorId } : "skip",
   ) as
     | {
       projectId: string;
-      vendorUserId: string;
+      vendorUserId: string | null;
       vendorName: string;
-      vendorContactName: string;
+      vendorContactName: string | null;
       deadlineAt: number | null;
       deadlineLocked: boolean;
       rows: Array<{
@@ -613,7 +605,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
 
   const scorerViews = useQuery(
     (api as any).projectViews.listProjectViews,
-    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+    selectedVendorId ? { projectId: projectId as any, vendorId: selectedVendorId } : "skip",
   ) as
     | {
       projectId: string;
@@ -755,29 +747,25 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               })()}
 
               <div className="mt-3">
-                {vendor.vendorUserId ? (
                   <button
                     type="button"
                     onClick={() => {
-                      const targetVendorUserId = vendor.vendorUserId as string;
-                      setSelectedVendorUserId(targetVendorUserId);
+                      setSelectedVendorId(vendor.vendorId);
                       setShouldScrollSelectedReview(true);
                       setEditingRequirementId("");
                       setNotice(null);
                       setReopenDate("");
                       if (typeof window !== "undefined") {
                         const nextUrl = new URL(window.location.href);
-                        nextUrl.searchParams.set("vendorUserId", targetVendorUserId);
+                        nextUrl.searchParams.delete("vendorUserId");
+                        nextUrl.searchParams.set("vendorId", vendor.vendorId);
                         window.history.replaceState({}, "", nextUrl.toString());
                       }
                     }}
-                    className={`rounded-xl border px-3 py-2 text-sm ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/60 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"}`}
+                    className={`rounded-xl border px-3 py-2 text-sm ${selectedVendorId === vendor.vendorId ? "border-sky-500/60 bg-sky-500/10 text-sky-100" : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"}`}
                   >
-                    {selectedVendorUserId === vendor.vendorUserId ? "Viewing scores" : "View scores"}
+                    {selectedVendorId === vendor.vendorId ? "Viewing scores" : "View scores"}
                   </button>
-                ) : (
-                  <p className="text-xs text-slate-400">Add an active vendor contact to view and amend scores.</p>
-                )}
               </div>
             </div>
           ))}
@@ -790,7 +778,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
         </div>
       ) : null}
 
-      {selectedVendorUserId ? (
+      {selectedVendorId ? (
         <div ref={selectedReviewRef} className="mt-6 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           {selectedReview === undefined ? (
             <p className="text-sm text-slate-400">Loading selected vendor answers...</p>
@@ -799,7 +787,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h4 className="text-base font-semibold text-white">{selectedReview.vendorName}</h4>
-                  <p className="text-xs text-slate-400">Contact: {safeDisplayName(selectedReview.vendorContactName)}</p>
+                  <p className="text-xs text-slate-400">Contact: {selectedReview.vendorContactName ? safeDisplayName(selectedReview.vendorContactName) : "No single active contact"}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill label={selectedReview.deadlineLocked ? "Deadline locked" : "Read-only until deadline"} className={selectedReview.deadlineLocked ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-slate-700 bg-slate-900 text-slate-200"} />
@@ -807,6 +795,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                 </div>
               </div>
 
+              {!selectedVendorUserId ? <p className="mb-3 text-sm text-amber-200">One active contact is needed to amend or reopen answers.</p> : null}
               <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
                 <label className="text-sm text-slate-300">
                   <span className="mb-1 block text-xs uppercase tracking-[0.14em] text-slate-400">Reopen for this vendor</span>
@@ -820,7 +809,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   onClick={() => void handleReopen()}
-                  disabled={busy}
+                  disabled={busy || !selectedVendorUserId}
                   className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
                 >
                   Reopen for this vendor
@@ -878,7 +867,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                       {isCollapsed ? null : (
                         <>
 
-                      {selectedReview.deadlineLocked ? (
+                      {selectedReview.deadlineLocked && selectedVendorUserId ? (
                         <div className="mt-3">
                           {row.score === null ? (
                             <p className="text-xs text-slate-400">No vendor answer to amend yet.</p>
