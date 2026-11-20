@@ -1194,6 +1194,9 @@ export const listWorkspaceRequirementsSummary = query({
     if (!identity) {
       return [] as const;
     }
+    if (await findVendorMembershipForIdentity(ctx, args.companyId, identity)) {
+      throw new Error("Company access denied");
+    }
 
     const userIds = getIdentityUserIds(identity);
     const memberships = await findActiveCompanyMembershipsForIdentity(ctx, args.companyId, identity);
@@ -1245,6 +1248,9 @@ export const listWorkspaceScoringSummary = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       return [] as const;
+    }
+    if (await findVendorMembershipForIdentity(ctx, args.companyId, identity)) {
+      throw new Error("Company access denied");
     }
 
     const userIds = getIdentityUserIds(identity);

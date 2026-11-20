@@ -41,6 +41,8 @@ describe("Phase 2 access checks", () => {
     expect(projects.map((project) => project._id)).toContain(seeded.projectBId);
     expect(projects.map((project) => project._id)).not.toContain(other.projectId);
     await expect(vendor.query(api.access.getProject, { projectId: other.projectId })).rejects.toThrow("Project access denied");
+    await expect(vendor.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
+    await expect(vendor.query(api.access.listWorkspaceRequirementsSummary, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
     const requirements = await vendor.query(api.access.listProjectRequirements, { projectId: seeded.projectBId });
     expect(requirements[0].priority).toBeUndefined();
     expect(requirements[0].type).toBeUndefined();
