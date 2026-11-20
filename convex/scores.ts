@@ -26,7 +26,8 @@ const scoreAmendmentValidator = v.object({
 
 const vendorResponseReviewValidator = v.object({
   projectId: v.id("projects"),
-  vendorUserId: v.string(),
+  vendorUserId: v.optional(v.string()),
+  vendorId: v.optional(v.id("vendorOrganizations")),
 });
 
 const requirementComparisonValidator = v.object({
@@ -1032,7 +1033,26 @@ export const getVendorResponseReview = query({
   args: vendorResponseReviewValidator,
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
-    const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+    if (Boolean(args.vendorId) === Boolean(args.vendorUserId)) {
+      throw new Error("Select exactly one vendor organisation for review.");
+    }
+    let vendorContext;
+    if (args.vendorId) {
+      const assigned = (await getProjectVendors(ctx, project)).find((vendor) => vendor.vendorId === args.vendorId);
+      if (!assigned) throw new Error("Vendor not assigned to this project");
+      vendorContext = {
+        vendorUserId: assigned.primaryContact?.userId ?? null,
+        vendorId: assigned.vendorId,
+        vendorName: assigned.vendorName,
+        vendorDisplayName: assigned.primaryContact
+          ? personDisplayName(assigned.primaryContact.displayName, assigned.primaryContact.userId)
+          : null,
+      };
+    } else if (args.vendorUserId) {
+      vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+    } else {
+      throw new Error("Select exactly one vendor organisation for review.");
+    }
     const requirements = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))

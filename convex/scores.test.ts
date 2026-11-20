@@ -600,6 +600,21 @@ describe("Phase 5 score audit trail", () => {
     expect(cells?.find((cell) => cell.vendorId === south.vendorId)?.vendorScore).toBe(0);
     expect(after.totalsByVendor.find((row) => row.vendorId === north.vendorId)?.vendor.combined).toBe(12);
     expect(after.totalsByVendor.find((row) => row.vendorId === south.vendorId)?.vendor.combined).toBe(3);
+    const review = await admin.query(api.scores.getVendorResponseReview, {
+      projectId: seeded.projectBId, vendorId: north.vendorId,
+    });
+    expect(review.vendorUserId).toBeNull();
+    expect(review.rows.find((row) => row.requirementId === "CMP-REQ-001")?.score).toBe(1);
+    await expect(t.withIdentity({ tokenIdentifier: "beta-scorer" }).query(api.scores.getVendorResponseReview, {
+      projectId: seeded.projectBId, vendorId: north.vendorId,
+    })).rejects.toThrow("Only consultants and company admins");
+    const otherId = await t.run(async (ctx) => ctx.db.insert("vendorOrganizations", {
+      companyId: seeded.companyBId, name: "Unassigned", status: "active",
+      createdByUserId: "beta-admin", createdAt: 1, updatedAt: 1,
+    }));
+    await expect(admin.query(api.scores.getVendorResponseReview, {
+      projectId: seeded.projectBId, vendorId: otherId,
+    })).rejects.toThrow("Vendor not assigned");
   });
 
   test("requirement comparison returns correct averages, weighted totals, exclusions, and mode-specific values", async () => {
