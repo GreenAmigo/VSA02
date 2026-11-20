@@ -116,6 +116,10 @@ describe("Phase 2 access checks", () => {
         userId: "ambiguous-contact", displayName: "ambiguous-contact", previousVendorId: second.vendorId,
         vendorId: first.vendorId, vendorName: "First organisation", source: "confirmed",
       });
+      expect(confirmed.unresolved).toContainEqual(expect.objectContaining({
+        userId: "ambiguous-contact",
+        reason: expect.stringContaining("More than one active contact is linked to First organisation"),
+      }));
       process.env.APP_ENVIRONMENT = "production";
       await expect(t.mutation(internal.access.repairVendorContactLinks, { companyId: seeded.companyBId }))
         .rejects.toThrow("only available in development or preview");

@@ -1,6 +1,6 @@
 import { query, mutation, action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { assertNoOtherActiveVendorContact, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { updateMemberDisplayName } from "./scorerNames";
@@ -692,6 +692,21 @@ export const repairVendorContactLinks = internalMutation({
       .paginate({ numItems: 50, cursor: args.cursor ?? null });
     const changes = [];
     const unresolved = [];
+    async function reportContactConflict(member: Doc<"companyMembers">, vendorId: Id<"vendorOrganizations">, vendorName: string) {
+      if (!member.isActive) return;
+      const contacts = ctx.db.query("companyMembers")
+        .withIndex("by_company_role", (q) => q.eq("companyId", args.companyId).eq("role", "vendor"));
+      for await (const other of contacts) {
+        if (other._id !== member._id && other.isActive && other.vendorId === vendorId) {
+          unresolved.push({
+            userId: member.userId,
+            displayName: member.displayName,
+            reason: `More than one active contact is linked to ${vendorName}. Resolve this in Manage contacts.`,
+          });
+          break;
+        }
+      }
+    }
     for (const member of page.page) {
       if (member.role !== "vendor") continue;
       const email = member.email?.trim().toLowerCase();
@@ -721,6 +736,7 @@ export const repairVendorContactLinks = internalMutation({
             source: "confirmed" as const,
           });
         }
+        await reportContactConflict(member, confirmedVendorId, vendor.name);
         continue;
       }
       const invites = ctx.db.query("workspaceInvites")
@@ -758,6 +774,7 @@ export const repairVendorContactLinks = internalMutation({
           source: "invitation" as const,
         });
       }
+      await reportContactConflict(member, vendorId, vendor.name);
     }
     return { changes, unresolved, continueCursor: page.continueCursor, isDone: page.isDone };
   },
