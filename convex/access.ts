@@ -428,8 +428,8 @@ export const acceptPendingInvitesForUser = internalMutation({
     for (const invite of pendingInvites) {
       const invitedName = invite.displayName.trim();
       const workosName = args.displayName?.trim();
-      const displayName = (invitedName && invitedName.toLowerCase() !== targetEmail ? invitedName : "")
-        || (workosName && workosName.toLowerCase() !== targetEmail ? workosName : "")
+      const displayName = (invitedName && !invitedName.includes("@") ? invitedName : "")
+        || (workosName && !workosName.includes("@") ? workosName : "")
         || targetEmail;
       const inviteNeedsDepartment = invite.role === "company-admin" || invite.role === "company-scorer";
       const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
@@ -651,7 +651,7 @@ export const listDisplayNameRepairCandidates = internalQuery({
         const name = invite.displayName.trim();
         if (invite.status === "active" && invite.role === member.role
           && (member.role !== "vendor" || invite.vendorId === member.vendorId)
-          && name && name.toLowerCase() !== email && (invite.acceptedAt ?? 0) > acceptedAt) {
+          && name && !name.includes("@") && (invite.acceptedAt ?? 0) > acceptedAt) {
           invitationName = name;
           acceptedAt = invite.acceptedAt ?? 0;
         }
@@ -676,7 +676,7 @@ export const applyDisplayNameRepair = internalMutation({
     const name = args.displayName.trim();
     if (!member || member.companyId !== args.companyId || member.email?.trim().toLowerCase() !== args.email
       || member.displayName.trim().toLowerCase() !== args.email) return false;
-    if (!name || name.toLowerCase() === args.email) throw new Error("A real display name is required.");
+    if (!name || name.includes("@")) throw new Error("A real display name is required.");
     await updateMemberDisplayName(ctx, member, name);
     return true;
   },
@@ -721,7 +721,7 @@ export const repairEmailDisplayNames = internalAction({
         }
         name = workos.displayName?.trim() || null;
       }
-      if (!name || name.toLowerCase() === candidate.email) {
+      if (!name || name.includes("@")) {
         unresolved.push({ userId: candidate.userId, reason: "No name was found in the invitation or WorkOS." });
         continue;
       }

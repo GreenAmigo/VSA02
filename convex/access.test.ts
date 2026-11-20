@@ -26,7 +26,7 @@ describe("Phase 2 access checks", () => {
     const departmentId = await getFirstDepartmentId(admin, seeded.companyBId);
     for (const [userId, email, name] of [
       ["repair-invited", "invited@example.com", "Invited Person"],
-      ["repair-workos", "workos@example.com", ""],
+      ["repair-workos", "workos@example.com", "different@example.com"],
     ]) {
       await admin.mutation(api.admin.inviteWorkspacePerson, {
         companyId: seeded.companyBId, name, email, role: "company-scorer", departmentId,
@@ -37,6 +37,10 @@ describe("Phase 2 access checks", () => {
           .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).unique();
         if (!member) throw new Error("Missing test member");
         await ctx.db.patch(member._id, { displayName: email });
+        const departmentMember = await ctx.db.query("departmentMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).first();
+        if (!departmentMember) throw new Error("Missing department member");
+        await ctx.db.patch(departmentMember._id, { displayName: email });
       });
     }
 
@@ -59,6 +63,12 @@ describe("Phase 2 access checks", () => {
       const people = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
       expect(people.find((person) => person.userId === "repair-invited")?.name).toBe("Invited Person");
       expect(people.find((person) => person.userId === "repair-workos")?.name).toBe("WorkOS Person");
+      const departmentName = await t.run(async (ctx) => {
+        const member = await ctx.db.query("departmentMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "repair-invited")).first();
+        return member?.displayName;
+      });
+      expect(departmentName).toBe("Invited Person");
       expect((await t.action(internal.access.repairEmailDisplayNames, { companyId: seeded.companyBId })).changes).toEqual([]);
       process.env.APP_ENVIRONMENT = "production";
       await expect(t.action(internal.access.repairEmailDisplayNames, { companyId: seeded.companyBId }))
@@ -84,7 +94,10 @@ describe("Phase 2 access checks", () => {
       companyId: seeded.companyBId, name: "Invited Name", email: "named@example.com", role: "company-scorer", departmentId,
     });
     await admin.mutation(api.admin.inviteWorkspacePerson, {
-      companyId: seeded.companyBId, name: "", email: "unnamed@example.com", role: "company-scorer", departmentId,
+      companyId: seeded.companyBId, name: "different@example.com", email: "unnamed@example.com", role: "company-scorer", departmentId,
+    });
+    await admin.mutation(api.admin.inviteWorkspacePerson, {
+      companyId: seeded.companyBId, name: "", email: "empty@example.com", role: "company-scorer", departmentId,
     });
     const originalKey = process.env.WORKOS_API_KEY;
     const originalFetch = globalThis.fetch;
@@ -93,12 +106,13 @@ describe("Phase 2 access checks", () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         const named = url.endsWith("named-user");
         return new Response(JSON.stringify({
-          email: named ? "named@example.com" : "unnamed@example.com",
+          email: named ? "named@example.com" : url.endsWith("empty-user") ? "empty@example.com" : "unnamed@example.com",
           email_verified: true, first_name: "WorkOS", last_name: "Name",
         }), { status: 200 });
       });
       await t.withIdentity({ subject: "named-user", tokenIdentifier: "named-user" }).action(api.access.acceptPendingInvites, {});
       await t.withIdentity({ subject: "other-user", tokenIdentifier: "other-user" }).action(api.access.acceptPendingInvites, {});
+      await t.withIdentity({ subject: "empty-user", tokenIdentifier: "empty-user" }).action(api.access.acceptPendingInvites, {});
     } finally {
       globalThis.fetch = originalFetch;
       if (originalKey === undefined) delete process.env.WORKOS_API_KEY;
@@ -107,6 +121,7 @@ describe("Phase 2 access checks", () => {
     const people = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
     expect(people.find((person) => person.userId === "named-user")?.name).toBe("Invited Name");
     expect(people.find((person) => person.userId === "other-user")?.name).toBe("WorkOS Name");
+    expect(people.find((person) => person.userId === "empty-user")?.name).toBe("WorkOS Name");
   });
 
   test("legacy vendor project memberships do not grant project or requirement access", async () => {
