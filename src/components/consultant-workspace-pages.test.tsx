@@ -92,6 +92,7 @@ describe("ConsultantHomeHeader", () => {
 describe("ConsultantWorkspaceProjectsPage", () => {
   const queueProjectDetailQueries = (access: any) => {
     useQueryMock.mockImplementationOnce(() => access);
+    useQueryMock.mockImplementationOnce(() => access?.isVendor ? { vendorId: "ven-1", vendorName: "Northwind Labs" } : null);
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",
@@ -217,6 +218,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       isVendor: true,
       isConsultant: false,
     }));
+    useQueryMock.mockImplementationOnce(() => ({ vendorId: "ven-1", vendorName: "Northwind Labs" }));
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",
@@ -266,6 +268,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       role: "consultant",
       isConsultant: true,
     }));
+    useQueryMock.mockImplementationOnce(() => null);
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",
@@ -309,8 +312,10 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       email: "admin@beta.example",
       tokenIdentifier: "beta-admin",
       role: "company-admin",
+      isVendor: true,
       isConsultant: false,
     }));
+    useQueryMock.mockImplementationOnce(() => null);
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",
@@ -359,6 +364,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       role: "company-scorer",
       isConsultant: false,
     }));
+    useQueryMock.mockImplementationOnce(() => null);
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",
@@ -441,6 +447,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       role: "company-scorer",
       isConsultant: false,
     }));
+    useQueryMock.mockImplementationOnce(() => null);
     useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Beta Logistics" }]);
     useQueryMock.mockImplementationOnce(() => ({
       _id: "project-1",

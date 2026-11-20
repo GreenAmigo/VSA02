@@ -2887,14 +2887,15 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
-  const canManageWorkspace = Boolean(access && (access.isConsultant || access.role === "company-admin"));
-  const canManageProjects = Boolean(access && (access.isConsultant || access.role === "company-admin"));
-  const isVendorView = Boolean(access?.isVendor || access?.role === "vendor");
+  const vendorContact = useQuery(api.access.getWorkspaceVendorContact, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any });
+  const canManageWorkspace = vendorContact === null && Boolean(access && (access.isConsultant || access.role === "company-admin"));
+  const canManageProjects = canManageWorkspace;
+  const isVendorView = vendorContact != null;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
   const project = useQuery(api.access.getProject, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
     | ProjectDetailProject
     | undefined;
-  const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId || isVendorView ? "skip" : { projectId: projectId as any }) as
+  const projectMembers = useQuery(api.admin.listProjectMembers, isProtectedLoading || !projectId || vendorContact === undefined || isVendorView ? "skip" : { projectId: projectId as any }) as
     | Array<{ _id: string; projectId: string; userId: string; role: string; displayName: string; isActive: boolean; createdAt?: number }>
     | undefined;
   const requirements = useQuery(api.access.listProjectRequirements, isProtectedLoading || !projectId ? "skip" : { projectId: projectId as any }) as
@@ -3010,7 +3011,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [comparisonShowWithdrawn, setComparisonShowWithdrawn] = useState(false);
   const [selectedComparisonCell, setSelectedComparisonCell] = useState<{ requirementId: string; vendorUserId: string } | null>(null);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || project === undefined || requirements === undefined || (!isVendorView && projectMembers === undefined) || (isVendorView && vendorScoringPanel === undefined)) {
+  if (isProtectedLoading || access === undefined || vendorContact === undefined || companies === undefined || project === undefined || requirements === undefined || (!isVendorView && projectMembers === undefined) || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -3260,11 +3261,11 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             { label: "Projects", href: `/workspaces/${companyId}/projects` },
             { label: project.name },
           ]}
-      role={access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
+      role={isVendorView ? "vendor" : access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "vendor"}
       userEmail={access.email ?? user?.email ?? "Unknown"}
-      serverRole={access.isConsultant ? "vs-consultant" : access.role ?? "none"}
+      serverRole={isVendorView ? "vendor" : access.isConsultant ? "vs-consultant" : access.role ?? "none"}
       serverLookupId={access.subject ?? access.tokenIdentifier ?? "unknown"}
-      showConsultantLinks={Boolean(access.isConsultant)}
+      showConsultantLinks={!isVendorView && Boolean(access.isConsultant)}
     >
       <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
