@@ -60,7 +60,8 @@ const scorerWorkboardValidator = v.object({
 
 const scorerVendorGridValidator = v.object({
   projectId: v.id("projects"),
-  vendorUserId: v.string(),
+  vendorUserId: v.optional(v.string()),
+  vendorId: v.optional(v.id("vendorOrganizations")),
   scopeKey: v.optional(v.string()),
 });
 
@@ -1422,7 +1423,7 @@ export const getScorerWorkboard = query({
     const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
     const requirements = await listScoringRequirements(ctx, project);
-    const vendorRows = await listAssignedVendorUsers(ctx, project);
+    const vendorRows = await getProjectVendors(ctx, project);
 
     const rows = await Promise.all(vendorRows.map(async (vendor) => {
       const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
@@ -1440,8 +1441,11 @@ export const getScorerWorkboard = query({
       return {
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
-        vendorUserId: vendor.vendorUserId as string,
-        vendorContactName: vendor.vendorContactName,
+        vendorUserId: vendor.primaryContact?.userId ?? null,
+        vendorContactName: vendor.primaryContact
+          ? personDisplayName(vendor.primaryContact.displayName, vendor.primaryContact.userId)
+          : null,
+        contactConflict: vendor.contacts.length > 1,
         hasScorerHistoryConflicts: scorerHistory.hasConflicts || hasConflict,
         answeredCount,
         totalRequirements: requirements.length,
@@ -1469,8 +1473,13 @@ export const getScorerVendorGrid = query({
     const scopes = await resolveScorerScopes(ctx, project, userIds);
     const activeScope = resolveActiveScope(scopes, args.scopeKey);
     let scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project);
-    const vendorRows = await listAssignedVendorUsers(ctx, project);
-    const selectedVendor = vendorRows.find((row) => row.vendorUserId === args.vendorUserId);
+    if (Boolean(args.vendorId) === Boolean(args.vendorUserId)) {
+      throw new Error("Select exactly one vendor organisation for scoring.");
+    }
+    const vendorRows = await getProjectVendors(ctx, project);
+    const selectedVendor = args.vendorId
+      ? vendorRows.find((row) => row.vendorId === args.vendorId)
+      : args.vendorUserId ? findProjectVendorByUserId(vendorRows, args.vendorUserId) : null;
 
     if (!selectedVendor) {
       throw new Error("Vendor is not assigned to this project");
@@ -1554,9 +1563,13 @@ export const getScorerVendorGrid = query({
 
     return {
       projectId: args.projectId,
-      vendorUserId: args.vendorUserId,
+      vendorId: selectedVendor.vendorId,
+      vendorUserId: selectedVendor.primaryContact?.userId ?? null,
       vendorName: selectedVendor.vendorName,
-      vendorContactName: selectedVendor.vendorContactName,
+      vendorContactName: selectedVendor.primaryContact
+        ? personDisplayName(selectedVendor.primaryContact.displayName, selectedVendor.primaryContact.userId)
+        : null,
+      contactConflict: selectedVendor.contacts.length > 1,
       migrationRequired: answerState.migrationRequired,
       hasVendorAnswerConflicts: [...(answerState.grouped.get(selectedVendor.vendorId)?.values() ?? [])]
         .some((answers) => answers.length > 1),

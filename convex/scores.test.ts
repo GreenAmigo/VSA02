@@ -669,6 +669,13 @@ describe("Phase 5 score audit trail", () => {
     expect(scorer?.totalPairs).toBe(2);
     expect(scorer?.vendors.find((row) => row.vendorId === north.vendorId))
       .toMatchObject({ vendorUserId: null, status: "completed" });
+    const scorerIdentity = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const workboard = await scorerIdentity.query(api.scores.getScorerWorkboard, { projectId: seeded.projectBId });
+    expect(workboard.vendors.find((row) => row.vendorId === north.vendorId))
+      .toMatchObject({ vendorUserId: null, status: "completed" });
+    const grid = await scorerIdentity.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorId: north.vendorId });
+    expect(grid.rows.find((row: { requirementId: string }) => row.requirementId === "CMP-REQ-001")?.ownScore).toBe(1);
+    expect(grid.rows.find((row: { requirementId: string }) => row.requirementId === "CMP-REQ-001")?.vendorScore).toBe(1);
     const review = await admin.query(api.scores.getVendorResponseReview, {
       projectId: seeded.projectBId, vendorId: north.vendorId,
     });
