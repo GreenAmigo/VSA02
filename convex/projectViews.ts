@@ -220,8 +220,6 @@ export const saveProjectView = mutation({
     if (!vendor) {
       throw new Error("Vendor not found on this project");
     }
-    const vendorContact = vendor.contacts.find((contact) => contact.userId === args.vendorUserId)!;
-
     const scorerDepartmentSnapshot = await resolveScorerDepartmentSnapshot(ctx, project.companyId, member.userId);
     const normalizedViewText = args.viewText.trim();
 
@@ -259,7 +257,7 @@ export const saveProjectView = mutation({
         actorUserId,
         actorEmail: identity.email,
         action: "save_scorer_view",
-        details: `${member.displayName} updated scorer views for ${vendorContact.displayName}.`,
+        details: `Updated scorer views for vendor organisation ${vendor.vendorName}.`,
         workspaceName: "workspace",
         companyId: project.companyId,
         projectId: args.projectId,
@@ -273,7 +271,7 @@ export const saveProjectView = mutation({
       actorUserId,
       actorEmail: identity.email,
       action: "save_scorer_view",
-      details: `${member.displayName} added scorer views for ${vendorContact.displayName}.`,
+      details: `Added scorer views for vendor organisation ${vendor.vendorName}.`,
       workspaceName: "workspace",
       companyId: project.companyId,
       projectId: args.projectId,

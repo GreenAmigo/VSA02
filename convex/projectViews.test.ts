@@ -49,11 +49,13 @@ describe("Phase 6 project view isolation", () => {
     await scorer.mutation(api.projectViews.saveProjectView, {
       projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Original view",
     });
-    const vendorId = await t.run(async (ctx) => {
+    const { vendorId, vendorName } = await t.run(async (ctx) => {
       const member = await ctx.db.query("companyMembers")
         .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
       if (!member?.vendorId) throw new Error("Missing test organisation");
-      return member.vendorId;
+      const vendor = await ctx.db.get(member.vendorId);
+      if (!vendor) throw new Error("Missing test vendor");
+      return { vendorId: member.vendorId, vendorName: vendor.name };
     });
     await admin.mutation(api.admin.deactivateVendorContact, { companyId: seeded.companyBId, vendorId, userId: "northwind-vendor" });
     await admin.mutation(api.admin.inviteVendorContact, {
@@ -69,6 +71,11 @@ describe("Phase 6 project view isolation", () => {
     const after = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
     expect(after.rows).toHaveLength(1);
     expect(after.rows[0].viewText).toBe("Updated view");
+    const activity = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
+    const viewLogs = activity.filter((entry) => entry.action === "save_scorer_view");
+    expect(viewLogs).toHaveLength(2);
+    expect(viewLogs.every((entry) => entry.details.includes(vendorName))).toBe(true);
+    expect(viewLogs.every((entry) => !entry.details.includes("Replacement"))).toBe(true);
     const legacyId = await t.run(async (ctx) => {
       const original = await ctx.db.query("projectViews")
         .withIndex("by_project_vendor_id", (q) => q.eq("projectId", seeded.projectBId).eq("vendorId", vendorId)).first();
