@@ -95,8 +95,17 @@ describe("admin console actions", () => {
         companyId: company.companyId, name: "Contact", email: invite.email, role: "vendor",
       })).rejects.toThrow("Manage contacts");
       await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "vendor-contact", email: invite.email });
+      await t.run(async (ctx) => {
+        const row = await ctx.db.query("workspaceInvites")
+          .withIndex("by_company_email", (q) => q.eq("companyId", company.companyId).eq("email", invite.email)).unique();
+        if (!row) throw new Error("Missing invitation");
+        await ctx.db.patch(row._id, { email: "CONTACT@EXAMPLE.COM" });
+      });
       await expect(admin.mutation(api.admin.inviteVendorContact, { ...invite, vendorId: second.vendorId }))
         .rejects.toThrow("already linked or invited");
+      await expect(admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId, name: "Contact", email: invite.email, role: "company-scorer",
+      })).rejects.toThrow("already linked or invited as a vendor");
       const contacts = await admin.query(api.admin.listVendorContacts, { companyId: company.companyId, vendorId: first.vendorId });
       expect(contacts).toHaveLength(1);
       expect(contacts[0]).toMatchObject({ userId: "vendor-contact", status: "active", source: "member" });
