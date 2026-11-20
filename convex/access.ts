@@ -381,9 +381,12 @@ async function resolveWorkOSUserEmail(identity: { subject?: string; tokenIdentif
       emailVerified?: boolean | null;
       name?: string | null;
       full_name?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
     };
 
     const resolvedEmail = (data.email ?? data.email_address ?? data.emailAddress ?? identity.email ?? null)?.trim().toLowerCase() || null;
+    const workosName = [data.first_name?.trim(), data.last_name?.trim()].filter(Boolean).join(" ");
     const emailVerified = typeof data.email_verified === "boolean"
       ? data.email_verified
       : typeof data.emailVerified === "boolean"
@@ -393,7 +396,7 @@ async function resolveWorkOSUserEmail(identity: { subject?: string; tokenIdentif
     return {
       email: resolvedEmail,
       emailVerified,
-      displayName: data.name ?? data.full_name ?? identity.name ?? resolvedEmail,
+      displayName: workosName || data.name?.trim() || data.full_name?.trim() || identity.name?.trim() || null,
       source: "workos" as const,
     };
   } catch {
@@ -422,6 +425,11 @@ export const acceptPendingInvitesForUser = internalMutation({
 
     let accepted = 0;
     for (const invite of pendingInvites) {
+      const invitedName = invite.displayName.trim();
+      const workosName = args.displayName?.trim();
+      const displayName = (invitedName && invitedName.toLowerCase() !== targetEmail ? invitedName : "")
+        || (workosName && workosName.toLowerCase() !== targetEmail ? workosName : "")
+        || targetEmail;
       const inviteNeedsDepartment = invite.role === "company-admin" || invite.role === "company-scorer";
       const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
       if (invite.cancelledAt || invite.deactivatedAt || isExpired) {
@@ -474,7 +482,7 @@ export const acceptPendingInvitesForUser = internalMutation({
       if (canonicalMembership) {
         await ctx.db.patch(canonicalMembership._id, {
           email: targetEmail,
-          displayName: args.displayName ?? invite.displayName,
+          displayName,
           role: invite.role,
           departmentId: inviteNeedsDepartment ? invite.departmentId : undefined,
           vendorId: invite.vendorId ?? canonicalMembership.vendorId,
@@ -485,7 +493,7 @@ export const acceptPendingInvitesForUser = internalMutation({
           companyId: invite.companyId,
           userId: args.userId,
           email: targetEmail,
-          displayName: args.displayName ?? invite.displayName,
+          displayName,
           role: invite.role,
           departmentId: inviteNeedsDepartment ? invite.departmentId : undefined,
           vendorId: invite.vendorId,
@@ -506,7 +514,7 @@ export const acceptPendingInvitesForUser = internalMutation({
           await ctx.db.patch(assignment._id, {
             isActive: assignment.departmentId === invite.departmentId,
             email: targetEmail,
-            displayName: args.displayName ?? invite.displayName,
+            displayName,
             role: invite.role,
           });
         }
@@ -518,7 +526,7 @@ export const acceptPendingInvitesForUser = internalMutation({
             departmentId: invite.departmentId,
             userId: args.userId,
             email: targetEmail,
-            displayName: args.displayName ?? invite.displayName,
+            displayName,
             role: invite.role,
             createdAt: Date.now(),
             isActive: true,

@@ -16,6 +16,43 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("invite acceptance prefers the invited name and uses WorkOS first and last name when none was supplied", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const departmentId = await getFirstDepartmentId(admin, seeded.companyBId);
+    await admin.mutation(api.admin.inviteWorkspacePerson, {
+      companyId: seeded.companyBId, name: "Invited Name", email: "named@example.com", role: "company-scorer", departmentId,
+    });
+    await admin.mutation(api.admin.inviteWorkspacePerson, {
+      companyId: seeded.companyBId, name: "", email: "unnamed@example.com", role: "company-scorer", departmentId,
+    });
+    const originalKey = process.env.WORKOS_API_KEY;
+    const originalFetch = globalThis.fetch;
+    process.env.WORKOS_API_KEY = "test-key";
+    try {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const named = url.endsWith("named-user");
+        return new Response(JSON.stringify({
+          email: named ? "named@example.com" : "unnamed@example.com",
+          email_verified: true, first_name: "WorkOS", last_name: "Name",
+        }), { status: 200 });
+      });
+      await t.withIdentity({ subject: "named-user", tokenIdentifier: "named-user" }).action(api.access.acceptPendingInvites, {});
+      await t.withIdentity({ subject: "other-user", tokenIdentifier: "other-user" }).action(api.access.acceptPendingInvites, {});
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.WORKOS_API_KEY;
+      else process.env.WORKOS_API_KEY = originalKey;
+    }
+    const people = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
+    expect(people.find((person) => person.userId === "named-user")?.name).toBe("Invited Name");
+    expect(people.find((person) => person.userId === "other-user")?.name).toBe("WorkOS Name");
+  });
+
   test("legacy vendor project memberships do not grant project or requirement access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
