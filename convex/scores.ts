@@ -830,6 +830,7 @@ export const listProjectVendorResponses = query({
         vendorName: vendor.vendorName,
         vendorUserId: selectedContact?.userId ?? null,
         vendorContactName: selectedContact ? personDisplayName(selectedContact.displayName, selectedContact.userId) : null,
+        contactConflict: vendor.contacts.length > 1,
         migrationRequired: answerState.migrationRequired,
         hasConflicts: [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
         deadlineMigrationRequired,

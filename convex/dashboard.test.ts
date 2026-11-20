@@ -26,7 +26,7 @@ describe("Phase 7 dashboard totals", () => {
     const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
     expect(dashboard.rows[0].vendorUserId).toBeNull();
     const responses = await admin.query(api.scores.listProjectVendorResponses, { projectId: seeded.projectBId });
-    expect(responses[0]).toMatchObject({ vendorUserId: null, vendorContactName: null });
+    expect(responses[0]).toMatchObject({ vendorUserId: null, vendorContactName: null, contactConflict: true });
   });
 
   test("does not count a partly migrated answer that may conflict with an older one", async () => {
