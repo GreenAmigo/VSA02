@@ -1074,7 +1074,8 @@ export const getVendorResponseReview = query({
     const scoreByRequirementId = getUnconflictedVendorAnswers(answerState, vendorContext.vendorId);
     const scoreRows = [...scoreByRequirementId.values()];
 
-    const scorerRows = (await getVendorScorerHistory(ctx, args.projectId, vendorContext.vendorId)).scores;
+    const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, vendorContext.vendorId);
+    const scorerRows = scorerHistory.scores;
     const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
     const scorerRowsByRequirementId = new Map<string, Array<{
       scopeKey: string;
@@ -1169,6 +1170,8 @@ export const getVendorResponseReview = query({
       vendorContactName: vendorContext.vendorDisplayName,
       migrationRequired: answerState.migrationRequired,
       hasConflicts: [...(answerState.grouped.get(vendorContext.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
+      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
+      hasScorerHistoryConflicts: scorerHistory.hasConflicts,
       deadlineMigrationRequired: await vendorDeadlinesNeedMigration(ctx, args.projectId),
       deadlineConflict: deadlineState.hasConflict,
       deadlineAt,

@@ -260,6 +260,36 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("vendor response review reports conflicting scorer history instead of choosing a score", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    const vendorId = await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      for (const score of [0, 1] as const) {
+        await ctx.db.insert("scorerScores", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId: contact.vendorId,
+          vendorUserId: "northwind-vendor", scorerScopeKey: "individual:beta-scorer",
+          scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual", requirementId: "REQ",
+          score, enteredByUserId: "beta-scorer", enteredByDisplayName: "Beta Scorer", enteredAt: 1, updatedAt: 1,
+        });
+      }
+      return contact.vendorId;
+    });
+    const review = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorId });
+    expect(review.hasScorerHistoryConflicts).toBe(true);
+    expect(review.rows[0].scorerScores).toEqual([]);
+  });
+
   test("legacy and conflicting answers are not guessed or editable", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
