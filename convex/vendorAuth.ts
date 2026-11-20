@@ -1,6 +1,6 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { getProjectVendors } from "./projectVendors";
+import { resolveProjectVendorContact } from "./projectVendors";
 
 const MAGIC_LINK_TTL_MS = 1000 * 60 * 30;
 
@@ -34,8 +34,8 @@ export const requestVendorMagicLink = mutation({
     let member = null;
     for await (const candidate of members) {
       if (candidate.email === args.email && candidate.isActive) {
+        if (member) throw new Error("This email has multiple vendor contacts. Ask a workspace admin to resolve them.");
         member = candidate;
-        break;
       }
     }
 
@@ -43,9 +43,8 @@ export const requestVendorMagicLink = mutation({
       throw new Error("Vendor not assigned to this project");
     }
 
-    const projectVendor = (await getProjectVendors(ctx, project))
-      .find((vendor) => vendor.vendorId === member.vendorId && vendor.contacts.some((contact) => contact._id === member._id));
-    if (!projectVendor) {
+    const contact = await resolveProjectVendorContact(ctx, project, { tokenIdentifier: member.userId });
+    if (!contact || contact.member._id !== member._id) {
       throw new Error("Vendor not assigned to this project");
     }
 
@@ -102,28 +101,12 @@ export const completeVendorMagicLink = mutation({
       throw new Error("Magic link has expired");
     }
 
-    const members = ctx.db
-      .query("companyMembers")
-      .withIndex("by_company_user", (q) => q.eq("companyId", record.companyId).eq("userId", record.userId));
-    let companyMember = null;
-    for await (const candidate of members) {
-      if (candidate.role === "vendor" && candidate.isActive) {
-        companyMember = candidate;
-        break;
-      }
-    }
-
-    if (!companyMember || !companyMember.vendorId) {
-      throw new Error("Vendor access denied for this project");
-    }
-
     const project = await ctx.db.get(record.projectId);
     if (!project || project.companyId !== record.companyId) {
       throw new Error("Vendor access denied for this project");
     }
-    const projectVendor = (await getProjectVendors(ctx, project))
-      .find((vendor) => vendor.vendorId === companyMember.vendorId && vendor.contacts.some((contact) => contact._id === companyMember._id));
-    if (!projectVendor) {
+    const contact = await resolveProjectVendorContact(ctx, project, { tokenIdentifier: record.userId });
+    if (!contact || contact.member.email !== record.email) {
       throw new Error("Vendor access denied for this project");
     }
 
@@ -134,7 +117,7 @@ export const completeVendorMagicLink = mutation({
       projectId: record.projectId,
       userId: record.userId,
       email: record.email,
-      displayName: companyMember.displayName,
+      displayName: contact.member.displayName,
       role: "vendor" as const,
     };
   },
