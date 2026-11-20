@@ -298,6 +298,15 @@ describe("Phase 5 score audit trail", () => {
     await expect(firstUser.mutation(api.scores.submitScore, {
       projectId: seeded.projectBId, vendorUserId: "second-contact", requirementId: "REQ-LINK", score: 1,
     })).rejects.toThrow("own submission");
+    await t.run((ctx) => ctx.db.insert("companyMembers", {
+      companyId: seeded.companyBId, userId: "first-contact", email: "first@example.com",
+      displayName: "Duplicate contact", role: "vendor", vendorId: second.vendorId, isActive: true, createdAt: Date.now(),
+    }));
+    await expect(firstUser.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId }))
+      .rejects.toThrow("multiple vendor memberships");
+    await expect(firstUser.mutation(api.scores.saveVendorAnswer, {
+      projectId: seeded.projectBId, requirementId: "REQ-LINK", score: 0,
+    })).rejects.toThrow("multiple vendor memberships");
   });
 
   test("matching a scorer or admin name alone does not grant scoring access", async () => {
