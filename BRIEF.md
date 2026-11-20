@@ -75,7 +75,7 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 - Vendors: separate external login (e.g. emailed sign-in link), restricted to their own project and their own scores only.
 - Vendor contacts are invited from an organisation's Manage contacts page. The Add vendor organisation form does not ask for an email; existing reference emails do not create invitations.
 - A contact's workspace membership links to its vendor organisation; project access requires that organisation to be assigned to the project. Conflicting workspace invitations or memberships must not choose an organisation by order.
-- Existing incorrect links require the development/preview-only contact repair and, where evidence conflicts, explicitly confirmed mappings. Repairing a link can change which organisation existing contact-keyed answers appear under; inspect those answers before running it.
+- Existing incorrect links require the development/preview-only contact repair and, where evidence conflicts, explicitly confirmed mappings. Inspect historical answers before repair: old contact-keyed rows do not prove which organisation the answers originally belonged to.
 
 ## Build status
 
@@ -212,12 +212,15 @@ Phase 1 is approved with the following changes:
 Phase 6 reporting rule:
 - Dashboard and score reporting must use the department recorded on each scorer score entry (snapshot at score time), not the scorer's current department.
 
-Phase 6b vendor-answer rule (planned):
+Phase 6b vendor-answer rule (implementation awaiting deployment and data review):
 - Each project has one answer per vendor organisation and requirement. The answer stores the organisation and is shared with its active contact; edits record who changed what and when.
 - A vendor organisation has one active contact. A second contact cannot be invited until the active contact is deactivated; contact changes are logged.
 - Replacement contacts continue the organisation's existing answers.
 - After contact links are repaired, a separate development/preview-only backfill assigns organisations to existing answers. Unmatched answers and duplicate answers for the same organisation and requirement are reported for review, never guessed or included in totals.
-- Before backfill, show a clear migration-required message rather than assigning old answers using current contact links. Dashboard and comparison totals must never double-count.
+- Old answer records alone cannot prove their original organisation. Review the contact and answer evidence before confirming a repair or backfill; backfilling from a repaired link does not establish historical truth.
+- Before backfill, show a clear migration-required message rather than assigning old answers using current contact links. Dashboard and comparison totals must never double-count or identify a winner from incomplete or conflicting data.
+- Company scorer scores, completions, views, deadlines and answer amendments also store organisation snapshots. A separate development/preview-only history backfill reports unmatched and conflicting records; conflicting records remain excluded until reviewed.
+- Snapshot fields remain optional for existing data. Tightening them requires a later schema step only after the data is migrated and reviewed successfully.
 - The legacy workspace-bundle import must reject bundles containing scores until score import can identify the organisation and actual project requirement safely.
 
 ### Phase 1 status update
