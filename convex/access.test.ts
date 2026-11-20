@@ -16,6 +16,55 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("vendor contact repair uses accepted invitations and reports ambiguity", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const first = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "First organisation" });
+    const second = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "Second organisation" });
+    for (const [userId, email] of [["repair-contact", "repair@example.com"], ["ambiguous-contact", "ambiguous@example.com"]]) {
+      await admin.mutation(api.admin.inviteVendorContact, {
+        companyId: seeded.companyBId, vendorId: first.vendorId, name: userId, email,
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId, email });
+      await t.run(async (ctx) => {
+        const member = await ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).unique();
+        if (!member) throw new Error("Missing contact");
+        await ctx.db.patch(member._id, { vendorId: second.vendorId });
+      });
+    }
+    await t.run(async (ctx) => {
+      await ctx.db.insert("workspaceInvites", {
+        companyId: seeded.companyBId, email: "ambiguous@example.com", displayName: "Ambiguous Contact",
+        role: "vendor", vendorId: second.vendorId, status: "active", invitedByUserId: "beta-admin",
+        invitedAt: Date.now(), expiresAt: Date.now() + 100000,
+      });
+    });
+    const previous = process.env.APP_ENVIRONMENT;
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      const result = await t.mutation(internal.access.repairVendorContactLinks, { companyId: seeded.companyBId });
+      expect(result.changes).toContainEqual({
+        userId: "repair-contact", displayName: "repair-contact", previousVendorId: second.vendorId,
+        vendorId: first.vendorId, vendorName: "First organisation",
+      });
+      expect(result.unresolved).toContainEqual(expect.objectContaining({ userId: "ambiguous-contact" }));
+      const ambiguous = await t.run((ctx) => ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "ambiguous-contact")).unique());
+      expect(ambiguous?.vendorId).toBe(second.vendorId);
+      process.env.APP_ENVIRONMENT = "production";
+      await expect(t.mutation(internal.access.repairVendorContactLinks, { companyId: seeded.companyBId }))
+        .rejects.toThrow("only available in development or preview");
+    } finally {
+      if (previous === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previous;
+    }
+  });
+
   test("accepting a vendor invitation links the canonical contact and refuses conflicting invitations", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

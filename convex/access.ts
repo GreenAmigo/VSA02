@@ -645,6 +645,86 @@ function requirePreviewOrDevelopment() {
   }
 }
 
+export const repairVendorContactLinks = internalMutation({
+  args: { companyId: v.id("companies"), cursor: v.optional(v.string()) },
+  returns: v.object({
+    changes: v.array(v.object({
+      userId: v.string(),
+      displayName: v.string(),
+      previousVendorId: v.union(v.id("vendorOrganizations"), v.null()),
+      vendorId: v.id("vendorOrganizations"),
+      vendorName: v.string(),
+    })),
+    unresolved: v.array(v.object({
+      userId: v.string(),
+      displayName: v.string(),
+      reason: v.string(),
+    })),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    if (!["development", "preview"].includes((process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase())) {
+      throw new Error("Vendor contact repair is only available in development or preview.");
+    }
+    if (!await ctx.db.get(args.companyId)) throw new Error("Workspace not found.");
+    const page = await ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId))
+      .paginate({ numItems: 50, cursor: args.cursor ?? null });
+    const changes = [];
+    const unresolved = [];
+    for (const member of page.page) {
+      if (member.role !== "vendor") continue;
+      const email = member.email?.trim().toLowerCase();
+      if (!email) {
+        unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Contact has no email." });
+        continue;
+      }
+      const matchingMembers = ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId));
+      let memberCount = 0;
+      for await (const other of matchingMembers) {
+        if (other.email?.trim().toLowerCase() === email || other.userId === member.userId) memberCount++;
+      }
+      if (memberCount !== 1) {
+        unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Multiple memberships match this contact." });
+        continue;
+      }
+      const invites = ctx.db.query("workspaceInvites")
+        .withIndex("by_company_status", (q) => q.eq("companyId", args.companyId));
+      const vendorIds = new Set<Id<"vendorOrganizations">>();
+      let invalidInvite = false;
+      let hasAcceptedInvite = false;
+      for await (const invite of invites) {
+        if (invite.email.trim().toLowerCase() !== email
+          || (invite.status !== "active" && !invite.acceptedAt
+            && !(invite.status === "invited" && invite.expiresAt >= Date.now()))) continue;
+        if (invite.status === "active" || invite.acceptedAt) hasAcceptedInvite = true;
+        if (invite.role !== "vendor" || !invite.vendorId) invalidInvite = true;
+        else vendorIds.add(invite.vendorId);
+      }
+      if (!hasAcceptedInvite || invalidInvite || vendorIds.size !== 1) {
+        unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Accepted invitations do not identify exactly one vendor organisation." });
+        continue;
+      }
+      const vendorId = [...vendorIds][0];
+      const vendor = await ctx.db.get(vendorId);
+      if (!vendor || vendor.companyId !== args.companyId) {
+        unresolved.push({ userId: member.userId, displayName: member.displayName, reason: "Invitation organisation is not in this workspace." });
+        continue;
+      }
+      if (member.vendorId !== vendorId) {
+        await ctx.db.patch(member._id, { vendorId });
+        changes.push({
+          userId: member.userId, displayName: member.displayName,
+          previousVendorId: member.vendorId ?? null, vendorId, vendorName: vendor.name,
+        });
+      }
+    }
+    return { changes, unresolved, continueCursor: page.continueCursor, isDone: page.isDone };
+  },
+});
+
 const repairCandidateValidator = v.object({
   memberId: v.id("companyMembers"),
   userId: v.string(),
