@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
 
 const projectViewValidator = v.object({
@@ -56,21 +56,10 @@ async function assertProjectViewAccess(ctx: any, projectId: string) {
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
 
-  const vendorMemberships = ctx.db.query("companyMembers")
-    .withIndex("by_company_role", (q: any) => q.eq("companyId", project.companyId).eq("role", "vendor"));
-  let hasVendorMembership = false;
-  for await (const candidate of vendorMemberships) {
-    if (candidate.isActive && (userIds.includes(candidate.userId)
-      || (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail))) {
-      hasVendorMembership = true;
-      break;
-    }
-  }
-  if (hasVendorMembership) {
-    const vendors = await getProjectVendors(ctx, project);
-    const contact = vendors.flatMap((vendor) => vendor.contacts).find((candidate) => userIds.includes(candidate.userId));
-    if (contact) {
-      return { project, identity, member: { ...contact, role: "vendor" as const }, consultant: null, actorUserId: contact.userId };
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    const contact = await resolveProjectVendorContact(ctx, project, identity);
+    if (contact && userIds.includes(contact.member.userId)) {
+      return { project, identity, member: { ...contact.member, role: "vendor" as const }, consultant: null, actorUserId: contact.member.userId };
     }
     throw new Error("Project access denied");
   }
@@ -94,11 +83,6 @@ async function assertProjectViewAccess(ctx: any, projectId: string) {
     .first();
 
   if ((!member || member.role === "vendor") && !consultant) {
-    const vendors = await getProjectVendors(ctx, project);
-    const contact = vendors.flatMap((vendor) => vendor.contacts).find((candidate) => userIds.includes(candidate.userId));
-    if (contact) {
-      return { project, identity, member: { ...contact, role: "vendor" as const }, consultant, actorUserId: contact.userId };
-    }
     throw new Error("Project access denied");
   }
 
