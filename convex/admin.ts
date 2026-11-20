@@ -1048,7 +1048,7 @@ export const listActivityLogs = query({
       await assertCompanyAdmin(ctx, args.companyId);
     } else {
       if (await hasVendorMembershipForIdentity(ctx, identity)) {
-        throw new Error("Only VS Consultants can view the activity log");
+        throw new Error("Only VS Consultants can manage workspaces");
       }
       await assertConsultantAccess(ctx);
     }
