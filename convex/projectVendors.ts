@@ -10,6 +10,21 @@ export type ProjectVendor = {
   primaryContact: Doc<"companyMembers"> | null;
 };
 
+export async function assertNoOtherActiveVendorContact(
+  ctx: Pick<QueryCtx, "db">,
+  companyId: Id<"companies">,
+  vendorId: Id<"vendorOrganizations">,
+  exceptUserId?: string,
+) {
+  const members = ctx.db.query("companyMembers")
+    .withIndex("by_company_role", (q) => q.eq("companyId", companyId).eq("role", "vendor"));
+  for await (const member of members) {
+    if (member.isActive && member.vendorId === vendorId && member.userId !== exceptUserId) {
+      throw new Error(`This vendor already has an active contact, ${member.displayName}. Deactivate them first to invite someone else.`);
+    }
+  }
+}
+
 export async function getProjectVendors(
   ctx: Pick<QueryCtx, "db">,
   project: { _id: Id<"projects">; companyId: Id<"companies"> },

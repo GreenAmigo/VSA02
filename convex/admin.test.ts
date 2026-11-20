@@ -71,6 +71,41 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("only one vendor contact can become active, including old invitations and reactivation", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "contact-admin", "admin@example.com", "Admin");
+      const admin = t.withIdentity({ tokenIdentifier: "contact-admin" });
+      const company = await admin.mutation(api.admin.createCompany, { name: "Contacts workspace" });
+      const vendor = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: company.companyId, name: "Vendor" });
+      const args = { companyId: company.companyId, vendorId: vendor.vendorId };
+      await admin.mutation(api.admin.inviteVendorContact, { ...args, name: "First Contact", email: "first@example.com" });
+      await admin.mutation(api.admin.inviteVendorContact, { ...args, name: "Second Contact", email: "second@example.com" });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "first-contact", email: "first@example.com" });
+
+      const message = "This vendor already has an active contact, First Contact. Deactivate them first to invite someone else.";
+      await expect(admin.mutation(api.admin.inviteVendorContact, { ...args, name: "Third Contact", email: "third@example.com" }))
+        .rejects.toThrow(message);
+      await expect(t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "second-contact", email: "second@example.com" }))
+        .rejects.toThrow(message);
+
+      await admin.mutation(api.admin.deactivateVendorContact, { ...args, userId: "first-contact" });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "second-contact", email: "second@example.com" });
+      await expect(admin.mutation(api.admin.reactivateVendorContact, { ...args, userId: "first-contact" }))
+        .rejects.toThrow("This vendor already has an active contact, Second Contact.");
+      await expect(admin.mutation(api.admin.reactivateWorkspacePerson, { companyId: args.companyId, userId: "first-contact" }))
+        .rejects.toThrow("This vendor already has an active contact, Second Contact.");
+      const contacts = await admin.query(api.admin.listVendorContacts, args);
+      expect(contacts.filter((contact) => contact.status === "active").map((contact) => contact.userId)).toEqual(["second-contact"]);
+      const actions = await t.run(async (ctx) => {
+        const logs = await ctx.db.query("activityLogs").withIndex("by_company", (q) => q.eq("companyId", company.companyId)).collect();
+        return logs.map((log) => log.action);
+      });
+      expect(actions).toContain("deactivate_vendor_contact");
+      expect(actions).toContain("accept_workspace_invite");
+    });
+  });
+
   test("vendor invitations cannot duplicate or move a contact between organisations", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

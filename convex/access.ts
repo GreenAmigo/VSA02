@@ -2,7 +2,7 @@ import { query, mutation, action, internalAction, internalMutation, internalQuer
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
+import { assertNoOtherActiveVendorContact, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { updateMemberDisplayName } from "./scorerNames";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
@@ -453,6 +453,7 @@ export const acceptPendingInvitesForUser = internalMutation({
         if (!organization || organization.companyId !== invite.companyId) {
           throw new Error("This vendor invitation has no valid organisation. Ask a workspace admin to fix the invitation.");
         }
+        await assertNoOtherActiveVendorContact(ctx, invite.companyId, organization._id, args.userId);
         const conflicts = pendingInvites.some((other) =>
           other.companyId === invite.companyId && other._id !== invite._id
           && !other.cancelledAt && !other.deactivatedAt

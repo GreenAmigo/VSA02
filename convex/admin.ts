@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { findVendorMembershipForIdentity, getProjectVendors, hasVendorMembershipForIdentity, resolveProjectVendorContact } from "./projectVendors";
+import { assertNoOtherActiveVendorContact, findVendorMembershipForIdentity, getProjectVendors, hasVendorMembershipForIdentity, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
@@ -1449,6 +1449,7 @@ export const inviteVendorContact = mutation({
       throw new Error("This email is already linked or invited in this workspace. Ask an administrator to resolve the existing contact before inviting them.");
     }
 
+    await assertNoOtherActiveVendorContact(ctx, args.companyId, args.vendorId, matchingMembers[0]?.userId);
     const existingMember = matchingMembers.find((member) => member.isActive);
 
     if (existingMember) {
@@ -1679,6 +1680,7 @@ export const reactivateVendorContact = mutation({
       throw new Error("Vendor contact not found");
     }
 
+    await assertNoOtherActiveVendorContact(ctx, args.companyId, args.vendorId, member.userId);
     await ctx.db.patch(member._id, { isActive: true });
 
     await recordActivity(ctx, {
@@ -2045,6 +2047,11 @@ export const reactivateWorkspacePerson = mutation({
 
     if (member.isActive) {
       throw new Error("Workspace person is already active");
+    }
+
+    if (member.role === "vendor") {
+      if (!member.vendorId) throw new Error("This contact has no vendor organisation. Ask a workspace admin to repair the contact link.");
+      await assertNoOtherActiveVendorContact(ctx, args.companyId, member.vendorId, member.userId);
     }
 
     await ctx.db.patch(member._id, {
