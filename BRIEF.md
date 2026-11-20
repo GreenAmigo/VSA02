@@ -209,6 +209,9 @@ Phase 1 is approved with the following changes:
 Phase 6 reporting rule:
 - Dashboard and score reporting must use the department recorded on each scorer score entry (snapshot at score time), not the scorer's current department.
 
+Phase 6b vendor-answer rule (planned):
+- Each vendor organisation has one answer per requirement, regardless of how many contacts it has. Dashboard totals must never double-count answers from multiple contacts.
+
 ### Phase 1 status update
 - Consultant access and preview-only workspace visibility are in place and enforced on the server.
 - The consultant home, workspace directory and activity-log route are all wired to Convex-backed access queries.
