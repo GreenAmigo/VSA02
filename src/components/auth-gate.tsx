@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@workos-inc/authkit-nextjs/components";
-import { useAction } from "convex/react";
+import { useAction, useConvexAuth } from "convex/react";
 import { useRouter } from "next/navigation";
 
 import { api } from "../../convex/_generated/api";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
   const router = useRouter();
   const [redirecting, setRedirecting] = useState(false);
   const [inviteError, setInviteError] = useState(false);
@@ -26,11 +27,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }, [loading, user, router]);
 
   useEffect(() => {
-    if (!loading && user && !acceptedRef.current) {
+    if (!loading && user && !convexLoading && convexAuthenticated && !acceptedRef.current) {
       acceptedRef.current = true;
       void acceptPendingInvites({}).catch(() => setInviteError(true));
     }
-  }, [acceptPendingInvites, loading, user]);
+  }, [acceptPendingInvites, loading, user, convexLoading, convexAuthenticated]);
 
   if (loading || !user) {
     return (
