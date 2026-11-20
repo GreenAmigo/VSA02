@@ -226,6 +226,8 @@ export default defineSchema({
     newScore: v.union(v.literal(0), v.literal(1)),
     originalComment: v.optional(v.string()),
     newComment: v.optional(v.string()),
+    originalEnteredBy: v.optional(v.string()),
+    originalEnteredAt: v.optional(v.number()),
     amendedByUserId: v.string(),
     amendedByDisplayName: v.string(),
     reason: v.string(),

@@ -3,6 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, personDisplayName, recordedPersonName, resolveScorerDisplayName } from "./scorerNames";
+import { getProjectVendorAnswerState, getUnconflictedVendorAnswers, requireWritableVendorAnswer } from "./vendorAnswers";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -464,18 +465,13 @@ export const listScoreHistory = query({
       return [] as const;
     }
 
-    const { member } = await assertScoringAccess(ctx, args.projectId);
-
-    const rows = await ctx.db
-      .query("scores")
-      .withIndex("by_project_requirement", (q) => q.eq("projectId", args.projectId))
-      .take(200);
-
+    const { member, project } = await assertScoringAccess(ctx, args.projectId);
+    const state = await getProjectVendorAnswerState(ctx, project);
     const visibleRows = member.role === "vendor"
-      ? rows.filter((row) => row.vendorUserId === member.userId)
-      : rows;
+      ? [...getUnconflictedVendorAnswers(state, member.vendorId).values()]
+      : [...state.grouped.keys()].flatMap((vendorId) => [...getUnconflictedVendorAnswers(state, vendorId).values()]);
 
-    return visibleRows.map((row) => ({
+    return visibleRows.slice(0, 200).map((row) => ({
       _id: row._id,
       projectId: row.projectId,
       vendorUserId: row.vendorUserId,
@@ -513,12 +509,9 @@ export const listVendorAnswerRequirements = query({
       .filter((row) => row.status === "active" && row.priority !== 0)
       .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
 
-    const vendorScores = await ctx.db
-      .query("scores")
-      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", member.userId))
-      .collect();
-
-    const scoreByRequirementId = new Map(vendorScores.map((row) => [row.requirementId, row]));
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const scoreByRequirementId = getUnconflictedVendorAnswers(answerState, member.vendorId);
+    const vendorScores = [...scoreByRequirementId.values()];
     const amendmentNames = new Map(await Promise.all(
       [...new Set(vendorScores.map((row) => row.amendedByUserId).filter((id): id is string => Boolean(id)))]
         .map(async (id) => [id, await getWorkspacePersonName(ctx, project.companyId, id)] as const),
@@ -543,6 +536,9 @@ export const listVendorAnswerRequirements = query({
       projectDescription: project.description ?? null,
       vendorOrganizationName: vendorOrganization.name,
       vendorUserId: member.userId,
+      migrationRequired: answerState.migrationRequired,
+      conflictingRequirementIds: [...(answerState.grouped.get(member.vendorId)?.entries() ?? [])]
+        .filter(([, answers]) => answers.length > 1).map(([requirementId]) => requirementId),
       deadlineAt,
       deadlineLocked,
       submittedAt: deadline?.submittedAt ?? null,
@@ -595,22 +591,19 @@ export const saveVendorAnswer = mutation({
       throw new Error("This requirement is not active for scoring");
     }
 
-    const existing = await ctx.db
-      .query("scores")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), member.userId))
-      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
-      .first();
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const existing = requireWritableVendorAnswer(answerState, member.vendorId, args.requirementId);
 
     const now = Date.now();
     const scoreRecord = {
       companyId: project.companyId,
       projectId: args.projectId,
-      vendorUserId: member.userId,
+      vendorUserId: existing?.vendorUserId ?? member.userId,
+      vendorId: member.vendorId,
       requirementId: args.requirementId,
       score: args.score,
       comment: args.comment?.trim() || undefined,
-      enteredBy: identity.tokenIdentifier,
+      enteredBy: member.userId,
       enteredAt: now,
       amendedByUserId: existing?.amendedByUserId,
       amendedByDisplayName: existing?.amendedByDisplayName,
@@ -619,6 +612,25 @@ export const saveVendorAnswer = mutation({
     };
 
     if (existing) {
+      if (existing.score !== args.score || (existing.comment ?? "") !== (scoreRecord.comment ?? "")) {
+        await ctx.db.insert("scoreAmendments", {
+          companyId: project.companyId,
+          projectId: args.projectId,
+          vendorUserId: existing.vendorUserId,
+          vendorId: member.vendorId,
+          requirementId: args.requirementId,
+          originalScore: existing.score,
+          newScore: args.score,
+          originalComment: existing.comment,
+          newComment: scoreRecord.comment,
+          originalEnteredBy: existing.enteredBy,
+          originalEnteredAt: existing.enteredAt,
+          amendedByUserId: member.userId,
+          amendedByDisplayName: await getWorkspacePersonName(ctx, project.companyId, member.userId, identity.name),
+          reason: "Vendor answer edited",
+          amendedAt: now,
+        });
+      }
       await ctx.db.patch(existing._id, scoreRecord);
     } else {
       await ctx.db.insert("scores", scoreRecord);
@@ -675,6 +687,14 @@ export const submitVendorAnswers = mutation({
     const { project, identity, member } = await assertScoringAccess(ctx, args.projectId);
     if (member.role !== "vendor") {
       throw new Error("Project access denied");
+    }
+
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    if (answerState.migrationRequired) {
+      throw new Error("Vendor answers need migration before they can be submitted. Ask a workspace admin for help.");
+    }
+    if ([...(answerState.grouped.get(member.vendorId)?.values() ?? [])].some((answers) => answers.length > 1)) {
+      throw new Error("Conflicting vendor answers must be resolved before submission. Ask a workspace admin for help.");
     }
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
@@ -744,13 +764,12 @@ export const getVendorScoringStatus = query({
       .collect();
 
     const eligibleRequirements = activeRequirements.filter((row) => row.status === "active" && row.priority !== 0);
-    const answeredRows = await ctx.db
-      .query("scores")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), args.vendorUserId))
-      .collect();
-
-    const answeredIds = new Set(answeredRows.map((row) => row.requirementId));
+    const vendor = member.role === "vendor"
+      ? { vendorId: member.vendorId }
+      : findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId);
+    if (!vendor) throw new Error("Vendor not assigned to this project");
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const answeredIds = new Set(getUnconflictedVendorAnswers(answerState, vendor.vendorId).keys());
     const answeredCount = eligibleRequirements.filter((row) => answeredIds.has(row.requirementId)).length;
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
@@ -766,6 +785,7 @@ export const getVendorScoringStatus = query({
     return {
       projectId: args.projectId,
       vendorUserId: args.vendorUserId,
+      migrationRequired: answerState.migrationRequired,
       status,
       answeredCount,
       totalRequirements: eligibleRequirements.length,
@@ -787,16 +807,11 @@ export const listProjectVendorResponses = query({
     const totalRequirements = allRequirements.filter((row) => row.status === "active" && row.priority !== 0).length;
 
     const vendors = await getProjectVendors(ctx, project);
+    const answerState = await getProjectVendorAnswerState(ctx, project);
     const rows = await Promise.all(vendors.map(async (vendor) => {
       const selectedContact = vendor.primaryContact;
       const vendorUserIds = vendor.contacts.map((contact) => contact.userId);
-      const scoresByVendor = await Promise.all(vendorUserIds.map((vendorUserId) =>
-        ctx.db
-          .query("scores")
-          .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorUserId))
-          .collect(),
-      ));
-      const answeredRequirementIds = new Set(scoresByVendor.flat().map((scoreRow) => scoreRow.requirementId));
+      const answeredRequirementIds = new Set(getUnconflictedVendorAnswers(answerState, vendor.vendorId).keys());
 
       const deadlines = await Promise.all(vendorUserIds.map((vendorUserId) =>
         ctx.db
@@ -823,6 +838,8 @@ export const listProjectVendorResponses = query({
         vendorName: vendor.vendorName,
         vendorUserId: selectedContact?.userId ?? null,
         vendorContactName: selectedContact ? personDisplayName(selectedContact.displayName, selectedContact.userId) : null,
+        migrationRequired: answerState.migrationRequired,
+        hasConflicts: [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
         answeredCount,
         totalRequirements,
         status,
@@ -1034,11 +1051,9 @@ export const getVendorResponseReview = query({
       .filter((row) => row.status === "active" && row.priority !== 0)
       .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
 
-    const scoreRows = await ctx.db
-      .query("scores")
-      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
-      .collect();
-    const scoreByRequirementId = new Map(scoreRows.map((row) => [row.requirementId, row]));
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const scoreByRequirementId = getUnconflictedVendorAnswers(answerState, vendorContext.vendorId);
+    const scoreRows = [...scoreByRequirementId.values()];
 
     const scorerRows = await ctx.db
       .query("scorerScores")
@@ -1078,7 +1093,7 @@ export const getVendorResponseReview = query({
 
     const amendments = await ctx.db
       .query("scoreAmendments")
-      .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
+      .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendorContext.vendorId))
       .collect();
 
     const amendmentUserIds = new Set([
@@ -1135,6 +1150,8 @@ export const getVendorResponseReview = query({
       vendorUserId: vendorContext.vendorUserId,
       vendorName: vendorContext.vendorName,
       vendorContactName: vendorContext.vendorDisplayName,
+      migrationRequired: answerState.migrationRequired,
+      hasConflicts: [...(answerState.grouped.get(vendorContext.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
       deadlineAt,
       deadlineLocked,
       rows,
@@ -1161,19 +1178,17 @@ export const getProjectRequirementComparison = query({
       .collect();
     const totalScorers = new Set(scorerAssignments.map((row: any) => row.userId)).size;
 
+    const answerState = await getProjectVendorAnswerState(ctx, project);
     const vendorComparison = await Promise.all(vendors.map(async (vendor) => {
       const scorerRows = await ctx.db
         .query("scorerScores")
         .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
         .collect();
       const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
-      const vendorRows = await ctx.db
-        .query("scores")
-        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
-        .collect();
+      const vendorRows = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
       const amendmentRows = await ctx.db
         .query("scoreAmendments")
-        .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
+        .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendor.vendorId))
         .collect();
 
       const amendmentUserIds = new Set([
@@ -1339,6 +1354,9 @@ export const getProjectRequirementComparison = query({
 
     return {
       projectId: args.projectId,
+      migrationRequired: answerState.migrationRequired,
+      hasVendorAnswerConflicts: [...answerState.grouped.values()].some((requirements) =>
+        [...requirements.values()].some((answers) => answers.length > 1)),
       vendors: vendorComparison.map((vendor) => ({
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
@@ -1430,13 +1448,10 @@ export const getScorerVendorGrid = query({
       .first();
     const isCompleted = completion?.status === "completed";
 
-    const vendorSelfScores = isCompleted
-      ? await ctx.db
-          .query("scores")
-          .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId))
-          .collect()
-      : [];
-    const vendorSelfByRequirementId = new Map(vendorSelfScores.map((row) => [row.requirementId, row]));
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const vendorSelfByRequirementId = isCompleted
+      ? getUnconflictedVendorAnswers(answerState, selectedVendor.vendorId)
+      : new Map();
 
     const peerScoresByRequirementId = new Map<string, Array<{
       scopeKey: string;
@@ -1913,6 +1928,10 @@ export const submitScore = mutation({
         throw new Error("Vendor scoring is locked after the deadline");
       }
     }
+    const vendor = member.role === "vendor"
+      ? { vendorId: member.vendorId }
+      : findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId);
+    if (!vendor) throw new Error("Vendor not assigned to this project");
 
     const requirement = await ctx.db
       .query("requirements")
@@ -1928,18 +1947,16 @@ export const submitScore = mutation({
       throw new Error("This requirement is not active for scoring");
     }
 
-    const existing = await ctx.db
-      .query("scores")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), args.vendorUserId))
-      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
-      .first();
+    const existing = requireWritableVendorAnswer(
+      await getProjectVendorAnswerState(ctx, project), vendor.vendorId, args.requirementId,
+    );
 
     const now = Date.now();
     const scoreRecord = {
       companyId: project.companyId,
       projectId: args.projectId,
-      vendorUserId: args.vendorUserId,
+      vendorUserId: existing?.vendorUserId ?? args.vendorUserId,
+      vendorId: vendor.vendorId,
       requirementId: args.requirementId,
       score: args.score,
       comment: args.comment,
@@ -1952,6 +1969,18 @@ export const submitScore = mutation({
     };
 
     if (existing) {
+      if (existing.score !== args.score || (existing.comment ?? "") !== (args.comment ?? "")) {
+        const actorUserId = member.userId;
+        await ctx.db.insert("scoreAmendments", {
+          companyId: project.companyId, projectId: args.projectId, vendorUserId: existing.vendorUserId,
+          vendorId: vendor.vendorId, requirementId: args.requirementId, originalScore: existing.score,
+          newScore: args.score, originalComment: existing.comment, newComment: args.comment,
+          originalEnteredBy: existing.enteredBy, originalEnteredAt: existing.enteredAt,
+          amendedByUserId: actorUserId,
+          amendedByDisplayName: await getWorkspacePersonName(ctx, project.companyId, actorUserId, identity.name),
+          reason: "Vendor answer edited", amendedAt: now,
+        });
+      }
       await ctx.db.patch(existing._id, scoreRecord);
       return { ...scoreRecord, updated: true };
     }
@@ -1977,10 +2006,12 @@ export const listScoreAmendments = query({
       throw new Error("Project access denied");
     }
 
-    const rows = await ctx.db
-      .query("scoreAmendments")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), args.vendorUserId))
+    const vendor = member.role === "vendor"
+      ? { vendorId: member.vendorId }
+      : findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId);
+    if (!vendor) throw new Error("Vendor not assigned to this project");
+    const rows = await ctx.db.query("scoreAmendments")
+      .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendor.vendorId))
       .collect();
 
     return rows
@@ -2004,7 +2035,7 @@ export const amendVendorScore = mutation({
   args: scoreAmendmentValidator,
   handler: async (ctx, args) => {
     const { project, identity, actorUserId, actorDisplayName } = await assertVendorReviewAccess(ctx, args.projectId);
-    await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+    const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
 
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
@@ -2022,12 +2053,9 @@ export const amendVendorScore = mutation({
       throw new Error("Requirement not found in project");
     }
 
-    const existing = await ctx.db
-      .query("scores")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), args.vendorUserId))
-      .filter((q: any) => q.eq(q.field("requirementId"), args.requirementId))
-      .first();
+    const existing = requireWritableVendorAnswer(
+      await getProjectVendorAnswerState(ctx, project), vendorContext.vendorId, args.requirementId,
+    );
 
     if (!existing) {
       throw new Error("No vendor score found for this requirement");
@@ -2043,11 +2071,14 @@ export const amendVendorScore = mutation({
       companyId: project.companyId,
       projectId: args.projectId,
       vendorUserId: args.vendorUserId,
+      vendorId: vendorContext.vendorId,
       requirementId: args.requirementId,
       originalScore: existing.score,
       newScore: args.score,
       originalComment: existing.comment ?? "",
       newComment: updatedComment,
+      originalEnteredBy: existing.enteredBy,
+      originalEnteredAt: existing.enteredAt,
       amendedByUserId: actorUserId,
       amendedByDisplayName: actorDisplayName,
       reason,

@@ -179,6 +179,7 @@ const seedRequirementComparisonFixture = mutation({
         companyId: args.companyId,
         projectId: args.projectId,
         vendorUserId: payload.vendorUserId,
+        vendorId: payload.vendorUserId === "northwind-vendor" ? northwindMembership.vendorId : southwindVendorId,
         requirementId: payload.requirementId,
         score: payload.score,
         comment: payload.comment,
@@ -205,6 +206,7 @@ const seedRequirementComparisonFixture = mutation({
       companyId: args.companyId,
       projectId: args.projectId,
       vendorUserId: "northwind-vendor",
+      vendorId: northwindMembership.vendorId,
       requirementId: "CMP-NFR-001",
       originalScore: 0,
       newScore: 1,
@@ -257,6 +259,113 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("legacy and conflicting answers are not guessed or editable", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await t.run((ctx) => ctx.db.patch(seeded.projectBId, { vendorDeadline: Date.now() + 100000 }));
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    const { legacyId, vendorId } = await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing test organisation");
+      const legacyId = await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+        requirementId: "REQ", score: 1, enteredBy: "northwind-vendor", enteredAt: 1,
+      });
+      return { legacyId, vendorId: member.vendorId };
+    });
+    const legacy = await vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(legacy.migrationRequired).toBe(true);
+    expect(legacy.rows[0].score).toBeNull();
+    await expect(vendor.mutation(api.scores.saveVendorAnswer, {
+      projectId: seeded.projectBId, requirementId: "REQ", score: 0,
+    })).rejects.toThrow("need migration");
+    await t.run(async (ctx) => {
+      await ctx.db.patch(legacyId, { vendorId });
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "other-contact",
+        vendorId, requirementId: "REQ", score: 0, enteredBy: "other-contact", enteredAt: 2,
+      });
+    });
+    const conflict = await vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(conflict.conflictingRequirementIds).toContain("REQ");
+    expect(conflict.rows[0].score).toBeNull();
+    await expect(vendor.mutation(api.scores.saveVendorAnswer, {
+      projectId: seeded.projectBId, requirementId: "REQ", score: 0,
+    })).rejects.toThrow("conflicting vendor answers");
+    await expect(vendor.mutation(api.scores.submitVendorAnswers, {
+      projectId: seeded.projectBId, confirm: true,
+    })).rejects.toThrow("Conflicting vendor answers");
+  });
+
+  test("replacement contact continues the organisation answer with its edit history", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const oldContact = t.withIdentity({ tokenIdentifier: "northwind-vendor", name: "Original Contact" });
+    const vendorId = await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing vendor contact");
+      await ctx.db.patch(seeded.projectBId, { vendorDeadline: Date.now() + 100000 });
+      return member.vendorId;
+    });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    const initial = await oldContact.mutation(api.scores.saveVendorAnswer, {
+      projectId: seeded.projectBId, requirementId: "REQ", score: 1, comment: "Original",
+    });
+    await admin.mutation(api.admin.deactivateVendorContact, {
+      companyId: seeded.companyBId, vendorId, userId: "northwind-vendor",
+    });
+    await admin.mutation(api.admin.inviteVendorContact, {
+      companyId: seeded.companyBId, vendorId, name: "Replacement Contact", email: "replacement@example.com",
+    });
+    await t.mutation(internal.access.acceptPendingInvitesForUser, {
+      userId: "replacement", email: "replacement@example.com",
+    });
+    const replacement = t.withIdentity({ tokenIdentifier: "replacement", email: "replacement@example.com" });
+    const page = await replacement.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(page.rows.find((row) => row.requirementId === "REQ")).toMatchObject({ score: 1, comment: "Original" });
+    await replacement.mutation(api.scores.saveVendorAnswer, {
+      projectId: seeded.projectBId, requirementId: "REQ", score: 0, comment: "Updated",
+    });
+    const review = await admin.query(api.scores.getVendorResponseReview, {
+      projectId: seeded.projectBId, vendorUserId: "replacement",
+    });
+    expect(review.rows.find((row) => row.requirementId === "REQ")).toMatchObject({
+      score: 0, comment: "Updated",
+      history: [expect.objectContaining({ originalScore: 1, newScore: 0, amendedByDisplayName: "Replacement Contact" })],
+    });
+    const stored = await t.run(async (ctx) => {
+      const answers = await ctx.db.query("scores")
+        .withIndex("by_project_requirement", (q) => q.eq("projectId", seeded.projectBId).eq("requirementId", "REQ")).collect();
+      const history = await ctx.db.query("scoreAmendments")
+        .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", seeded.projectBId).eq("vendorId", vendorId)).collect();
+      return { answers, history };
+    });
+    expect(stored.answers).toHaveLength(1);
+    expect(stored.answers[0]).toMatchObject({ vendorId, score: 0, enteredBy: "replacement" });
+    expect(stored.history[0]).toMatchObject({
+      originalEnteredBy: "northwind-vendor", originalEnteredAt: initial.savedAt, amendedByUserId: "replacement",
+    });
+    await expect(oldContact.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId }))
+      .rejects.toThrow("Project access denied");
+  });
+
   test("vendor answers follow contact links rather than organisation or invitation order", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
@@ -524,10 +633,10 @@ describe("Phase 5 score audit trail", () => {
       projectBName: "Supply Chain",
     });
 
-    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
 
     await admin.mutation(api.requirements.applyRequirementImport, {
-      projectId: seeded.projectAId,
+      projectId: seeded.projectBId,
       rows: [
         {
           id: "REQ-101",
@@ -540,23 +649,23 @@ describe("Phase 5 score audit trail", () => {
     });
 
     const submitted = await admin.mutation(api.scores.submitScore, {
-      projectId: seeded.projectAId,
+      projectId: seeded.projectBId,
       vendorUserId: "northwind-vendor",
       requirementId: "REQ-101",
       score: 1,
       comment: "Matches the requirement",
     });
 
-    expect(submitted.enteredBy).toBe("acme-admin");
+    expect(submitted.enteredBy).toBe("beta-admin");
     expect(submitted.enteredAt).toBeTypeOf("number");
 
     const history = await admin.query(api.scores.listScoreHistory, {
-      projectId: seeded.projectAId,
+      projectId: seeded.projectBId,
     });
 
     expect(history).toHaveLength(1);
     expect(history[0].vendorUserId).toBe("northwind-vendor");
-    expect(history[0].enteredBy).toBe("acme-admin");
+    expect(history[0].enteredBy).toBe("beta-admin");
     expect(history[0].enteredAt).toBe(submitted.enteredAt);
   });
 
@@ -704,10 +813,13 @@ describe("Phase 5 score audit trail", () => {
       vendorUserId: "northwind-vendor",
     });
 
-    expect(history).toHaveLength(1);
-    expect(history[0].reason).toBe("Updated after final review");
-    expect(history[0].originalScore).toBe(0);
-    expect(history[0].newScore).toBe(1);
+    expect(history).toHaveLength(2);
+    expect(history).toContainEqual(expect.objectContaining({
+      reason: "Updated after final review", originalScore: 0, newScore: 1,
+    }));
+    expect(history).toContainEqual(expect.objectContaining({
+      reason: "Vendor answer edited", originalScore: 1, newScore: 0,
+    }));
   });
 
   test("vendor answer page APIs only expose active answerable requirements and keep edits open until due date", async () => {
