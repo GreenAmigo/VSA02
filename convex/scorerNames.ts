@@ -15,13 +15,35 @@ export async function updateMemberDisplayName(ctx: MutationCtx, member: Doc<"com
   }
 }
 
-function isPersonName(value: string | null | undefined, userId: string) {
+export const MISSING_PERSON_NAME = "Name not set — ask an admin to update it";
+
+export function isPersonName(value: string | null | undefined, userId: string) {
   const name = value?.trim();
-  return Boolean(name && name !== userId && !name.includes("|") && !name.includes("@")
+  return Boolean(name && name !== userId && !/^(scorer|admin|vendor)$/i.test(name) && !name.includes("|") && !name.includes("@")
     && !/^workos[_-]/i.test(name)
     && !/^user[_:-]/i.test(name)
-    && !/^org[_:-]/i.test(name)
-    && !/^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(name));
+    && !/^org[_:-]/i.test(name));
+}
+
+export function personDisplayName(value: string | null | undefined, userId = "") {
+  return isPersonName(value, userId) ? value!.trim() : MISSING_PERSON_NAME;
+}
+
+export function recordedPersonName(currentName: string | undefined, snapshot: string | null | undefined, userId: string) {
+  return currentName && currentName !== MISSING_PERSON_NAME ? currentName : personDisplayName(snapshot, userId);
+}
+
+export async function getWorkspacePersonName(ctx: Pick<QueryCtx, "db">, companyId: Id<"companies"> | undefined, userId: string, snapshot?: string | null) {
+  if (companyId) {
+    const members = ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", companyId).eq("userId", userId));
+    for await (const member of members) {
+      if (isPersonName(member.displayName, userId)) return member.displayName.trim();
+    }
+  }
+  const consultant = await ctx.db.query("consultants").withIndex("by_user", (q) => q.eq("userId", userId)).first();
+  if (isPersonName(consultant?.displayName, userId)) return consultant!.displayName.trim();
+  return personDisplayName(snapshot, userId);
 }
 
 export async function getScorerDisplayNames(
@@ -62,5 +84,5 @@ export function resolveScorerDisplayName(params: {
   const userId = params.enteredByUserId ?? "";
   const name = params.displayNameByUserId.get(userId);
   if (name) return name;
-  return isPersonName(params.enteredByDisplayName, userId) ? params.enteredByDisplayName!.trim() : "Scorer";
+  return personDisplayName(params.enteredByDisplayName, userId);
 }

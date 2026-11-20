@@ -5,6 +5,7 @@ import { convexTest } from "convex-test";
 import { v } from "convex/values";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { mutation } from "./_generated/server";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
@@ -301,15 +302,35 @@ describe("Phase 5 score audit trail", () => {
     const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
     expect(comparison.rows[0].cells[0].scorerDetails[0].scorerName).toBe("Beta Scorer");
 
+    const person = (await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId }))
+      .find((entry) => entry.userId === "beta-scorer");
+    if (!person) throw new Error("Missing test person");
+    await admin.mutation(api.admin.updateWorkspacePersonName, {
+      companyId: seeded.companyBId, memberId: person.id as Id<"companyMembers">, displayName: "Mary-Jane Smith",
+    });
+    const renamedGrid = await scorer.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(renamedGrid.scorerScope.label).toBe("Mary-Jane Smith");
+    expect(renamedGrid.rows[0].ownEnteredByDisplayName).toBe("Mary-Jane Smith");
+    const renamedReview = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(renamedReview.rows[0].scorerScores[0].enteredByDisplayName).toBe("Mary-Jane Smith");
+    const renamedProgress = await admin.query(api.scores.getProjectScoringProgress, { projectId: seeded.projectBId });
+    expect(renamedProgress.groups[0].scorers[0].displayName).toBe("Mary-Jane Smith");
+    const renamedComparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(renamedComparison.rows[0].cells[0].scorerDetails[0].scorerName).toBe("Mary-Jane Smith");
+
     await t.run(async (ctx) => {
       const member = await ctx.db.query("companyMembers")
         .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique();
       if (!member) throw new Error("Missing test member");
       await ctx.db.patch(member._id, { displayName: "beta-scorer" });
+      const assignment = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "beta-scorer")).unique();
+      if (!assignment) throw new Error("Missing test assignment");
+      await ctx.db.patch(assignment._id, { displayName: "scorer@beta.example" });
     });
     const fallbackGrid = await scorer.query(api.scores.getScorerVendorGrid, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
-    expect(fallbackGrid.scorerScope.label).toBe("Scorer");
-    expect(fallbackGrid.rows[0].ownEnteredByDisplayName).toBe("Scorer");
+    expect(fallbackGrid.scorerScope.label).toBe("Name not set — ask an admin to update it");
+    expect(fallbackGrid.rows[0].ownEnteredByDisplayName).toBe("Name not set — ask an admin to update it");
   });
 
   test("vendor scoring access follows organisation assignment rather than legacy project membership", async () => {
@@ -723,6 +744,18 @@ describe("Phase 5 score audit trail", () => {
     const amendedRow = readOnlyPanel.rows.find((row: { requirementId: string }) => row.requirementId === "REQ-401");
     expect(readOnlyPanel.deadlineLocked).toBe(true);
     expect(amendedRow?.amendedByDisplayName).toBe("Beta Admin");
+    const adminPerson = (await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId }))
+      .find((person) => person.userId === "beta-admin");
+    if (!adminPerson) throw new Error("Missing admin");
+    await admin.mutation(api.admin.updateWorkspacePersonName, {
+      companyId: seeded.companyBId, memberId: adminPerson.id as Id<"companyMembers">, displayName: "Renamed Admin",
+    });
+    const renamedPanel = await vendor.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(renamedPanel.rows.find((row) => row.requirementId === "REQ-401")?.amendedByDisplayName).toBe("Renamed Admin");
+    const review = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
+    expect(review.rows.find((row) => row.requirementId === "REQ-401")?.history[0].amendedByDisplayName).toBe("Renamed Admin");
+    const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(comparison.rows.find((row) => row.requirementId === "REQ-401")?.cells[0].vendorAmendedByDisplayName).toBe("Renamed Admin");
   });
 
   test("vendor answer page APIs enforce project scope and active requirement rules", async () => {

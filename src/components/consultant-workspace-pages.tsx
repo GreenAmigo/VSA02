@@ -137,14 +137,14 @@ function looksLikeIdentityValue(value: string | null | undefined) {
     || /^workos[_-]/i.test(normalized)
     || /^user[_:-]/i.test(normalized)
     || /^org[_:-]/i.test(normalized)
-    || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(normalized)
+    || /^(scorer|admin|vendor)$/i.test(normalized)
   );
 }
 
-function safeDisplayName(value: string | null | undefined, fallback = "Scorer") {
+function safeDisplayName(value: string | null | undefined) {
   const normalized = `${value ?? ""}`.trim();
   if (!normalized || looksLikeIdentityValue(normalized)) {
-    return fallback;
+    return "Name not set — ask an admin to update it";
   }
 
   return normalized;
@@ -712,7 +712,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-base font-semibold text-white">{vendor.vendorName}</p>
-                  <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName || "No active contact linked"}</p>
+                  <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -770,7 +770,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h4 className="text-base font-semibold text-white">{selectedReview.vendorName}</h4>
-                  <p className="text-xs text-slate-400">Contact: {selectedReview.vendorContactName}</p>
+                  <p className="text-xs text-slate-400">Contact: {safeDisplayName(selectedReview.vendorContactName)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill label={selectedReview.deadlineLocked ? "Deadline locked" : "Read-only until deadline"} className={selectedReview.deadlineLocked ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-slate-700 bg-slate-900 text-slate-200"} />
@@ -834,7 +834,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                           <p>Vendor score: {row.score === null ? "-" : row.score}</p>
                           <p className="mt-1 max-w-xs truncate" title={row.comment || ""}>Comment: {row.comment || "(none)"}</p>
                           {row.amendedByDisplayName && row.amendedAt ? (
-                            <p className="mt-1 text-slate-400">Amended by {row.amendedByDisplayName} on {new Date(row.amendedAt).toLocaleString()}</p>
+                            <p className="mt-1 text-slate-400">Amended by {safeDisplayName(row.amendedByDisplayName)} on {new Date(row.amendedAt).toLocaleString()}</p>
                           ) : null}
                           <button
                             type="button"
@@ -947,7 +947,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                               <div key={`${row.requirementId}-${index}`} className="rounded-lg border border-slate-800 bg-slate-900/70 p-2">
                                 <p>Score: {entry.originalScore}{" -> "}{entry.newScore}</p>
                                 <p>Comment: {entry.originalComment || "(none)"}{" -> "}{entry.newComment || "(none)"}</p>
-                                <p>By: {entry.amendedByDisplayName} on {new Date(entry.amendedAt).toLocaleString()}</p>
+                                <p>By: {safeDisplayName(entry.amendedByDisplayName)} on {new Date(entry.amendedAt).toLocaleString()}</p>
                                 <p>Reason: {entry.reason}</p>
                               </div>
                             ))}
@@ -1235,7 +1235,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="font-medium text-white">{vendor.vendorName}</p>
-                    <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName || "Unknown"}</p>
+                    <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <StatusPill label={vendor.status === "not-started" ? "Not started" : vendor.status === "in-progress" ? "In progress" : "Completed"} className="border-slate-700 bg-slate-900 text-slate-100" />
@@ -1257,7 +1257,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-base font-semibold text-white">Scoring {grid.vendorName}</p>
-                  <p className="text-xs text-slate-400">Own scorer column: {grid.scorerScope.label}</p>
+                  <p className="text-xs text-slate-400">Own scorer column: {safeDisplayName(grid.scorerScope.label)}</p>
                 </div>
                 {grid.isCompleted ? (
                   <div className="flex flex-wrap items-center gap-2">
@@ -2197,8 +2197,7 @@ export function ConsultantActivityLogPage() {
               {logs.map((log) => (
                 <div key={log._id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   {(() => {
-                    const actorNameRaw = (log.actorLabel ?? "").split("<")[0]?.split("(")[0]?.trim();
-                    const actorName = actorNameRaw && !looksLikeIdentityValue(actorNameRaw) ? actorNameRaw : "";
+                    const actorName = safeDisplayName(log.actorLabel);
                     const rawDetails = log.detailLines && log.detailLines.length > 0 ? log.detailLines : [log.details];
                     const dedupedDetails = Array.from(new Set(rawDetails.map((line) => line.trim()).filter((line) => line.length > 0)));
                     const summaryLine = (log.summary ?? log.details).trim();
@@ -3486,7 +3485,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                       {requirementComparison.vendors.map((vendor) => (
                         <th key={vendor.vendorUserId} className="sticky top-0 z-20 min-w-[170px] border-b border-slate-800 bg-slate-900 px-3 py-2 text-left">
                           <p className="font-medium text-white">{vendor.vendorName}</p>
-                          <p className="text-[11px] text-slate-400">{vendor.vendorContactName || "No contact"}</p>
+                          <p className="text-[11px] text-slate-400">{vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No contact"}</p>
                         </th>
                       ))}
                     </tr>
@@ -3651,7 +3650,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                     {selectedComparisonCellData.vendorEnteredAt ? <p>Date: {new Date(selectedComparisonCellData.vendorEnteredAt).toLocaleDateString()}</p> : null}
                     {selectedComparisonCellData.vendorAmendedAt ? (
                       <p>
-                        Amended by {safeDisplayName(selectedComparisonCellData.vendorAmendedByDisplayName, "Admin")} on {new Date(selectedComparisonCellData.vendorAmendedAt).toLocaleDateString()}
+                        Amended by {safeDisplayName(selectedComparisonCellData.vendorAmendedByDisplayName)} on {new Date(selectedComparisonCellData.vendorAmendedAt).toLocaleDateString()}
                       </p>
                     ) : null}
                     {selectedComparisonCellData.vendorAmendmentReason ? <p>Reason: {selectedComparisonCellData.vendorAmendmentReason}</p> : null}
@@ -3665,7 +3664,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                       <div key={`${entry.amendedAt}-${index}`} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2 text-xs text-slate-300">
                         <p>Score: {entry.originalScore} → {entry.newScore}</p>
                         <p>Comment: {entry.originalComment || "(none)"} → {entry.newComment || "(none)"}</p>
-                        <p>By {safeDisplayName(entry.amendedByDisplayName, "Admin")} on {new Date(entry.amendedAt).toLocaleDateString()}</p>
+                        <p>By {safeDisplayName(entry.amendedByDisplayName)} on {new Date(entry.amendedAt).toLocaleDateString()}</p>
                         <p>Reason: {entry.reason}</p>
                       </div>
                     ))}
@@ -4142,7 +4141,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
                   />
 
                   {panel.deadlineLocked && row.amendedByDisplayName ? (
-                    <p className="mt-2 text-xs text-slate-400">Amended by {row.amendedByDisplayName}</p>
+                    <p className="mt-2 text-xs text-slate-400">Amended by {safeDisplayName(row.amendedByDisplayName)}</p>
                   ) : null}
                 </>
               )}

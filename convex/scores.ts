@@ -2,7 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
-import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
+import { getScorerDisplayNames, getWorkspacePersonName, personDisplayName, recordedPersonName, resolveScorerDisplayName } from "./scorerNames";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -303,8 +303,8 @@ async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ 
     throw new Error("Only consultants and company admins can review vendor responses");
   }
 
-  const actorUserId = identity.subject ?? identity.tokenIdentifier ?? companyAdmin?.userId ?? consultant?.userId ?? "system";
-  const actorDisplayName = identity.name?.trim() || companyAdmin?.displayName || consultant?.displayName || "Admin";
+  const actorUserId = companyAdmin?.userId ?? consultant?.userId ?? identity.subject ?? identity.tokenIdentifier ?? "system";
+  const actorDisplayName = await getWorkspacePersonName(ctx, project.companyId, actorUserId, identity.name);
 
   return { project, identity, actorUserId, actorDisplayName };
 }
@@ -325,7 +325,7 @@ async function resolveVendorReviewContext(ctx: any, project: any, vendorUserId: 
     vendorUserId: trimmedVendorUserId,
     vendorId: vendor.vendorId,
     vendorName: vendor.vendorName,
-    vendorDisplayName: contact.displayName,
+    vendorDisplayName: personDisplayName(contact.displayName, contact.userId),
   };
 }
 
@@ -465,7 +465,7 @@ async function listAssignedVendorUsers(ctx: any, project: any) {
     vendorId: vendor.vendorId,
     vendorName: vendor.vendorName,
     vendorUserId: vendor.primaryContact.userId,
-    vendorContactName: vendor.primaryContact.displayName,
+    vendorContactName: personDisplayName(vendor.primaryContact.displayName, vendor.primaryContact.userId),
   }] : []);
 }
 
@@ -541,6 +541,10 @@ export const listVendorAnswerRequirements = query({
       .collect();
 
     const scoreByRequirementId = new Map(vendorScores.map((row) => [row.requirementId, row]));
+    const amendmentNames = new Map(await Promise.all(
+      [...new Set(vendorScores.map((row) => row.amendedByUserId).filter((id): id is string => Boolean(id)))]
+        .map(async (id) => [id, await getWorkspacePersonName(ctx, project.companyId, id)] as const),
+    ));
     const answeredCount = visibleRequirements.filter((row) => scoreByRequirementId.has(row.requirementId)).length;
     const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
@@ -575,7 +579,9 @@ export const listVendorAnswerRequirements = query({
           score: answer?.score ?? null,
           comment: answer?.comment ?? "",
           enteredAt: answer?.enteredAt ?? null,
-          amendedByDisplayName: answer?.amendedByDisplayName ?? null,
+          amendedByDisplayName: answer?.amendedByUserId
+            ? recordedPersonName(amendmentNames.get(answer.amendedByUserId), answer.amendedByDisplayName, answer.amendedByUserId)
+            : answer?.amendedByDisplayName ? personDisplayName(answer.amendedByDisplayName) : null,
           amendedAt: answer?.amendedAt ?? null,
         };
       }),
@@ -838,7 +844,7 @@ export const listProjectVendorResponses = query({
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
         vendorUserId: selectedContact?.userId ?? null,
-        vendorContactName: selectedContact?.displayName ?? null,
+        vendorContactName: selectedContact ? personDisplayName(selectedContact.displayName, selectedContact.userId) : null,
         answeredCount,
         totalRequirements,
         status,
@@ -1097,6 +1103,13 @@ export const getVendorResponseReview = query({
       .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", vendorContext.vendorUserId))
       .collect();
 
+    const amendmentUserIds = new Set([
+      ...amendments.map((entry) => entry.amendedByUserId),
+      ...scoreRows.map((entry) => entry.amendedByUserId).filter((id): id is string => Boolean(id)),
+    ]);
+    const amendmentNames = new Map(await Promise.all(
+      [...amendmentUserIds].map(async (id) => [id, await getWorkspacePersonName(ctx, project.companyId, id)] as const),
+    ));
     const amendmentsByRequirementId = new Map<string, Array<any>>();
     for (const amendment of amendments) {
       const current = amendmentsByRequirementId.get(amendment.requirementId) ?? [];
@@ -1117,7 +1130,7 @@ export const getVendorResponseReview = query({
           newScore: entry.newScore,
           originalComment: entry.originalComment ?? "",
           newComment: entry.newComment ?? "",
-          amendedByDisplayName: entry.amendedByDisplayName,
+          amendedByDisplayName: recordedPersonName(amendmentNames.get(entry.amendedByUserId), entry.amendedByDisplayName, entry.amendedByUserId),
           amendedAt: entry.amendedAt,
           reason: entry.reason,
         }));
@@ -1129,7 +1142,9 @@ export const getVendorResponseReview = query({
         priority: requirement.priority,
         score: score?.score ?? null,
         comment: score?.comment ?? "",
-        amendedByDisplayName: score?.amendedByDisplayName ?? null,
+        amendedByDisplayName: score?.amendedByUserId
+          ? recordedPersonName(amendmentNames.get(score.amendedByUserId), score.amendedByDisplayName, score.amendedByUserId)
+          : score?.amendedByDisplayName ? personDisplayName(score.amendedByDisplayName) : null,
         amendedAt: score?.amendedAt ?? null,
         scorerScores: (scorerRowsByRequirementId.get(requirement.requirementId) ?? [])
           .sort((a, b) => a.scopeLabel.localeCompare(b.scopeLabel) || b.enteredAt - a.enteredAt),
@@ -1183,6 +1198,13 @@ export const getProjectRequirementComparison = query({
         .withIndex("by_project_vendor", (q: any) => q.eq("projectId", args.projectId).eq("vendorUserId", vendor.vendorUserId as string))
         .collect();
 
+      const amendmentUserIds = new Set([
+        ...amendmentRows.map((entry) => entry.amendedByUserId),
+        ...vendorRows.map((entry) => entry.amendedByUserId).filter((id): id is string => Boolean(id)),
+      ]);
+      const amendmentNames = new Map(await Promise.all(
+        [...amendmentUserIds].map(async (id) => [id, await getWorkspacePersonName(ctx, project.companyId, id)] as const),
+      ));
       const scorerByRequirementId = new Map<string, Array<{
         scorerName: string;
         scorerDepartmentName: string;
@@ -1223,7 +1245,7 @@ export const getProjectRequirementComparison = query({
           newScore: row.newScore,
           originalComment: row.originalComment ?? "",
           newComment: row.newComment ?? "",
-          amendedByDisplayName: row.amendedByDisplayName,
+          amendedByDisplayName: recordedPersonName(amendmentNames.get(row.amendedByUserId), row.amendedByDisplayName, row.amendedByUserId),
           amendedAt: row.amendedAt,
           reason: row.reason,
         });
@@ -1238,6 +1260,7 @@ export const getProjectRequirementComparison = query({
         scorerByRequirementId,
         vendorByRequirementId,
         amendmentsByRequirementId,
+        amendmentNames,
       };
     }));
 
@@ -1264,7 +1287,9 @@ export const getProjectRequirementComparison = query({
           vendorComment: vendorAnswer?.comment ?? "",
           vendorEnteredAt: vendorAnswer?.enteredAt ?? null,
           vendorIsAmended: Boolean(vendorAnswer?.amendedAt || vendorAnswer?.amendedByDisplayName || vendorAnswer?.amendmentReason),
-          vendorAmendedByDisplayName: vendorAnswer?.amendedByDisplayName ?? null,
+          vendorAmendedByDisplayName: vendorAnswer?.amendedByUserId
+            ? recordedPersonName(vendor.amendmentNames.get(vendorAnswer.amendedByUserId), vendorAnswer.amendedByDisplayName, vendorAnswer.amendedByUserId)
+            : vendorAnswer?.amendedByDisplayName ? personDisplayName(vendorAnswer.amendedByDisplayName) : null,
           vendorAmendedAt: vendorAnswer?.amendedAt ?? null,
           vendorAmendmentReason: vendorAnswer?.amendmentReason ?? null,
           amendmentHistory,

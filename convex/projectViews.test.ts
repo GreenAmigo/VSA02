@@ -46,7 +46,7 @@ describe("Phase 6 project view isolation", () => {
       await ctx.db.patch(member._id, { displayName: "beta-scorer" });
     });
     const fallback = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
-    expect(fallback.rows[0].scorerDisplayName).toBe("Scorer");
+    expect(fallback.rows[0].scorerDisplayName).toBe("Name not set — ask an admin to update it");
   });
 
   test("scorer views require an active contact of an assigned vendor organisation, not a legacy project member", async () => {

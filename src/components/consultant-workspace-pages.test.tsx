@@ -510,6 +510,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     );
 
     expect(html).toContain("Green Test1 score: 1");
+    expect(html).toContain("Own scorer column: Beta Scorer");
     expect(html).toContain("Comment: Strong response");
     expect(html).not.toContain("workos_user_abc123");
   });
