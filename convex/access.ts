@@ -2,7 +2,7 @@ import { query, mutation, action, internalAction, internalMutation, internalQuer
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { updateMemberDisplayName } from "./scorerNames";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
@@ -1037,6 +1037,14 @@ async function getAccessibleProjectIdsForUser(
   identity?: { subject?: string; tokenIdentifier?: string; email?: string; name?: string | null },
 ) {
   const allowedProjectIds = new Set<Id<"projects">>();
+  const vendorMembership = identity ? await findVendorMembershipForIdentity(ctx, companyId, identity) : null;
+  if (vendorMembership && identity) {
+    const projects = ctx.db.query("projects").withIndex("by_company", (q: any) => q.eq("companyId", companyId));
+    for await (const project of projects) {
+      if (await resolveProjectVendorContact(ctx, project, identity)) allowedProjectIds.add(project._id);
+    }
+    return allowedProjectIds;
+  }
   const identityMatches = identity ? await findActiveCompanyMembershipsForIdentity(ctx, companyId, identity) : [];
   const candidateUserIds = new Set<string>([...userIds, ...identityMatches.map((member: { userId: string }) => member.userId)]);
 
@@ -1052,37 +1060,6 @@ async function getAccessibleProjectIdsForUser(
   for (const membership of directMemberships) {
     if (membership.role !== "vendor") {
       allowedProjectIds.add(membership.projectId);
-    }
-  }
-
-  const vendorMemberships = await ctx.db
-    .query("companyMembers")
-    .filter((q: any) => q.eq(q.field("companyId"), companyId))
-    .filter((q: any) => q.or(
-      ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-    ))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .filter((q: any) => q.eq(q.field("role"), "vendor"))
-    .collect();
-
-  for (const vendorMembership of vendorMemberships) {
-    if (!vendorMembership.vendorId) {
-      continue;
-    }
-
-    const vendorAssignments = await ctx.db
-      .query("projectVendors")
-      .filter((q: any) => q.eq(q.field("companyId"), companyId))
-      .filter((q: any) => q.eq(q.field("vendorId"), vendorMembership.vendorId))
-      .collect();
-
-    for (const assignment of vendorAssignments) {
-      const project = await ctx.db.get(assignment.projectId);
-      if (project && project.companyId === companyId &&
-          findProjectVendorByUserId(await getProjectVendors(ctx, project), vendorMembership.userId)) {
-        allowedProjectIds.add(assignment.projectId);
-      }
     }
   }
 
@@ -1156,6 +1133,9 @@ export const getProject = query({
     if (allowedProjectIds.has(args.projectId)) {
       return project;
     }
+    if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+      throw new Error("Project access denied");
+    }
 
     const companyMembership = await findActiveCompanyMembershipsForIdentity(ctx, project.companyId, identity).then((members) => members[0] ?? null);
 
@@ -1189,7 +1169,8 @@ export const listProjectsForCompany = query({
       throw new Error("Company access denied");
     }
 
-    if (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")) {
+    if (!await findVendorMembershipForIdentity(ctx, args.companyId, identity)
+      && (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin"))) {
       return await ctx.db
         .query("projects")
         .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
@@ -1368,7 +1349,8 @@ export const listDashboardProjects = query({
       .withIndex("by_company", (q) => q.eq("companyId", args.companyId))
       .collect();
 
-    if (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin")) {
+    if (!await findVendorMembershipForIdentity(ctx, args.companyId, identity)
+      && (consultantMembership || memberships.some((member: { role: string }) => member.role === "company-admin"))) {
       return projects;
     }
 
@@ -1388,6 +1370,12 @@ export async function canViewRequirements(
   }
 
   const userIds = getIdentityUserIds(identity);
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    const contact = await resolveProjectVendorContact(ctx, project, identity);
+    return contact
+      ? { allowed: true, visibility: "vendor" as const }
+      : { allowed: false, visibility: null };
+  }
   const projectMembership = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
@@ -1423,25 +1411,6 @@ export async function canViewRequirements(
 
   if (projectMembership && projectMembership.role === "company-scorer") {
     return { allowed: true, visibility: "scorer" as const };
-  }
-
-  const vendorCompanyMembership = await ctx.db
-    .query("companyMembers")
-    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-    .filter((q: any) => q.or(
-      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-    ))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .filter((q: any) => q.eq(q.field("role"), "vendor"))
-    .first();
-
-  if (vendorCompanyMembership && vendorCompanyMembership.vendorId) {
-    const vendorAssignment = findProjectVendorByUserId(await getProjectVendors(ctx, project), vendorCompanyMembership.userId);
-
-    if (vendorAssignment && vendorAssignment.vendorId === vendorCompanyMembership.vendorId) {
-      return { allowed: true, visibility: "vendor" as const };
-    }
   }
 
   return { allowed: false, visibility: null };

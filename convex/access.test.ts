@@ -16,6 +16,36 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("a vendor's stale scorer assignment cannot grant unassigned project access or priorities", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const other = await admin.mutation(api.admin.createProject, { companyId: seeded.companyBId, name: "Unassigned" });
+    await t.run(async (ctx) => {
+      for (const projectId of [seeded.projectBId, other.projectId]) {
+        await ctx.db.insert("projectMembers", {
+          companyId: seeded.companyBId, projectId, userId: "northwind-vendor", role: "company-scorer",
+          displayName: "Stale scorer", isActive: true, createdAt: Date.now(),
+        });
+      }
+      await ctx.db.insert("requirements", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, requirementId: "REQ",
+        text: "Requirement", type: "user-story", priority: 9, status: "active", createdAt: Date.now(),
+      });
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const projects = await vendor.query(api.access.listDashboardProjects, { companyId: seeded.companyBId });
+    expect(projects.map((project) => project._id)).toContain(seeded.projectBId);
+    expect(projects.map((project) => project._id)).not.toContain(other.projectId);
+    await expect(vendor.query(api.access.getProject, { projectId: other.projectId })).rejects.toThrow("Project access denied");
+    const requirements = await vendor.query(api.access.listProjectRequirements, { projectId: seeded.projectBId });
+    expect(requirements[0].priority).toBeUndefined();
+    expect(requirements[0].type).toBeUndefined();
+  });
+
   test("vendor contact repair uses accepted invitations and reports ambiguity", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
