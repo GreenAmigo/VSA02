@@ -1137,6 +1137,9 @@ describe("admin console actions", () => {
       projectAName: "HR Platform", projectBName: "Supply Chain",
     });
     await t.run(async (ctx) => {
+      await ctx.db.insert("consultants", {
+        userId: "northwind-vendor", displayName: "Stale consultant", isActive: true, grantedAt: Date.now(),
+      });
       await ctx.db.insert("companyMembers", {
         companyId: seeded.companyBId, userId: "northwind-vendor", role: "company-admin",
         displayName: "Stale admin", isActive: true, createdAt: Date.now(),
@@ -1149,6 +1152,7 @@ describe("admin console actions", () => {
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
     await expect(vendor.query(api.admin.listActivityLogs, { companyId: seeded.companyBId }))
       .rejects.toThrow("Only company admins");
+    await expect(vendor.query(api.admin.listActivityLogs, {})).rejects.toThrow("Only VS Consultants");
     const roster = await vendor.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
     expect(roster).toHaveLength(1);
     expect(roster[0]).toMatchObject({ userId: "northwind-vendor", role: "vendor" });

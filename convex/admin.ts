@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
+import { findVendorMembershipForIdentity, getProjectVendors, hasVendorMembershipForIdentity, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
@@ -1047,6 +1047,9 @@ export const listActivityLogs = query({
     if (args.companyId) {
       await assertCompanyAdmin(ctx, args.companyId);
     } else {
+      if (await hasVendorMembershipForIdentity(ctx, identity)) {
+        throw new Error("Only VS Consultants can view the activity log");
+      }
       await assertConsultantAccess(ctx);
     }
 

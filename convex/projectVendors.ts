@@ -72,6 +72,27 @@ export async function findVendorMembershipForIdentity(
   return matches[0] ?? null;
 }
 
+export async function hasVendorMembershipForIdentity(
+  ctx: Pick<QueryCtx, "db">,
+  identity: { subject?: string; tokenIdentifier?: string; email?: string },
+) {
+  const userIds = new Set([identity.subject, identity.tokenIdentifier].filter((id): id is string => Boolean(id)));
+  for (const userId of userIds) {
+    const members = ctx.db.query("companyMembers").withIndex("by_user", (q) => q.eq("userId", userId));
+    for await (const member of members) {
+      if (member.isActive && member.role === "vendor") return true;
+    }
+  }
+  const email = identity.email?.trim().toLowerCase();
+  if (email) {
+    const members = ctx.db.query("companyMembers").withIndex("by_email", (q) => q.eq("email", email));
+    for await (const member of members) {
+      if (member.isActive && member.role === "vendor") return true;
+    }
+  }
+  return false;
+}
+
 export async function resolveProjectVendorContact(
   ctx: Pick<QueryCtx, "db">,
   project: { _id: Id<"projects">; companyId: Id<"companies"> },

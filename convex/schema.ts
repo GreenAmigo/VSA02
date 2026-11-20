@@ -34,7 +34,9 @@ export default defineSchema({
     createdAt: v.number(),
     isTestData: v.optional(v.boolean()),
   }).index("by_company_user", ["companyId", "userId"])
-    .index("by_company_role", ["companyId", "role"]),
+    .index("by_company_role", ["companyId", "role"])
+    .index("by_user", ["userId"])
+    .index("by_email", ["email"]),
 
   vendorOrganizations: defineTable({
     companyId: v.id("companies"),
