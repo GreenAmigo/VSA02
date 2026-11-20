@@ -8,6 +8,27 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 7 dashboard totals", () => {
+  test("does not choose a contact when an organisation has multiple active contacts", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyBId, vendorId: contact.vendorId, userId: "second-contact",
+        displayName: "Second Contact", role: "vendor", isActive: true, createdAt: 1,
+      });
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(dashboard.rows[0].vendorUserId).toBeNull();
+    const responses = await admin.query(api.scores.listProjectVendorResponses, { projectId: seeded.projectBId });
+    expect(responses[0]).toMatchObject({ vendorUserId: null, vendorContactName: null });
+  });
+
   test("does not count a partly migrated answer that may conflict with an older one", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

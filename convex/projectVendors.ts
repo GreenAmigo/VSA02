@@ -49,14 +49,13 @@ export async function getProjectVendors(
       throw new Error("Project vendor organisation not found in this workspace");
     }
     const contacts = contactsByVendor.get(assignment.vendorId) ?? [];
-    contacts.sort((a, b) => a.createdAt - b.createdAt);
     vendors.push({
       assignmentId: assignment._id,
       assignedAt: assignment.createdAt,
       vendorId: organization._id,
       vendorName: organization.name,
       contacts,
-      primaryContact: contacts[0] ?? null,
+      primaryContact: contacts.length === 1 ? contacts[0] : null,
     });
   }
   return vendors;
