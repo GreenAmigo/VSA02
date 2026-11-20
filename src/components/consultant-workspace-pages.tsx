@@ -494,6 +494,16 @@ function VendorAnswerNotice({ migrationRequired, hasConflicts }: { migrationRequ
   );
 }
 
+function ScorerViewNotice({ migrationRequired, hasConflicts }: { migrationRequired?: boolean; hasConflicts?: boolean }) {
+  if (!migrationRequired && !hasConflicts) return null;
+  return (
+    <div role="alert" className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+      {migrationRequired ? <p>Some older company scoring history needs migration. Scorer views may be hidden until a workspace admin resolves this.</p> : null}
+      {hasConflicts ? <p>Some scorer views conflict and are hidden. Ask a workspace admin to resolve them.</p> : null}
+    </div>
+  );
+}
+
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const selectedReviewRef = useRef<HTMLDivElement | null>(null);
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
@@ -610,6 +620,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       canViewAll: boolean;
       peerVisibilityEnabled: boolean;
       peerViewsUnlocked: boolean;
+      historyMigrationRequired?: boolean;
+      hasViewConflicts?: boolean;
       rows: Array<{
         _id: string;
         projectId: string;
@@ -979,9 +991,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
 
               <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <p className="text-xs uppercase tracking-[0.14em] text-slate-300">Scorer overall views</p>
+                <ScorerViewNotice migrationRequired={scorerViews?.historyMigrationRequired} hasConflicts={scorerViews?.hasViewConflicts} />
                 {scorerViews === undefined ? (
                   <p className="mt-2 text-xs text-slate-400">Loading scorer views...</p>
-                ) : scorerViews.rows.length === 0 ? (
+                ) : scorerViews.rows.length === 0 && !scorerViews.historyMigrationRequired && !scorerViews.hasViewConflicts ? (
                   <p className="mt-2 text-xs text-slate-400">No scorer views saved for this vendor yet.</p>
                 ) : (
                   <div className="mt-2 space-y-2">
@@ -1100,6 +1113,8 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       canViewAll: boolean;
       peerVisibilityEnabled: boolean;
       peerViewsUnlocked: boolean;
+      historyMigrationRequired?: boolean;
+      hasViewConflicts?: boolean;
       rows: Array<{
         _id: string;
         projectId: string;
@@ -1444,6 +1459,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                           : "Ready"}
                   </span>
                 </div>
+                <ScorerViewNotice migrationRequired={scorerViews?.historyMigrationRequired} hasConflicts={scorerViews?.hasViewConflicts} />
                 <textarea
                   value={hydratedViewVendorId === selectedVendorUserId ? viewDraft : ""}
                   onChange={(event) => {
@@ -1453,7 +1469,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                   }}
                   placeholder="Write your overall view of this vendor..."
                   rows={4}
-                  disabled={Boolean(scorerDeadlineAt && scorerDeadlineAt <= Date.now())}
+                  disabled={!scorerViews || Boolean(scorerViews.historyMigrationRequired || scorerViews.hasViewConflicts || (scorerDeadlineAt && scorerDeadlineAt <= Date.now()))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-60"
                 />
                 {scorerDeadlineAt && scorerDeadlineAt <= Date.now() ? (
