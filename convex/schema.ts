@@ -157,6 +157,7 @@ export default defineSchema({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     vendorUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     requirementId: v.string(),
     score: v.union(v.literal(0), v.literal(1)),
     comment: v.optional(v.string()),
@@ -167,7 +168,8 @@ export default defineSchema({
     amendedAt: v.optional(v.number()),
     amendmentReason: v.optional(v.string()),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
-    .index("by_project_requirement", ["projectId", "requirementId"]),
+    .index("by_project_requirement", ["projectId", "requirementId"])
+    .index("by_project_vendor_id_requirement", ["projectId", "vendorId", "requirementId"]),
 
   scorerScores: defineTable({
     companyId: v.id("companies"),
@@ -214,6 +216,7 @@ export default defineSchema({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     vendorUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     requirementId: v.string(),
     originalScore: v.union(v.literal(0), v.literal(1)),
     newScore: v.union(v.literal(0), v.literal(1)),
@@ -224,7 +227,8 @@ export default defineSchema({
     reason: v.string(),
     amendedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
-    .index("by_project_requirement", ["projectId", "requirementId"]),
+    .index("by_project_requirement", ["projectId", "requirementId"])
+    .index("by_project_vendor_id_requirement", ["projectId", "vendorId", "requirementId"]),
 
   projectViews: defineTable({
     companyId: v.id("companies"),
