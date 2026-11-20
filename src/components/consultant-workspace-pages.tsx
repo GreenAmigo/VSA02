@@ -4165,6 +4165,54 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
   );
 }
 
+function PersonNameEditor({ companyId, person }: {
+  companyId: string;
+  person: { id: string; name: string; source: string };
+}) {
+  const updateName = useMutation(api.admin.updateWorkspacePersonName);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(person.name);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      await updateName({
+        companyId: companyId as Id<"companies">,
+        ...(person.source === "member"
+          ? { memberId: person.id as Id<"companyMembers"> }
+          : { inviteId: person.id as Id<"workspaceInvites"> }),
+        displayName: draft,
+      });
+      setEditing(false);
+      setMessage({ kind: "success", text: "Name updated." });
+    } catch (error) {
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to update this name." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      {editing ? (
+        <form onSubmit={save} className="flex flex-wrap gap-2">
+          <label className="sr-only" htmlFor={`person-name-${person.id}`}>Display name</label>
+          <input id={`person-name-${person.id}`} value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" />
+          <button type="submit" disabled={busy} className="rounded-xl border border-sky-500/40 px-3 py-2 text-sm text-sky-200 disabled:opacity-60">Save name</button>
+          <button type="button" disabled={busy} onClick={() => { setEditing(false); setDraft(person.name); setMessage(null); }} className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-300">Cancel</button>
+        </form>
+      ) : (
+        <button type="button" onClick={() => { setDraft(person.name); setEditing(true); setMessage(null); }} className="rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-200">Edit name</button>
+      )}
+      {message ? <p role={message.kind === "error" ? "alert" : "status"} className={`mt-2 text-sm ${message.kind === "error" ? "text-rose-300" : "text-emerald-300"}`}>{message.text}</p> : null}
+    </div>
+  );
+}
+
 export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string }) {
   const { user, loading: workosLoading } = useAuth();
   const { isLoading: convexLoading, isAuthenticated: convexAuthenticated } = useConvexAuth();
@@ -4435,6 +4483,8 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                     </div>
                   </div>
 
+                  <PersonNameEditor companyId={companyId} person={person} />
+
                   {person.status === "active" && person.userId && person.role !== "vendor" ? (
                     <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
                       <select
@@ -4519,6 +4569,8 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
                       </span>
                     </div>
                   </div>
+
+                  {person.status === "invited" ? <PersonNameEditor companyId={companyId} person={person} /> : null}
 
                   {person.status === "invited" ? (
                     <div className="mt-3 flex justify-end">
@@ -4709,6 +4761,7 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
                     </div>
                     <button type="button" onClick={() => void handleDeactivate(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Deactivate</button>
                   </div>
+                  <PersonNameEditor companyId={companyId} person={entry} />
                 </div>
               ))}
             </div>
@@ -4727,6 +4780,7 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
                     </div>
                     <button type="button" onClick={() => void handleCancelInvite(entry as any)} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs text-rose-200">Cancel</button>
                   </div>
+                  {entry.status === "invited" ? <PersonNameEditor companyId={companyId} person={entry} /> : null}
                 </div>
               ))}
             </div>

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { api } from "../../convex/_generated/api";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
-import { ConsultantWorkspaceOverviewPage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage } from "./consultant-workspace-pages";
+import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage } from "./consultant-workspace-pages";
 
 const { useQueryMock, useMutationMock, useAuthMock, useConvexAuthMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -39,6 +39,39 @@ describe("ConsultantHomeHeader", () => {
 
     expect(html).toContain("Consultant home");
     expect(html).toContain("New workspace");
+  });
+
+  describe("workspace name editors", () => {
+    beforeEach(() => {
+      useQueryMock.mockReset();
+      useMutationMock.mockClear();
+      useAuthMock.mockReturnValue({ user: { email: "admin@example.com" }, loading: false });
+      useConvexAuthMock.mockReturnValue({ isLoading: false, isAuthenticated: true });
+      useQueryMock.mockImplementationOnce(() => ({ email: "admin@example.com", role: "company-admin" }));
+      useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Workspace" }]);
+    });
+
+    test("People offers name editing for members and pending invites", () => {
+      useQueryMock.mockImplementationOnce(() => [
+        { id: "member-1", name: "Real Name", email: "person@example.com", role: "company-scorer", status: "active", source: "member" },
+        { id: "invite-1", name: "Invited Name", email: "invite@example.com", role: "company-scorer", status: "invited", source: "invite" },
+      ]);
+      useQueryMock.mockImplementationOnce(() => []);
+      const html = renderToStaticMarkup(<ConsultantWorkspacePeoplePage companyId="company-1" />);
+      expect(html.match(/Edit name/g)).toHaveLength(2);
+      expect(useMutationMock).toHaveBeenCalledWith(api.admin.updateWorkspacePersonName);
+    });
+
+    test("vendor contacts offers the same name editor", () => {
+      useQueryMock.mockImplementationOnce(() => [{ vendorId: "vendor-1", name: "Vendor" }]);
+      useQueryMock.mockImplementationOnce(() => [
+        { id: "member-1", name: "Contact Name", email: "contact@example.com", role: "vendor", status: "active", source: "member" },
+        { id: "invite-1", name: "Invited Contact", email: "invite@example.com", role: "vendor", status: "invited", source: "invite" },
+      ]);
+      const html = renderToStaticMarkup(<ConsultantWorkspaceVendorContactsPage companyId="company-1" vendorId="vendor-1" />);
+      expect(html.match(/Edit name/g)).toHaveLength(2);
+      expect(useMutationMock).toHaveBeenCalledWith(api.admin.updateWorkspacePersonName);
+    });
   });
 
   test("does not show New workspace button for a company admin", () => {
