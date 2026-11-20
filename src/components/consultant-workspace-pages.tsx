@@ -1053,7 +1053,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
 
 function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string; scorerDeadlineAt?: number | null }) {
   const [selectedScopeKey, setSelectedScopeKey] = useState("");
-  const [selectedVendorUserId, setSelectedVendorUserId] = useState("");
+  const [selectedVendorId, setSelectedVendorId] = useState("");
   const [collapsedRequirementIds, setCollapsedRequirementIds] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busyKey, setBusyKey] = useState("");
@@ -1076,8 +1076,9 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       vendors: Array<{
         vendorId: string;
         vendorName: string;
-        vendorUserId: string;
+        vendorUserId: string | null;
         vendorContactName: string | null;
+        contactConflict?: boolean;
         hasScorerHistoryConflicts?: boolean;
         answeredCount: number;
         totalRequirements: number;
@@ -1097,20 +1098,23 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       setSelectedScopeKey(workboard.activeScopeKey);
     }
 
-    if (!selectedVendorUserId || !workboard.vendors.some((vendor) => vendor.vendorUserId === selectedVendorUserId)) {
-      setSelectedVendorUserId(workboard.vendors[0]?.vendorUserId ?? "");
+    if (!selectedVendorId || !workboard.vendors.some((vendor) => vendor.vendorId === selectedVendorId)) {
+      setSelectedVendorId(workboard.vendors[0]?.vendorId ?? "");
     }
-  }, [workboard, selectedScopeKey, selectedVendorUserId]);
+  }, [workboard, selectedScopeKey, selectedVendorId]);
+
+  const selectedVendor = workboard?.vendors.find((vendor) => vendor.vendorId === selectedVendorId);
+  const selectedVendorUserId = selectedVendor?.vendorUserId ?? "";
 
   const grid = useQuery(
     (api as any).scores.getScorerVendorGrid,
-    workboard && selectedVendorUserId
-      ? { projectId: projectId as any, vendorUserId: selectedVendorUserId, scopeKey: selectedScopeKey || undefined }
+    workboard && selectedVendorId
+      ? { projectId: projectId as any, vendorId: selectedVendorId, scopeKey: selectedScopeKey || undefined }
       : "skip",
   ) as
     | {
       projectId: string;
-      vendorUserId: string;
+      vendorUserId: string | null;
       vendorName: string;
       vendorContactName: string | null;
       scorerScope: { scopeKey: string; scopeType: "individual" | "department"; label: string };
@@ -1143,7 +1147,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
   const saveProjectView = useMutation((api as any).projectViews.saveProjectView);
   const scorerViews = useQuery(
     (api as any).projectViews.listProjectViews,
-    selectedVendorUserId ? { projectId: projectId as any, vendorUserId: selectedVendorUserId } : "skip",
+    selectedVendorId ? { projectId: projectId as any, vendorId: selectedVendorId } : "skip",
   ) as
     | {
       projectId: string;
@@ -1169,7 +1173,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
     }
     | undefined;
 
-  const scorerHistoryLocked = Boolean(workboard?.scorerHistoryMigrationRequired || grid?.scorerHistoryMigrationRequired || grid?.hasScorerHistoryConflicts);
+  const scorerHistoryLocked = Boolean(!selectedVendorUserId || workboard?.scorerHistoryMigrationRequired || grid?.scorerHistoryMigrationRequired || grid?.hasScorerHistoryConflicts);
 
   useEffect(() => () => {
     if (saveViewTimerRef.current !== null) {
@@ -1179,7 +1183,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
   }, []);
 
   useEffect(() => {
-    if (!selectedVendorUserId || !scorerViews) {
+    if (!selectedVendorId || !scorerViews) {
       return;
     }
 
@@ -1187,8 +1191,8 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
     setViewDraft(ownView?.viewText ?? "");
     setViewLastSavedAt(ownView?.updatedAt ?? null);
     setViewSaveState("idle");
-    setHydratedViewVendorId(selectedVendorUserId);
-  }, [selectedVendorUserId, scorerViews]);
+    setHydratedViewVendorId(selectedVendorId);
+  }, [selectedVendorId, scorerViews]);
 
   const scheduleViewSave = (nextText: string) => {
     if (!selectedVendorUserId) {
@@ -1304,15 +1308,15 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
           <div className="space-y-3">
             {workboard.vendors.map((vendor) => (
               <button
-                key={vendor.vendorUserId}
+                key={vendor.vendorId}
                 type="button"
-                onClick={() => setSelectedVendorUserId(vendor.vendorUserId)}
-                className={`w-full rounded-xl border p-3 text-left ${selectedVendorUserId === vendor.vendorUserId ? "border-sky-500/50 bg-sky-500/10" : "border-slate-800 bg-slate-950/60 hover:border-slate-600"}`}
+                onClick={() => setSelectedVendorId(vendor.vendorId)}
+                className={`w-full rounded-xl border p-3 text-left ${selectedVendorId === vendor.vendorId ? "border-sky-500/50 bg-sky-500/10" : "border-slate-800 bg-slate-950/60 hover:border-slate-600"}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="font-medium text-white">{vendor.vendorName}</p>
-                    <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
+                    <p className="text-xs text-slate-400">Contact: {vendor.contactConflict ? "Multiple active contacts; ask an admin to resolve this" : vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <StatusPill label={vendor.status === "not-started" ? "Not started" : vendor.status === "in-progress" ? "In progress" : "Completed"} className="border-slate-700 bg-slate-900 text-slate-100" />
@@ -1336,6 +1340,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                   <p className="text-base font-semibold text-white">Scoring {grid.vendorName}</p>
                   <p className="text-xs text-slate-400">Own scorer column: {safeDisplayName(grid.scorerScope.label)}</p>
                 </div>
+                {!selectedVendorUserId ? <p className="mb-3 text-sm text-amber-200">Historical scores are read-only until this organisation has one active contact.</p> : null}
                 {grid.isCompleted ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill
@@ -1506,7 +1511,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                 </div>
                 <ScorerViewNotice migrationRequired={scorerViews?.historyMigrationRequired} hasConflicts={scorerViews?.hasViewConflicts} />
                 <textarea
-                  value={hydratedViewVendorId === selectedVendorUserId ? viewDraft : ""}
+                  value={hydratedViewVendorId === selectedVendorId ? viewDraft : ""}
                   onChange={(event) => {
                     const nextValue = event.target.value;
                     setViewDraft(nextValue);
@@ -1514,7 +1519,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                   }}
                   placeholder="Write your overall view of this vendor..."
                   rows={4}
-                  disabled={!scorerViews || Boolean(scorerViews.historyMigrationRequired || scorerViews.hasViewConflicts || (scorerDeadlineAt && scorerDeadlineAt <= Date.now()))}
+                  disabled={!selectedVendorUserId || !scorerViews || Boolean(scorerViews.historyMigrationRequired || scorerViews.hasViewConflicts || (scorerDeadlineAt && scorerDeadlineAt <= Date.now()))}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-60"
                 />
                 {scorerDeadlineAt && scorerDeadlineAt <= Date.now() ? (

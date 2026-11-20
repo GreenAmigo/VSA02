@@ -430,6 +430,24 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).not.toContain("Add an active vendor contact to view and amend scores");
   });
 
+  test("scorer workboard lists organisations without active contacts", () => {
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "scorer@example.com", role: "company-scorer", isConsultant: false });
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => ({
+      projectId: "project-1", scorerCanSeePeerScores: false, scorerScopes: [], activeScopeKey: "individual:scorer",
+      vendors: [{
+        vendorId: "vendor-1", vendorName: "Historical vendor", vendorUserId: null, vendorContactName: null,
+        answeredCount: 1, totalRequirements: 1, status: "completed", completedAt: 1, lastScoredAt: 1,
+      }],
+    }));
+    const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
+    expect(html).toContain("Historical vendor");
+    expect(html).toContain("No active contact linked");
+    expect(html).toContain("Completed");
+  });
+
   test("company admin project detail also shows Vendor responses section", () => {
     useQueryMock.mockReset();
     useQueryMock.mockImplementationOnce(() => ({
