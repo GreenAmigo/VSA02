@@ -14,6 +14,7 @@ const projectViewValidator = v.object({
 const listProjectViewsValidator = v.object({
   projectId: v.id("projects"),
   vendorUserId: v.optional(v.string()),
+  vendorId: v.optional(v.id("vendorOrganizations")),
 });
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
@@ -124,9 +125,12 @@ export const listProjectViews = query({
       };
     }
 
-    const assignedVendor = args.vendorUserId
-      ? findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId)
-      : null;
+    if (args.vendorId && args.vendorUserId) throw new Error("Select exactly one vendor organisation for review.");
+    const projectVendors = args.vendorId || args.vendorUserId ? await getProjectVendors(ctx, project) : [];
+    const assignedVendor = args.vendorId
+      ? projectVendors.find((vendor) => vendor.vendorId === args.vendorId) ?? null
+      : args.vendorUserId ? findProjectVendorByUserId(projectVendors, args.vendorUserId) : null;
+    if (args.vendorId && !assignedVendor) throw new Error("Vendor not assigned to this project");
     const rows = assignedVendor
       ? await ctx.db
           .query("projectViews")

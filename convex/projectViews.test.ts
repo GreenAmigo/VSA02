@@ -8,6 +8,37 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 6 project view isolation", () => {
+  test("admins can read organisation views without an active contact, but vendors cannot", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Historical view",
+    });
+    const vendorId = await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      return contact.vendorId;
+    });
+    expect((await vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorId })).rows).toEqual([]);
+    await admin.mutation(api.admin.deactivateVendorContact, { companyId: seeded.companyBId, vendorId, userId: "northwind-vendor" });
+    const views = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorId });
+    expect(views.rows).toHaveLength(1);
+    expect(views.rows[0].viewText).toBe("Historical view");
+    const unassigned = await t.run((ctx) => ctx.db.insert("vendorOrganizations", {
+      companyId: seeded.companyBId, name: "Unassigned", status: "active",
+      createdByUserId: "beta-admin", createdAt: 1, updatedAt: 1,
+    }));
+    await expect(admin.query(api.projectViews.listProjectViews, {
+      projectId: seeded.projectBId, vendorId: unassigned,
+    })).rejects.toThrow("Vendor not assigned");
+  });
+
   test("scorer views stay with the organisation after a contact is replaced", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
