@@ -16,6 +16,47 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("accepting a vendor invitation links the canonical contact and refuses conflicting invitations", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const first = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "First organisation" });
+    const second = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "Second organisation" });
+    await admin.mutation(api.admin.inviteVendorContact, {
+      companyId: seeded.companyBId, vendorId: first.vendorId, name: "Invited Contact", email: "contact@example.com",
+    });
+    await t.run(async (ctx) => {
+      for (const [createdAt, vendorId] of [[1, undefined], [2, first.vendorId]] as const) {
+        await ctx.db.insert("companyMembers", {
+          companyId: seeded.companyBId, userId: "contact-user", email: "contact@example.com",
+          displayName: "Contact", role: "vendor", vendorId, isActive: true, createdAt,
+        });
+      }
+    });
+    const user = t.withIdentity({ subject: "contact-user", tokenIdentifier: "contact-user", email: "contact@example.com", emailVerified: true });
+    await user.action(api.access.acceptPendingInvites, {});
+    expect(await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: first.vendorId }))
+      .toEqual([expect.objectContaining({ userId: "contact-user", name: "Invited Contact", status: "active" })]);
+    expect(await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: second.vendorId })).toEqual([]);
+    await t.run(async (ctx) => {
+      const invite = await ctx.db.query("workspaceInvites")
+        .withIndex("by_company_email", (q) => q.eq("companyId", seeded.companyBId).eq("email", "contact@example.com")).unique();
+      if (!invite) throw new Error("Missing invite");
+      await ctx.db.insert("workspaceInvites", {
+        companyId: seeded.companyBId, email: invite.email, displayName: invite.displayName, role: "vendor",
+        vendorId: second.vendorId, status: "active", invitedByUserId: "beta-admin",
+        invitedAt: Date.now(), expiresAt: Date.now() + 100000,
+      });
+    });
+    await expect(user.action(api.access.acceptPendingInvites, {})).rejects.toThrow("invitations conflict");
+    const firstContacts = await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: first.vendorId });
+    expect(firstContacts).toHaveLength(1);
+    expect(firstContacts[0].userId).toBe("contact-user");
+  });
+
   test("matching a member's display name alone does not grant workspace or project access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

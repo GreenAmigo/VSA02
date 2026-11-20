@@ -11,6 +11,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [redirecting, setRedirecting] = useState(false);
+  const [inviteError, setInviteError] = useState(false);
   const acceptPendingInvites = useAction(api.access.acceptPendingInvites);
   const acceptedRef = useRef(false);
 
@@ -27,7 +28,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!loading && user && !acceptedRef.current) {
       acceptedRef.current = true;
-      void acceptPendingInvites({});
+      void acceptPendingInvites({}).catch(() => setInviteError(true));
     }
   }, [acceptPendingInvites, loading, user]);
 
@@ -39,5 +40,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {inviteError ? (
+        <div role="alert" className="bg-red-950 px-6 py-3 text-red-100">
+          We could not connect your invitation. Ask a workspace administrator to check your invitation and vendor organisation.
+        </div>
+      ) : null}
+      {children}
+    </>
+  );
 }

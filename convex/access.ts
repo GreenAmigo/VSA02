@@ -432,7 +432,7 @@ export const acceptPendingInvitesForUser = internalMutation({
         || (workosName && !workosName.includes("@") ? workosName : "")
         || targetEmail;
       const inviteNeedsDepartment = invite.role === "company-admin" || invite.role === "company-scorer";
-      const isExpired = invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
+      const isExpired = invite.status === "invited" && invite.expiresAt !== undefined && Date.now() > invite.expiresAt;
       if (invite.cancelledAt || invite.deactivatedAt || isExpired) {
         await ctx.db.patch(invite._id, {
           status: isExpired ? "expired" : invite.cancelledAt ? "cancelled" : "deactivated",
@@ -447,23 +447,51 @@ export const acceptPendingInvitesForUser = internalMutation({
         throw new Error("This invite is missing a department. Ask a workspace admin to re-send the invite with a department.");
       }
 
+      if (invite.role === "vendor") {
+        const organization = invite.vendorId ? await ctx.db.get(invite.vendorId) : null;
+        if (!organization || organization.companyId !== invite.companyId) {
+          throw new Error("This vendor invitation has no valid organisation. Ask a workspace admin to fix the invitation.");
+        }
+        const conflicts = pendingInvites.some((other) =>
+          other.companyId === invite.companyId && other._id !== invite._id
+          && !other.cancelledAt && !other.deactivatedAt
+          && (other.status === "active" || other.expiresAt >= Date.now())
+          && (other.role !== "vendor" || other.vendorId !== invite.vendorId));
+        if (conflicts) {
+          throw new Error("Your invitations conflict. Ask a workspace admin to resolve your vendor organisation.");
+        }
+      }
+
       const existingMemberships = await ctx.db
         .query("companyMembers")
-        .filter((q: any) => q.eq(q.field("companyId"), invite.companyId))
-        .filter((q: any) => q.eq(q.field("userId"), args.userId))
+        .withIndex("by_company_user", (q) => q.eq("companyId", invite.companyId).eq("userId", args.userId))
         .collect();
+
+      if (invite.role === "vendor") {
+        const members = ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", invite.companyId));
+        for await (const member of members) {
+          if (member.userId !== args.userId && member.email?.trim().toLowerCase() === targetEmail) {
+            throw new Error("This email is already linked to another account. Ask a workspace admin to resolve the contact.");
+          }
+        }
+      }
 
       const canonicalMembership = (existingMemberships.length > 0
         ? [...existingMemberships].sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.createdAt - b.createdAt)[0]
         : null) as any;
-      const hasMatchingVendorMembership = invite.vendorId
-        ? existingMemberships.some((membership) => membership.vendorId === invite.vendorId)
+      if (invite.role === "vendor" && existingMemberships.some((membership) =>
+        membership.role !== "vendor" || (membership.vendorId && membership.vendorId !== invite.vendorId))) {
+        throw new Error("Your vendor organisation link conflicts with your invitation. Ask a workspace admin to resolve it.");
+      }
+      const hasMatchingVendorMembership = invite.role === "vendor"
+        ? canonicalMembership?.role === "vendor" && canonicalMembership.vendorId === invite.vendorId
         : true;
       const hasMatchingDepartment = inviteNeedsDepartment
-        ? existingMemberships.some((membership) => membership.departmentId === invite.departmentId)
+        ? canonicalMembership?.departmentId === invite.departmentId
         : true;
 
-      if (canonicalMembership && canonicalMembership.isActive && hasMatchingVendorMembership && hasMatchingDepartment) {
+      if (canonicalMembership && canonicalMembership.isActive && canonicalMembership.role === invite.role && hasMatchingVendorMembership && hasMatchingDepartment) {
         for (const duplicate of existingMemberships) {
           if (duplicate._id !== canonicalMembership._id) {
             await ctx.db.delete(duplicate._id);
