@@ -56,6 +56,10 @@ describe("Phase 8 deadline and reminder logic", () => {
       const member = await ctx.db.query("companyMembers")
         .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
       if (!member?.vendorId) throw new Error("Missing vendor contact");
+      const staleProjectMember = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", member.userId)).unique();
+      if (!staleProjectMember) throw new Error("Missing project member");
+      await ctx.db.patch(staleProjectMember._id, { role: "company-scorer" });
       await ctx.db.insert("companyMembers", {
         companyId: seeded.companyBId, vendorId: member.vendorId, userId: "another-contact",
         email: "other@example.com", displayName: "Other Contact", role: "vendor", isActive: true, createdAt: Date.now(),

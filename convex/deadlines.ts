@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -62,6 +62,15 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
 
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    const contact = await resolveProjectVendorContact(ctx, project, identity);
+    if (!contact) throw new Error("Project access denied");
+    return {
+      project, identity,
+      member: { companyId: project.companyId, projectId, userId: contact.member.userId, role: "vendor" as const },
+    };
+  }
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
@@ -97,25 +106,6 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
         role: "company-admin",
       },
     };
-  }
-
-  const vendors = await getProjectVendors(ctx, project);
-  const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
-  for (const vendorMembership of vendorMemberships) {
-    const assignment = findProjectVendorByUserId(vendors, vendorMembership.userId);
-
-    if (assignment && assignment.vendorId === vendorMembership.vendorId) {
-      return {
-        project,
-        identity,
-        member: {
-          companyId: project.companyId,
-          projectId,
-          userId: vendorMembership.userId,
-          role: "vendor",
-        },
-      };
-    }
   }
 
   throw new Error("Project access denied");
