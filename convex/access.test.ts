@@ -16,6 +16,22 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("matching a member's display name alone does not grant workspace or project access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    for (const name of ["Beta Admin", "Beta Scorer"]) {
+      const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name });
+      expect((await outsider.query(api.access.getCurrentUserAccess, {})).companyIds).not.toContain(seeded.companyBId);
+      expect(await outsider.query(api.access.listAccessibleCompanies, {})).toEqual([]);
+      await expect(outsider.query(api.access.getCompany, { companyId: seeded.companyBId })).rejects.toThrow("Company access denied");
+      await expect(outsider.query(api.access.getProject, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+      await expect(outsider.query(api.access.listProjectRequirements, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
+    }
+  });
+
   test("development name repair reports invitation and WorkOS changes and is blocked in production", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

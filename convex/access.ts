@@ -757,7 +757,6 @@ export const getCurrentUserAccess = query({
       .filter((q) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
         ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
@@ -810,7 +809,6 @@ export const listAccessibleCompanies = query({
       .filter((q) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
         ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
@@ -877,7 +875,6 @@ async function findActiveCompanyMembershipsForIdentity(
 ) {
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
-  const normalizedDisplayName = identity.name?.trim();
 
   return await ctx.db
     .query("companyMembers")
@@ -885,7 +882,6 @@ async function findActiveCompanyMembershipsForIdentity(
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-      ...(normalizedDisplayName ? [q.eq(q.field("displayName"), normalizedDisplayName)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -900,17 +896,12 @@ async function getAccessibleProjectIdsForUser(
   const allowedProjectIds = new Set<Id<"projects">>();
   const identityMatches = identity ? await findActiveCompanyMembershipsForIdentity(ctx, companyId, identity) : [];
   const candidateUserIds = new Set<string>([...userIds, ...identityMatches.map((member: { userId: string }) => member.userId)]);
-  const candidateDisplayNames = new Set<string>([
-    ...identityMatches.map((member: { displayName: string }) => member.displayName.trim()).filter(Boolean),
-    ...(identity?.name?.trim() ? [identity.name.trim()] : []),
-  ]);
 
   const directMemberships = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
     .filter((q: any) => q.or(
       ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
-      ...Array.from(candidateDisplayNames).map((displayName) => q.eq(q.field("displayName"), displayName)),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -927,7 +918,6 @@ async function getAccessibleProjectIdsForUser(
     .filter((q: any) => q.or(
       ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity?.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.eq(q.field("role"), "vendor"))
@@ -959,7 +949,6 @@ async function getAccessibleProjectIdsForUser(
     .filter((q: any) => q.or(
       ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity?.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -1261,7 +1250,6 @@ export async function canViewRequirements(
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("displayName"), identity.name?.trim() ?? identity.email.trim().toLowerCase())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -1272,7 +1260,6 @@ export async function canViewRequirements(
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -1301,7 +1288,6 @@ export async function canViewRequirements(
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.eq(q.field("role"), "vendor"))
