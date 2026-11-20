@@ -71,6 +71,69 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("admins and consultants can rename people and vendor contacts, with workspace checks and activity logs", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      const seeded = await t.mutation(internal.access.seedScenario, {
+        companyAName: "Acme Health", companyBName: "Beta Logistics",
+        projectAName: "HR Platform", projectBName: "Supply Chain",
+      });
+      await grantConsultant(t, "name-consultant", "consultant@example.com", "Name Consultant");
+      const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+      const consultant = t.withIdentity({ tokenIdentifier: "name-consultant" });
+      const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+      const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+      const targets = await t.run(async (ctx) => {
+        const person = await ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique();
+        const contact = await ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+        if (!person || !contact?.vendorId) throw new Error("Missing test members");
+        return { personId: person._id, contactId: contact._id, vendorId: contact.vendorId };
+      });
+      await expect(scorer.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, memberId: targets.personId, displayName: "Blocked",
+      })).rejects.toThrow("Only company admins");
+      await expect(vendor.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, memberId: targets.contactId, displayName: "Blocked",
+      })).rejects.toThrow("Only company admins");
+      await expect(consultant.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyAId, memberId: targets.personId, displayName: "Wrong Workspace",
+      })).rejects.toThrow("Person not found in this workspace");
+      await expect(admin.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, memberId: targets.personId, displayName: "name@example.com",
+      })).rejects.toThrow("not an email address");
+      await admin.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, memberId: targets.personId, displayName: "Updated Scorer",
+      });
+      await consultant.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, memberId: targets.contactId, displayName: "Updated Contact",
+      });
+      const people = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
+      expect(people.find((person) => person.userId === "beta-scorer")?.name).toBe("Updated Scorer");
+      const contacts = await admin.query(api.admin.listVendorContacts, { companyId: seeded.companyBId, vendorId: targets.vendorId });
+      expect(contacts.find((contact) => contact.userId === "northwind-vendor")?.name).toBe("Updated Contact");
+      const roster = await admin.query(api.admin.listProjectMembers, { projectId: seeded.projectBId });
+      expect(roster.find((row) => row.userId === "beta-scorer")?.displayName).toBe("Updated Scorer");
+      const logs = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
+      expect(logs.filter((log) => log.action === "update_workspace_person_name")).toHaveLength(2);
+      expect(logs.some((log) => log.details.includes("Name: Beta Scorer -> Updated Scorer"))).toBe(true);
+
+      const departmentId = await getFirstDepartmentId(admin, seeded.companyBId);
+      const invite = await admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: seeded.companyBId, name: "Old Invite", email: "pending@example.com", role: "company-scorer", departmentId,
+      });
+      await admin.mutation(api.admin.updateWorkspacePersonName, {
+        companyId: seeded.companyBId, inviteId: invite.inviteId, displayName: "New Invite",
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, {
+        userId: "pending-user", email: "pending@example.com", displayName: "WorkOS Name",
+      });
+      const updatedPeople = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
+      expect(updatedPeople.find((person) => person.userId === "pending-user")?.name).toBe("New Invite");
+    });
+  });
+
   test("project roster uses workspace scorer display names", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

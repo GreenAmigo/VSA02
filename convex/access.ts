@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { updateMemberDisplayName } from "./scorerNames";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -676,7 +677,7 @@ export const applyDisplayNameRepair = internalMutation({
     if (!member || member.companyId !== args.companyId || member.email?.trim().toLowerCase() !== args.email
       || member.displayName.trim().toLowerCase() !== args.email) return false;
     if (!name || name.toLowerCase() === args.email) throw new Error("A real display name is required.");
-    await ctx.db.patch(member._id, { displayName: name });
+    await updateMemberDisplayName(ctx, member, name);
     return true;
   },
 });

@@ -2,7 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { getProjectVendors } from "./projectVendors";
-import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
+import { getScorerDisplayNames, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
 const consultantRole = "vs-consultant" as const;
@@ -1861,6 +1861,41 @@ export const inviteWorkspacePerson = mutation({
       status: "invited",
       inviteId,
     };
+  },
+});
+
+export const updateWorkspacePersonName = mutation({
+  args: {
+    companyId: v.id("companies"),
+    memberId: v.optional(v.id("companyMembers")),
+    inviteId: v.optional(v.id("workspaceInvites")),
+    displayName: v.string(),
+  },
+  returns: v.object({ displayName: v.string(), updated: v.boolean() }),
+  handler: async (ctx, args) => {
+    const identity = await assertCompanyAdmin(ctx, args.companyId);
+    if (Boolean(args.memberId) === Boolean(args.inviteId)) throw new Error("Select one person or invitation.");
+    const name = args.displayName.trim();
+    if (!name || /\S+@\S+/.test(name)) throw new Error("Enter the person's name, not an email address.");
+    const target = args.memberId ? await ctx.db.get(args.memberId) : args.inviteId ? await ctx.db.get(args.inviteId) : null;
+    if (!target || target.companyId !== args.companyId) throw new Error("Person not found in this workspace.");
+    if ("userId" in target && name === target.userId) throw new Error("Enter the person's name, not their user ID.");
+    if (!("userId" in target) && (target.status !== "invited" || target.expiresAt <= Date.now())) {
+      throw new Error("Only pending invitations can be updated.");
+    }
+    const previousName = target.displayName;
+    if (previousName === name) return { displayName: name, updated: false };
+    if ("userId" in target) await updateMemberDisplayName(ctx, target, name);
+    else await ctx.db.patch(target._id, { displayName: name });
+    await recordActivity(ctx, {
+      actorUserId: identity.subject ?? identity.tokenIdentifier ?? "system",
+      actorEmail: identity.email ?? undefined,
+      action: "update_workspace_person_name",
+      details: `Updated a person's display name. Name: ${previousName} -> ${name}`,
+      workspaceName: "workspace",
+      companyId: args.companyId,
+    });
+    return { displayName: name, updated: true };
   },
 });
 

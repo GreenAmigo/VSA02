@@ -86,7 +86,8 @@ export default defineSchema({
     createdAt: v.number(),
     isActive: v.boolean(),
   }).index("by_department_user", ["departmentId", "userId"])
-    .index("by_company_department", ["companyId", "departmentId"]),
+    .index("by_company_department", ["companyId", "departmentId"])
+    .index("by_company_user", ["companyId", "userId"]),
 
   projects: defineTable({
     companyId: v.id("companies"),
@@ -114,7 +115,8 @@ export default defineSchema({
     createdAt: v.number(),
     isTestData: v.optional(v.boolean()),
   }).index("by_project_user", ["projectId", "userId"])
-    .index("by_company_project", ["companyId", "projectId"]),
+    .index("by_company_project", ["companyId", "projectId"])
+    .index("by_company_user", ["companyId", "userId"]),
 
   projectVendors: defineTable({
     companyId: v.id("companies"),

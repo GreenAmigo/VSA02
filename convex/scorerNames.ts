@@ -1,5 +1,19 @@
-import type { Id } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+
+export async function updateMemberDisplayName(ctx: MutationCtx, member: Doc<"companyMembers">, displayName: string) {
+  await ctx.db.patch(member._id, { displayName });
+  const projectMembers = ctx.db.query("projectMembers")
+    .withIndex("by_company_user", (q) => q.eq("companyId", member.companyId).eq("userId", member.userId));
+  for await (const assignment of projectMembers) {
+    await ctx.db.patch(assignment._id, { displayName });
+  }
+  const departmentMembers = ctx.db.query("departmentMembers")
+    .withIndex("by_company_user", (q) => q.eq("companyId", member.companyId).eq("userId", member.userId));
+  for await (const assignment of departmentMembers) {
+    await ctx.db.patch(assignment._id, { displayName });
+  }
+}
 
 function isPersonName(value: string | null | undefined, userId: string) {
   const name = value?.trim();
