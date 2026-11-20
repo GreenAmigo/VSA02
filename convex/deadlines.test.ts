@@ -46,6 +46,41 @@ describe("Phase 8 deadline and reminder logic", () => {
     await expect(vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
   });
 
+  test("a vendor with different subject and token identifier can only read and submit their own deadline", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing vendor contact");
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyBId, vendorId: member.vendorId, userId: "another-contact",
+        email: "other@example.com", displayName: "Other Contact", role: "vendor", isActive: true, createdAt: Date.now(),
+      });
+    });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    for (const userId of ["northwind-vendor", "another-contact"]) {
+      await scorer.mutation(api.deadlines.upsertProjectDeadline, {
+        projectId: seeded.projectBId, targetType: "vendor", targetUserId: userId, dueAt: Date.now() + 10000,
+      });
+    }
+    const vendor = t.withIdentity({ subject: "northwind-vendor", tokenIdentifier: "issuer|northwind-vendor" });
+    const rows = await vendor.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId });
+    expect(rows.map((row) => row.targetUserId)).toEqual(["northwind-vendor"]);
+    await expect(vendor.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "another-contact",
+    })).rejects.toThrow("Project access denied");
+    await expect(vendor.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "scorer", targetUserId: "northwind-vendor",
+    })).rejects.toThrow("Project access denied");
+    await expect(vendor.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
+    })).resolves.toMatchObject({ status: "submitted" });
+  });
+
   test("scorers and vendors can see their deadline state, and vendors can only update their own submitted status", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

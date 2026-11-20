@@ -19,6 +19,19 @@ const projectDeadlineSubmitValidator = v.object({
   targetUserId: v.string(),
 });
 
+const deadlineRowValidator = v.object({
+  _id: v.id("projectDeadlines"),
+  companyId: v.id("companies"),
+  projectId: v.id("projects"),
+  targetType: v.union(v.literal("vendor"), v.literal("scorer")),
+  targetUserId: v.string(),
+  dueAt: v.number(),
+  status: v.union(v.literal("not-started"), v.literal("in-progress"), v.literal("submitted")),
+  submittedAt: v.optional(v.number()),
+  lastReminderAt: v.optional(v.number()),
+  reminderMessage: v.string(),
+});
+
 function getDeadlineStatus(status: "not-started" | "in-progress" | "submitted") {
   return status;
 }
@@ -110,10 +123,11 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
 
 export const listProjectDeadlines = query({
   args: { projectId: v.id("projects") },
+  returns: v.array(deadlineRowValidator),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      return [] as const;
+      return [];
     }
 
     const { member } = await assertProjectDeadlineAccess(ctx, args.projectId);
@@ -124,7 +138,7 @@ export const listProjectDeadlines = query({
       .collect();
 
     const visibleRows = member.role === "vendor"
-      ? rows.filter((row) => row.targetType === "vendor" && row.targetUserId === identity.tokenIdentifier)
+      ? rows.filter((row) => row.targetType === "vendor" && row.targetUserId === member.userId)
       : rows;
 
     return visibleRows.map((row) => ({
@@ -201,10 +215,11 @@ export const upsertProjectDeadline = mutation({
 
 export const markDeadlineSubmitted = mutation({
   args: projectDeadlineSubmitValidator,
+  returns: deadlineRowValidator,
   handler: async (ctx, args) => {
-    const { identity, member } = await assertProjectDeadlineAccess(ctx, args.projectId);
+    const { member } = await assertProjectDeadlineAccess(ctx, args.projectId);
 
-      if (member.role === "vendor" && (args.targetType !== "vendor" || args.targetUserId !== identity.tokenIdentifier)) {
+    if (member.role === "vendor" && (args.targetType !== "vendor" || args.targetUserId !== member.userId)) {
       throw new Error("Project access denied");
     }
 
