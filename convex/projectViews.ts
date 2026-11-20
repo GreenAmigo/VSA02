@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, resolveScorerDisplayName } from "./scorerNames";
+import { getVendorScorerCompletion, scorerHistoryNeedsMigration } from "./scorerHistory";
 
 const projectViewValidator = v.object({
   projectId: v.id("projects"),
@@ -123,8 +124,16 @@ export const listProjectViews = query({
       };
     }
 
-    const rows = args.vendorUserId
+    const assignedVendor = args.vendorUserId
+      ? findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId)
+      : null;
+    const rows = assignedVendor
       ? await ctx.db
+          .query("projectViews")
+          .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", assignedVendor.vendorId))
+          .take(200)
+      : args.vendorUserId
+        ? await ctx.db
           .query("projectViews")
           .withIndex("by_project_vendor", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId as string))
           .take(200)
@@ -137,11 +146,8 @@ export const listProjectViews = query({
 
     const requesterUserId = member?.userId ?? identity.tokenIdentifier ?? identity.subject ?? "";
     let peerViewsUnlocked = false;
-    if (member?.role === "company-scorer" && requesterUserId && args.vendorUserId) {
-      const completion = await ctx.db
-        .query("scorerCompletions")
-        .withIndex("by_project_vendor_scope", (q) => q.eq("projectId", args.projectId).eq("vendorUserId", args.vendorUserId as string).eq("scorerScopeKey", `individual:${requesterUserId}`))
-        .first();
+    if (member?.role === "company-scorer" && requesterUserId && assignedVendor) {
+      const { completion } = await getVendorScorerCompletion(ctx, args.projectId, assignedVendor.vendorId, `individual:${requesterUserId}`);
       peerViewsUnlocked = completion?.status === "completed";
     }
 
@@ -151,6 +157,9 @@ export const listProjectViews = query({
     const visibleRows = member?.role === "company-scorer"
       ? rows.filter((row) => row.scorerUserId === requesterUserId || (peerVisibilityEnabled && peerViewsUnlocked))
       : rows;
+    const missingSnapshots = await ctx.db.query("projectViews")
+      .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", undefined))
+      .first();
 
     const orderedRows = visibleRows
       .slice()
@@ -162,6 +171,7 @@ export const listProjectViews = query({
       canViewAll,
       peerVisibilityEnabled,
       peerViewsUnlocked,
+      historyMigrationRequired: Boolean(missingSnapshots) || await scorerHistoryNeedsMigration(ctx, args.projectId),
       rows: orderedRows.map((row) => ({
         _id: row._id,
         projectId: row.projectId,
@@ -203,18 +213,27 @@ export const saveProjectView = mutation({
     const scorerDepartmentSnapshot = await resolveScorerDepartmentSnapshot(ctx, project.companyId, member.userId);
     const normalizedViewText = args.viewText.trim();
 
-    const existing = await ctx.db
-      .query("projectViews")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("scorerUserId"), member.userId))
-      .filter((q: any) => q.eq(q.field("vendorUserId"), args.vendorUserId))
+    const legacy = await ctx.db.query("projectViews")
+      .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", undefined))
       .first();
+    if (legacy || await scorerHistoryNeedsMigration(ctx, args.projectId)) {
+      throw new Error("Company scoring history needs migration before views can be edited. Ask a workspace admin for help.");
+    }
+    const matchingViews = [];
+    const views = ctx.db.query("projectViews")
+      .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendor.vendorId));
+    for await (const view of views) {
+      if (view.scorerUserId === member.userId) matchingViews.push(view);
+      if (matchingViews.length > 1) throw new Error("Conflicting scorer views must be resolved before editing.");
+    }
+    const existing = matchingViews[0];
 
     const row = {
       companyId: project.companyId,
       projectId: args.projectId,
       scorerUserId: member.userId,
-      vendorUserId: args.vendorUserId,
+      vendorUserId: existing?.vendorUserId ?? args.vendorUserId,
+      vendorId: vendor.vendorId,
       viewText: normalizedViewText,
       scorerDepartmentId: scorerDepartmentSnapshot.scorerDepartmentId,
       scorerDepartmentName: scorerDepartmentSnapshot.scorerDepartmentName,

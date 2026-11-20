@@ -8,6 +8,38 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 6 project view isolation", () => {
+  test("scorer views stay with the organisation after a contact is replaced", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Original view",
+    });
+    const vendorId = await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing test organisation");
+      return member.vendorId;
+    });
+    await admin.mutation(api.admin.deactivateVendorContact, { companyId: seeded.companyBId, vendorId, userId: "northwind-vendor" });
+    await admin.mutation(api.admin.inviteVendorContact, {
+      companyId: seeded.companyBId, vendorId, name: "Replacement", email: "replacement@example.com",
+    });
+    await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "replacement", email: "replacement@example.com" });
+    const before = await scorer.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
+    expect(before.rows[0].viewText).toBe("Original view");
+    const saved = await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "replacement", viewText: "Updated view",
+    });
+    expect(saved.updated).toBe(true);
+    const after = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
+    expect(after.rows).toHaveLength(1);
+    expect(after.rows[0].viewText).toBe("Updated view");
+  });
+
   test("a matching scorer name does not authorize project views", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
