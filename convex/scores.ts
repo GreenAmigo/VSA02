@@ -471,11 +471,12 @@ export const listScoreHistory = query({
     const state = await getProjectVendorAnswerState(ctx, project);
     const visibleRows = member.role === "vendor"
       ? [...getUnconflictedVendorAnswers(state, member.vendorId).values()]
-      : [...state.grouped.keys()].flatMap((vendorId) => [...getUnconflictedVendorAnswers(state, vendorId).values()]);
+      : (await getProjectVendors(ctx, project)).flatMap((vendor) => [...getUnconflictedVendorAnswers(state, vendor.vendorId).values()]);
 
     return visibleRows.slice(0, 200).map((row) => ({
       _id: row._id,
       projectId: row.projectId,
+      vendorId: row.vendorId,
       vendorUserId: row.vendorUserId,
       requirementId: row.requirementId,
       score: row.score,

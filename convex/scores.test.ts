@@ -260,6 +260,37 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("legacy score history only includes organisations assigned to the project", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    await admin.mutation(api.scores.submitScore, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1,
+    });
+    const unassigned = await t.run(async (ctx) => {
+      const vendorId = await ctx.db.insert("vendorOrganizations", {
+        companyId: seeded.companyBId, name: "Unassigned", status: "active",
+        createdByUserId: "beta-admin", createdAt: 1, updatedAt: 1,
+      });
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId,
+        vendorUserId: "old-contact", requirementId: "REQ", score: 0, enteredBy: "old-contact", enteredAt: 1,
+      });
+      return vendorId;
+    });
+    const history = await admin.query(api.scores.listScoreHistory, { projectId: seeded.projectBId });
+    expect(history).toHaveLength(1);
+    expect(history[0].vendorId).not.toBe(unassigned);
+    expect(history[0].score).toBe(1);
+  });
+
   test("partially migrated answer history is hidden until all history has an organisation", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
