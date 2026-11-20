@@ -257,6 +257,49 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("vendor answers follow contact links rather than organisation or invitation order", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const first = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "First organisation" });
+    const second = await admin.mutation(api.admin.addWorkspaceVendor, { companyId: seeded.companyBId, name: "Second organisation" });
+    for (const vendorId of [first.vendorId, second.vendorId]) {
+      await admin.mutation(api.admin.addProjectVendor, { companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId });
+    }
+    for (const [userId, email, vendorId] of [
+      ["second-contact", "second@example.com", second.vendorId],
+      ["first-contact", "first@example.com", first.vendorId],
+    ] as const) {
+      await admin.mutation(api.admin.inviteVendorContact, { companyId: seeded.companyBId, vendorId, name: userId, email });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId, email });
+    }
+    await t.run((ctx) => ctx.db.patch(seeded.projectBId, { vendorDeadline: Date.now() + 100000 }));
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ-LINK", text: "Linked vendor answer", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    const firstUser = t.withIdentity({ subject: "first-contact", tokenIdentifier: "first-contact", email: "first@example.com" });
+    const secondUser = t.withIdentity({ subject: "second-contact", tokenIdentifier: "second-contact", email: "second@example.com" });
+    await firstUser.mutation(api.scores.saveVendorAnswer, { projectId: seeded.projectBId, requirementId: "REQ-LINK", score: 1, comment: "first answer" });
+    await secondUser.mutation(api.scores.saveVendorAnswer, { projectId: seeded.projectBId, requirementId: "REQ-LINK", score: 0, comment: "second answer" });
+    const firstAnswers = await firstUser.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    const secondAnswers = await secondUser.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(firstAnswers.vendorOrganizationName).toBe("First organisation");
+    expect(secondAnswers.vendorOrganizationName).toBe("Second organisation");
+    expect(firstAnswers.rows.find((row) => row.requirementId === "REQ-LINK")?.comment).toBe("first answer");
+    expect(secondAnswers.rows.find((row) => row.requirementId === "REQ-LINK")?.comment).toBe("second answer");
+    await expect(firstUser.query(api.scores.getVendorScoringStatus, {
+      projectId: seeded.projectBId, vendorUserId: "second-contact",
+    })).rejects.toThrow("own scoring status");
+    await expect(firstUser.mutation(api.scores.submitScore, {
+      projectId: seeded.projectBId, vendorUserId: "second-contact", requirementId: "REQ-LINK", score: 1,
+    })).rejects.toThrow("own submission");
+  });
+
   test("matching a scorer or admin name alone does not grant scoring access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

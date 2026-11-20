@@ -48,5 +48,43 @@ export async function getProjectVendors(
 }
 
 export function findProjectVendorByUserId(vendors: ProjectVendor[], userId: string) {
-  return vendors.find((vendor) => vendor.contacts.some((contact) => contact.userId === userId)) ?? null;
+  const matches = vendors.filter((vendor) => vendor.contacts.some((contact) => contact.userId === userId));
+  if (matches.length > 1) throw new Error("This contact has conflicting vendor organisation links. Ask a workspace admin to resolve them.");
+  return matches[0] ?? null;
+}
+
+export async function findVendorMembershipForIdentity(
+  ctx: Pick<QueryCtx, "db">,
+  companyId: Id<"companies">,
+  identity: { subject?: string; tokenIdentifier?: string; email?: string },
+) {
+  const userIds = [identity.subject, identity.tokenIdentifier].filter((id): id is string => Boolean(id));
+  const email = identity.email?.trim().toLowerCase();
+  const matches: Doc<"companyMembers">[] = [];
+  const memberships = ctx.db.query("companyMembers")
+    .withIndex("by_company_role", (q) => q.eq("companyId", companyId).eq("role", "vendor"));
+  for await (const member of memberships) {
+    if (member.isActive && (userIds.includes(member.userId) || (email && member.email?.trim().toLowerCase() === email))) {
+      matches.push(member);
+    }
+  }
+  if (matches.length > 1) throw new Error("This contact has multiple vendor memberships. Ask a workspace admin to resolve them.");
+  return matches[0] ?? null;
+}
+
+export async function resolveProjectVendorContact(
+  ctx: Pick<QueryCtx, "db">,
+  project: { _id: Id<"projects">; companyId: Id<"companies"> },
+  identity: { subject?: string; tokenIdentifier?: string; email?: string },
+) {
+  const member = await findVendorMembershipForIdentity(ctx, project.companyId, identity);
+  if (!member?.vendorId) return null;
+  const vendorId = member.vendorId;
+  const organization = await ctx.db.get(vendorId);
+  if (!organization || organization.companyId !== project.companyId) return null;
+  const assignment = await ctx.db.query("projectVendors")
+    .withIndex("by_project_vendor", (q) => q.eq("projectId", project._id).eq("vendorId", vendorId))
+    .unique();
+  if (!assignment || assignment.companyId !== project.companyId) return null;
+  return { member, organization };
 }

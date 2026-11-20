@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { findProjectVendorByUserId, getProjectVendors } from "./projectVendors";
+import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { getScorerDisplayNames, getWorkspacePersonName, personDisplayName, recordedPersonName, resolveScorerDisplayName } from "./scorerNames";
 
 const scoreRowValidator = v.object({
@@ -171,6 +171,15 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
 
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    const contact = await resolveProjectVendorContact(ctx, project, identity);
+    if (!contact) throw new Error("Project access denied");
+    return {
+      project, identity,
+      member: { companyId: project.companyId, projectId, userId: contact.member.userId, role: "vendor", vendorId: contact.organization._id },
+    };
+  }
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
@@ -206,26 +215,6 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
         role: "company-admin",
       },
     };
-  }
-
-  const vendors = await getProjectVendors(ctx, project);
-  const vendorMemberships = companyMemberships.filter((row: any) => row.role === "vendor" && Boolean(row.vendorId));
-  for (const vendorMembership of vendorMemberships) {
-    const assignment = findProjectVendorByUserId(vendors, vendorMembership.userId);
-
-    if (assignment && assignment.vendorId === vendorMembership.vendorId) {
-      return {
-        project,
-        identity,
-        member: {
-          companyId: project.companyId,
-          projectId,
-          userId: vendorMembership.userId,
-          role: "vendor",
-          vendorId: vendorMembership.vendorId,
-        },
-      };
-    }
   }
 
   const consultant = await ctx.db
@@ -270,6 +259,9 @@ async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ 
 
   const userIds = getIdentityUserIds(identity);
   if (userIds.length === 0) {
+    throw new Error("Only consultants and company admins can review vendor responses");
+  }
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
     throw new Error("Only consultants and company admins can review vendor responses");
   }
 
@@ -335,6 +327,9 @@ async function assertScorerAccess(ctx: any, projectId: string): Promise<{ projec
   }
 
   const userIds = getIdentityUserIds(identity);
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    throw new Error("Only assigned scorers can score this project");
+  }
   return { project, identity, userIds };
 }
 
@@ -506,17 +501,8 @@ export const listVendorAnswerRequirements = query({
     }
 
     const company = await ctx.db.get(project.companyId) as { name?: string } | null;
-    const companyMembership = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q: any) => q.eq(q.field("userId"), member.userId))
-      .filter((q: any) => q.eq(q.field("role"), "vendor"))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
-
-    const vendorOrganization = companyMembership?.vendorId
-      ? await ctx.db.get(companyMembership.vendorId)
-      : null;
+    const vendorOrganization = await ctx.db.get(member.vendorId) as { name: string } | null;
+    if (!vendorOrganization) throw new Error("Vendor organisation not found in this workspace.");
 
     const allRequirements = await ctx.db
       .query("requirements")
@@ -555,7 +541,7 @@ export const listVendorAnswerRequirements = query({
       companyName: company?.name ?? "Workspace",
       projectName: project.name,
       projectDescription: project.description ?? null,
-      vendorOrganizationName: vendorOrganization?.name ?? companyMembership?.displayName ?? "Vendor organisation",
+      vendorOrganizationName: vendorOrganization.name,
       vendorUserId: member.userId,
       deadlineAt,
       deadlineLocked,
