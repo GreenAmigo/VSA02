@@ -582,6 +582,9 @@ describe("Phase 5 score audit trail", () => {
     const north = before.vendors.find((vendor) => vendor.vendorUserId === "northwind-vendor");
     const south = before.vendors.find((vendor) => vendor.vendorUserId === "southwind-vendor");
     if (!north || !south) throw new Error("Missing test organisations");
+    await t.withIdentity({ tokenIdentifier: "beta-scorer" }).mutation(api.scores.completeScorerVendor, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    });
     await t.run(async (ctx) => {
       for (const userId of ["northwind-vendor", "southwind-vendor"]) {
         const contact = await ctx.db.query("companyMembers")
@@ -600,6 +603,11 @@ describe("Phase 5 score audit trail", () => {
     expect(cells?.find((cell) => cell.vendorId === south.vendorId)?.vendorScore).toBe(0);
     expect(after.totalsByVendor.find((row) => row.vendorId === north.vendorId)?.vendor.combined).toBe(12);
     expect(after.totalsByVendor.find((row) => row.vendorId === south.vendorId)?.vendor.combined).toBe(3);
+    const progress = await admin.query(api.scores.getProjectScoringProgress, { projectId: seeded.projectBId });
+    const scorer = progress.groups.flatMap((group) => group.scorers).find((row) => row.userId === "beta-scorer");
+    expect(scorer?.totalPairs).toBe(2);
+    expect(scorer?.vendors.find((row) => row.vendorId === north.vendorId))
+      .toMatchObject({ vendorUserId: null, status: "completed" });
     const review = await admin.query(api.scores.getVendorResponseReview, {
       projectId: seeded.projectBId, vendorId: north.vendorId,
     });

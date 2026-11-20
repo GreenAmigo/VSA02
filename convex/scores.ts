@@ -860,12 +860,13 @@ export const getProjectScoringProgress = query({
       throw new Error("Department not found");
     }
 
-    const vendors = await listAssignedVendorUsers(ctx, project);
-    const vendorRows = vendors.map((vendor) => ({
+    const vendorRows = (await getProjectVendors(ctx, project)).map((vendor) => ({
       vendorId: vendor.vendorId,
-      vendorUserId: vendor.vendorUserId as string,
+      vendorUserId: vendor.primaryContact?.userId ?? null,
       vendorName: vendor.vendorName,
-      vendorContactName: vendor.vendorContactName,
+      vendorContactName: vendor.primaryContact
+        ? personDisplayName(vendor.primaryContact.displayName, vendor.primaryContact.userId)
+        : null,
     }));
 
     const scorerAssignments = await ctx.db
@@ -886,8 +887,9 @@ export const getProjectScoringProgress = query({
       scopeKey: string;
       completedPairs: number;
       totalPairs: number;
-      vendors: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }>;
+      vendors: Array<{ vendorId: Id<"vendorOrganizations">; vendorUserId: string | null; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }>;
     }> = [];
+    let hasScorerHistoryConflicts = false;
 
     for (const assignment of scorerAssignments) {
       if (assignment.userId.startsWith("department:")) {
@@ -908,11 +910,13 @@ export const getProjectScoringProgress = query({
       const scopeKey = `individual:${assignment.userId}`;
       const snapshotDepartments = new Set<string>();
       let selectedDepartmentScoreCount = 0;
-      const scorerVendorRows: Array<{ vendorUserId: string; status: "not-started" | "in-progress" | "completed"; answeredCount: number; totalRequirements: number; completedAt: number | null }> = [];
+      const scorerVendorRows: typeof scorerRows[number]["vendors"] = [];
 
       for (const vendor of vendorRows) {
-        const { completion } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, scopeKey);
-        const scorerScoreRows = (await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId)).scores
+        const { completion, hasConflict } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, scopeKey);
+        const history = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
+        hasScorerHistoryConflicts ||= hasConflict || history.hasConflicts;
+        const scorerScoreRows = history.scores
           .filter((row) => row.scorerScopeKey === scopeKey);
         for (const scorerScoreRow of scorerScoreRows) {
           if (scorerScoreRow.scorerDepartmentName) {
@@ -930,6 +934,7 @@ export const getProjectScoringProgress = query({
         }
 
         scorerVendorRows.push({
+          vendorId: vendor.vendorId,
           vendorUserId: vendor.vendorUserId,
           status: completion?.status ?? "not-started",
           answeredCount: completion?.answeredCount ?? 0,
@@ -977,6 +982,8 @@ export const getProjectScoringProgress = query({
 
       return {
         projectId: args.projectId,
+        scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
+        hasScorerHistoryConflicts,
         vendors: vendorRows,
         groups: [
           {
@@ -1017,6 +1024,8 @@ export const getProjectScoringProgress = query({
 
     return {
       projectId: args.projectId,
+      scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
+      hasScorerHistoryConflicts,
       vendors: vendorRows,
       groups: Array.from(grouped.values())
         .map((group) => ({
