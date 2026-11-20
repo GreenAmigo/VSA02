@@ -70,5 +70,48 @@ describe("Phase 3 vendor emailed-link login", () => {
     expect(completed.projectId).toBe(seeded.projectBId);
     expect(completed.email).toBe("vendor@northwind.example");
   });
+
+  test("a cross-workspace assignment cannot be used to request a link", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    await t.run(async (ctx) => {
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!assignment) throw new Error("Missing vendor assignment");
+      await ctx.db.patch(assignment._id, { companyId: seeded.companyAId });
+    });
+    await expect(t.mutation(api.vendorAuth.requestVendorMagicLink, {
+      projectId: seeded.projectBId, email: "vendor@northwind.example",
+    })).rejects.toThrow("Vendor not assigned to this project");
+  });
+
+  test("a link cannot be used after its project changes workspace or its vendor assignment is removed", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const issued = await t.mutation(api.vendorAuth.requestVendorMagicLink, {
+      projectId: seeded.projectBId, email: "vendor@northwind.example",
+    });
+    await t.run(async (ctx) => { await ctx.db.patch(seeded.projectBId, { companyId: seeded.companyAId }); });
+    await expect(t.mutation(api.vendorAuth.completeVendorMagicLink, { token: issued.token }))
+      .rejects.toThrow("Vendor access denied for this project");
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectBId, { companyId: seeded.companyBId });
+      const assignment = await ctx.db.query("projectVendors")
+        .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyBId).eq("projectId", seeded.projectBId)).first();
+      if (!assignment) throw new Error("Missing vendor assignment");
+      await ctx.db.delete(assignment._id);
+    });
+    await expect(t.mutation(api.vendorAuth.completeVendorMagicLink, { token: issued.token }))
+      .rejects.toThrow("Vendor access denied for this project");
+    const token = await t.run((ctx) => ctx.db.query("vendorLoginTokens")
+      .withIndex("by_token", (q) => q.eq("token", issued.token)).unique());
+    expect(token?.usedAt).toBeUndefined();
+  });
 });
 

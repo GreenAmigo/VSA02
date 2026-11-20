@@ -1,5 +1,6 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { getProjectVendors } from "./projectVendors";
 
 const MAGIC_LINK_TTL_MS = 1000 * 60 * 30;
 
@@ -12,30 +13,38 @@ export const requestVendorMagicLink = mutation({
     projectId: v.id("projects"),
     email: v.string(),
   },
+  returns: v.object({
+    sent: v.boolean(),
+    projectId: v.id("projects"),
+    companyId: v.id("companies"),
+    userId: v.string(),
+    email: v.string(),
+    token: v.string(),
+    expiresAt: v.number(),
+  }),
   handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
     if (!project) {
       throw new Error("Project not found");
     }
 
-    const member = await ctx.db
+    const members = ctx.db
       .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), project.companyId))
-      .filter((q) => q.eq(q.field("email"), args.email))
-      .filter((q) => q.eq(q.field("role"), "vendor"))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+      .withIndex("by_company_role", (q) => q.eq("companyId", project.companyId).eq("role", "vendor"));
+    let member = null;
+    for await (const candidate of members) {
+      if (candidate.email === args.email && candidate.isActive) {
+        member = candidate;
+        break;
+      }
+    }
 
     if (!member || !member.vendorId) {
       throw new Error("Vendor not assigned to this project");
     }
 
-    const projectVendor = await ctx.db
-      .query("projectVendors")
-      .filter((q) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q) => q.eq(q.field("vendorId"), member.vendorId))
-      .first();
-
+    const projectVendor = (await getProjectVendors(ctx, project))
+      .find((vendor) => vendor.vendorId === member.vendorId && vendor.contacts.some((contact) => contact._id === member._id));
     if (!projectVendor) {
       throw new Error("Vendor not assigned to this project");
     }
@@ -67,6 +76,14 @@ export const requestVendorMagicLink = mutation({
 
 export const completeVendorMagicLink = mutation({
   args: { token: v.string() },
+  returns: v.object({
+    companyId: v.id("companies"),
+    projectId: v.id("projects"),
+    userId: v.string(),
+    email: v.string(),
+    displayName: v.string(),
+    role: v.literal("vendor"),
+  }),
   handler: async (ctx, args) => {
     const record = await ctx.db
       .query("vendorLoginTokens")
@@ -85,24 +102,27 @@ export const completeVendorMagicLink = mutation({
       throw new Error("Magic link has expired");
     }
 
-    const companyMember = await ctx.db
+    const members = ctx.db
       .query("companyMembers")
-      .filter((q) => q.eq(q.field("companyId"), record.companyId))
-      .filter((q) => q.eq(q.field("userId"), record.userId))
-      .filter((q) => q.eq(q.field("role"), "vendor"))
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .first();
+      .withIndex("by_company_user", (q) => q.eq("companyId", record.companyId).eq("userId", record.userId));
+    let companyMember = null;
+    for await (const candidate of members) {
+      if (candidate.role === "vendor" && candidate.isActive) {
+        companyMember = candidate;
+        break;
+      }
+    }
 
     if (!companyMember || !companyMember.vendorId) {
       throw new Error("Vendor access denied for this project");
     }
 
-    const projectVendor = await ctx.db
-      .query("projectVendors")
-      .filter((q) => q.eq(q.field("projectId"), record.projectId))
-      .filter((q) => q.eq(q.field("vendorId"), companyMember.vendorId))
-      .first();
-
+    const project = await ctx.db.get(record.projectId);
+    if (!project || project.companyId !== record.companyId) {
+      throw new Error("Vendor access denied for this project");
+    }
+    const projectVendor = (await getProjectVendors(ctx, project))
+      .find((vendor) => vendor.vendorId === companyMember.vendorId && vendor.contacts.some((contact) => contact._id === companyMember._id));
     if (!projectVendor) {
       throw new Error("Vendor access denied for this project");
     }
