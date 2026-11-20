@@ -512,6 +512,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       vendorName: string;
       vendorUserId: string | null;
       vendorContactName: string | null;
+      contactConflict?: boolean;
       status: "not-started" | "in-progress" | "submitted";
       answeredCount: number;
       totalRequirements: number;
@@ -740,7 +741,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-base font-semibold text-white">{vendor.vendorName}</p>
-                  <p className="text-xs text-slate-400">Contact: {vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
+                  <p className="text-xs text-slate-400">Contact: {vendor.contactConflict ? "Multiple active contacts; resolve this in Manage contacts" : vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No active contact linked"}</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -4778,6 +4779,11 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
       showConsultantLinks={Boolean(access.isConsultant)}
     >
       <div className="space-y-6">
+        {activeContacts.length > 1 ? (
+          <div role="alert" className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+            This vendor has more than one active contact. Deactivate the extra contacts so only one remains active.
+          </div>
+        ) : null}
         {notice ? (
           <div className={`rounded-2xl border p-4 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}

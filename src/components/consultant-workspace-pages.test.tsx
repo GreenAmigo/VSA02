@@ -73,6 +73,17 @@ describe("ConsultantHomeHeader", () => {
       expect(useMutationMock).toHaveBeenCalledWith(api.admin.updateWorkspacePersonName);
     });
 
+    test("vendor contacts explains when legacy data has multiple active contacts", () => {
+      useQueryMock.mockImplementationOnce(() => [{ vendorId: "vendor-1", name: "Vendor" }]);
+      useQueryMock.mockImplementationOnce(() => [
+        { id: "member-1", userId: "first", name: "First", email: "first@example.com", role: "vendor", status: "active", source: "member" },
+        { id: "member-2", userId: "second", name: "Second", email: "second@example.com", role: "vendor", status: "active", source: "member" },
+      ]);
+      const html = renderToStaticMarkup(<ConsultantWorkspaceVendorContactsPage companyId="company-1" vendorId="vendor-1" />);
+      expect(html).toContain("This vendor has more than one active contact");
+      expect(html).toContain("Deactivate the extra contacts");
+    });
+
     test("adding a vendor directs admins to Manage contacts instead of asking for an email", () => {
       useQueryMock.mockImplementationOnce(() => null);
       useQueryMock.mockImplementationOnce(() => [{ vendorId: "vendor-1", name: "Vendor", contactEmail: "reference@example.com", status: "active", contactCount: 0 }]);
