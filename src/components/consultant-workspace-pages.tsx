@@ -2292,8 +2292,9 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
   const projects = useQuery((api as any).access.listDashboardProjects, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any }) as
     | Array<{ _id: string; name: string; description?: string | null; vendorDeadline?: number | null; scorerDeadline?: number | null; status: "draft" | "active"; createdAt?: number }>
     | undefined;
+  const vendorContact = useQuery(api.access.getWorkspaceVendorContact, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any });
 
-  if (isProtectedLoading || access === undefined || companies === undefined || projects === undefined) {
+  if (isProtectedLoading || access === undefined || companies === undefined || projects === undefined || vendorContact === undefined) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -2328,8 +2329,8 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
     requirements: [],
     scores: [],
   };
-  const canManageWorkspace = Boolean(access.isConsultant || access.role === "company-admin");
-  const isVendorView = Boolean(access.isVendor);
+  const isVendorView = vendorContact !== null;
+  const canManageWorkspace = !isVendorView && Boolean(access.isConsultant || access.role === "company-admin");
   const visibleProjects = projects.slice().sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   const upcomingDeadlines = visibleProjects
     .map((project) => ({
@@ -2351,18 +2352,19 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
             { label: "All workspaces", href: "/workspaces" },
             { label: workspace.name },
           ]}
-      role={access.isConsultant ? "consultant" : access.isVendor ? "vendor" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "company-admin"}
+      role={isVendorView ? "vendor" : access.isConsultant ? "consultant" : access.role === "company-admin" ? "company-admin" : access.role === "company-scorer" ? "company-scorer" : "company-admin"}
       userEmail={access.email ?? user?.email ?? "Unknown"}
-      serverRole={access.isConsultant ? "vs-consultant" : access.role ?? "none"}
+      serverRole={isVendorView ? "vendor" : access.isConsultant ? "vs-consultant" : access.role ?? "none"}
       serverLookupId={access.subject ?? access.tokenIdentifier ?? "unknown"}
-      showConsultantLinks={Boolean(access.isConsultant)}
+      showConsultantLinks={!isVendorView && Boolean(access.isConsultant)}
     >
       {isVendorView ? (
         <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <div className="mb-4">
               <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Vendor home</p>
-              <h2 className="mt-2 text-2xl font-semibold text-white">{access.displayName ?? "Vendor organisation"}</h2>
+              <h2 className="mt-2 text-2xl font-semibold text-white">{vendorContact?.vendorName ?? "Vendor organisation not linked"}</h2>
+              {!vendorContact?.vendorName ? <p role="alert" className="mt-2 text-sm text-rose-300">Ask a workspace administrator to link your vendor contact to an organisation.</p> : null}
               <p className="mt-2 text-sm text-slate-300">Working with {workspace.name}</p>
             </div>
 
@@ -4796,9 +4798,10 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const isProtectedLoading = workosLoading || convexLoading || !user || !convexAuthenticated;
   const access = useQuery(api.access.getCurrentUserAccess, isProtectedLoading ? "skip" : {}) as any;
   const companies = useQuery(api.access.listAccessibleCompanies, isProtectedLoading ? "skip" : {}) as Array<{ _id: string; name: string }> | undefined;
-  const canManage = Boolean(access?.isConsultant || access?.role === "company-admin");
-  const showVendorHome = Boolean(access?.isVendor && access.vendorId);
-  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !(canManage || showVendorHome) ? "skip" : { companyId }) as
+  const vendorContact = useQuery(api.access.getWorkspaceVendorContact, isProtectedLoading || !companyId ? "skip" : { companyId: companyId as any });
+  const showVendorHome = vendorContact != null;
+  const canManage = vendorContact !== undefined && !showVendorHome && Boolean(access?.isConsultant || access?.role === "company-admin");
+  const vendors = useQuery((api as any).admin.listWorkspaceVendors, isProtectedLoading || !companyId || !canManage ? "skip" : { companyId }) as
     | Array<{ vendorId: string; name: string; contactEmail: string | null; status: string; contactCount: number }>
     | undefined;
   const vendorProjects = useQuery(
@@ -4815,7 +4818,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (isProtectedLoading || access === undefined || companies === undefined || (showVendorHome && vendorProjects === undefined)) {
+  if (isProtectedLoading || access === undefined || companies === undefined || vendorContact === undefined || (showVendorHome && vendorProjects === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
   }
 
@@ -4825,7 +4828,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   }
 
   if (showVendorHome) {
-    const vendorNameText = (vendors ?? []).find((vendor) => vendor.vendorId === access.vendorId)?.name ?? "Vendor organisation";
+    const vendorNameText = vendorContact?.vendorName ?? "Vendor organisation not linked";
     const companyName = company?.name ?? "Unknown workspace";
     return (
       <WorkspaceShell

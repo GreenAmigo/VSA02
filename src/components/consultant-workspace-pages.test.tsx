@@ -192,13 +192,14 @@ describe("ConsultantWorkspaceProjectsPage", () => {
       companyId: "company-1",
       createdAt: Date.now(),
     }]);
-    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => ({ vendorId: "vendor-1", vendorName: "Workspace Vendor Organisation" }));
 
     const html = renderToStaticMarkup(
       <ConsultantWorkspaceOverviewPage companyId="company-1" />,
     );
 
     expect(html).toContain("Vendor home");
+    expect(html).toContain("Workspace Vendor Organisation");
     expect(html).toContain("Score requirements");
     expect(html).not.toContain("All workspaces");
     expect(html).not.toContain("Company ID");
