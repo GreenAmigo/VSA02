@@ -4,6 +4,8 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { assertNoOtherActiveVendorContact, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
 import { updateMemberDisplayName } from "./scorerNames";
+import { getVendorScorerCompletion, scorerHistoryNeedsMigration } from "./scorerHistory";
+import { getVendorDeadline, vendorDeadlinesNeedMigration } from "./vendorDeadlines";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -1294,25 +1296,8 @@ export const listWorkspaceScoringSummary = query({
 
     const rows = await Promise.all(scopedProjects.map(async (project) => {
       const projectVendors = await getProjectVendors(ctx, project);
-      const vendors = await Promise.all(projectVendors.map(async (vendor) => {
-        const selectedContact = vendor.primaryContact;
-        if (!selectedContact) {
-          return null;
-        }
-
-        const deadline = await ctx.db
-          .query("projectDeadlines")
-          .withIndex("by_project_target", (q) => q.eq("projectId", project._id).eq("targetType", "vendor").eq("targetUserId", selectedContact.userId))
-          .first();
-
-        return {
-          vendorUserId: selectedContact.userId,
-          submitted: deadline?.status === "submitted",
-        };
-      }));
-
-      const vendorRows = vendors.filter((row): row is { vendorUserId: string; submitted: boolean } => row !== null);
-      const submittedVendors = vendorRows.filter((row) => row.submitted).length;
+      const deadlines = await Promise.all(projectVendors.map((vendor) => getVendorDeadline(ctx, project._id, vendor.vendorId)));
+      const submittedVendors = deadlines.filter((state) => state.deadline?.status === "submitted").length;
 
       const scopeKeys = new Set<string>();
       const scorerAssignments = await ctx.db
@@ -1323,28 +1308,24 @@ export const listWorkspaceScoringSummary = query({
         .collect();
 
       for (const assignment of scorerAssignments) {
-        if (assignment.departmentId || assignment.departmentName) {
-          scopeKeys.add(`department:${assignment.departmentId ?? assignment.departmentName}`);
-        } else {
-          scopeKeys.add(`individual:${assignment.userId}`);
-        }
+        scopeKeys.add(`individual:${assignment.userId}`);
       }
 
-      const completionRows = await ctx.db
-        .query("scorerCompletions")
-        .filter((q: any) => q.eq(q.field("projectId"), project._id))
-        .filter((q: any) => q.eq(q.field("status"), "completed"))
-        .collect();
-      const completedScorerVendorPairs = new Set(completionRows.map((row) => `${row.vendorUserId}::${row.scorerScopeKey}`));
-      const totalScorerVendorPairs = scopeKeys.size * vendorRows.length;
+      const completionStates = await Promise.all(projectVendors.flatMap((vendor) =>
+        [...scopeKeys].map((scopeKey) => getVendorScorerCompletion(ctx, project._id, vendor.vendorId, scopeKey))));
+      const completedScorerVendorPairs = completionStates.filter((state) => state.completion?.status === "completed").length;
+      const totalScorerVendorPairs = scopeKeys.size * projectVendors.length;
 
       return {
         projectId: project._id,
         projectName: project.name,
         submittedVendors,
-        totalVendors: vendorRows.length,
-        completedScorerVendorPairs: completedScorerVendorPairs.size,
+        totalVendors: projectVendors.length,
+        completedScorerVendorPairs,
         totalScorerVendorPairs,
+        deadlineMigrationRequired: await vendorDeadlinesNeedMigration(ctx, project._id),
+        scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, project._id),
+        hasHistoryConflicts: deadlines.some((state) => state.hasConflict) || completionStates.some((state) => state.hasConflict),
       };
     }));
 

@@ -313,7 +313,7 @@ describe("Phase 2 access checks", () => {
     expect(projects).toHaveLength(0);
   });
 
-  test("scoring summary counts assigned vendor organisations with active contacts", async () => {
+  test("scoring summary keeps organisation submission status when a contact is deactivated", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
       companyAName: "Acme Health", companyBName: "Beta Logistics",
@@ -325,11 +325,12 @@ describe("Phase 2 access checks", () => {
         .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
       if (!member) throw new Error("Missing test membership");
       await ctx.db.delete(member._id);
-      await ctx.db.insert("projectDeadlines", {
-        companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor",
-        targetUserId: "northwind-vendor", dueAt: Date.now(), status: "submitted",
-        submittedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
-      });
+    });
+    await admin.mutation(api.deadlines.upsertProjectDeadline, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor", dueAt: Date.now() + 100000,
+    });
+    await admin.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
     });
     const summary = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
     expect(summary.find((row) => row.projectId === seeded.projectBId))
@@ -342,7 +343,7 @@ describe("Phase 2 access checks", () => {
     });
     const afterDeactivation = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
     expect(afterDeactivation.find((row) => row.projectId === seeded.projectBId))
-      .toMatchObject({ totalVendors: 0, submittedVendors: 0 });
+      .toMatchObject({ totalVendors: 1, submittedVendors: 1 });
   });
 
   test("a user can only see companies and projects they belong to", async () => {
