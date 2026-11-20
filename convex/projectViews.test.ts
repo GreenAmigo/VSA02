@@ -79,6 +79,9 @@ describe("Phase 6 project view isolation", () => {
     const pending = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
     expect(pending.historyMigrationRequired).toBe(true);
     expect(pending.rows).toEqual([]);
+    const allPending = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(allPending.historyMigrationRequired).toBe(true);
+    expect(allPending.rows).toEqual([]);
     await t.run(async (ctx) => { await ctx.db.delete(legacyId); });
     await t.run(async (ctx) => {
       const original = await ctx.db.query("projectViews")
@@ -90,6 +93,9 @@ describe("Phase 6 project view isolation", () => {
     const conflicting = await scorer.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
     expect(conflicting.hasViewConflicts).toBe(true);
     expect(conflicting.rows).toEqual([]);
+    const allConflicting = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
+    expect(allConflicting.hasViewConflicts).toBe(true);
+    expect(allConflicting.rows).toEqual([]);
     await expect(scorer.mutation(api.projectViews.saveProjectView, {
       projectId: seeded.projectBId, vendorUserId: "replacement", viewText: "Must not overwrite",
     })).rejects.toThrow("Conflicting scorer views");

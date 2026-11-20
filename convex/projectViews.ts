@@ -162,13 +162,13 @@ export const listProjectViews = query({
       .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", undefined))
       .first();
     const counts = new Map<string, number>();
-    if (assignedVendor) {
-      for (const row of rows) counts.set(row.scorerUserId, (counts.get(row.scorerUserId) ?? 0) + 1);
+    const viewKey = (row: typeof rows[number]) => JSON.stringify([row.vendorId, row.scorerUserId]);
+    for (const row of rows) {
+      const key = viewKey(row);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const hasViewConflicts = [...counts.values()].some((count) => count > 1);
-    const nonConflictingRows = assignedVendor
-      ? missingSnapshots ? [] : rows.filter((row) => counts.get(row.scorerUserId) === 1)
-      : rows;
+    const nonConflictingRows = missingSnapshots ? [] : rows.filter((row) => counts.get(viewKey(row)) === 1);
     const visibleRows = member?.role === "company-scorer"
       ? nonConflictingRows.filter((row) => row.scorerUserId === requesterUserId || (peerVisibilityEnabled && peerViewsUnlocked))
       : nonConflictingRows;
