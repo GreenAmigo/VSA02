@@ -1424,15 +1424,17 @@ export const inviteVendorContact = mutation({
       .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId));
     const matchingMembers = [];
     for await (const member of members) {
-      if (member.email?.trim().toLowerCase() === normalizedEmail && member.isActive) {
+      if (member.email?.trim().toLowerCase() === normalizedEmail) {
         matchingMembers.push(member);
       }
     }
 
     const invites = ctx.db.query("workspaceInvites")
-      .withIndex("by_company_email", (q) => q.eq("companyId", args.companyId).eq("email", normalizedEmail));
+      .withIndex("by_company_status", (q) => q.eq("companyId", args.companyId));
     const matchingInvites = [];
-    for await (const invite of invites) matchingInvites.push(invite);
+    for await (const invite of invites) {
+      if (invite.email.trim().toLowerCase() === normalizedEmail) matchingInvites.push(invite);
+    }
 
     if (matchingMembers.length > 1 || matchingInvites.length > 1
       || matchingMembers.some((member) => member.role !== "vendor" || member.vendorId !== args.vendorId)
@@ -1440,7 +1442,7 @@ export const inviteVendorContact = mutation({
       throw new Error("This email is already linked or invited in this workspace. Ask an administrator to resolve the existing contact before inviting them.");
     }
 
-    const existingMember = matchingMembers[0];
+    const existingMember = matchingMembers.find((member) => member.isActive);
 
     if (existingMember) {
       await ctx.db.patch(existingMember._id, {
@@ -1710,9 +1712,9 @@ export const inviteWorkspacePerson = mutation({
     }
 
     const vendorInvites = ctx.db.query("workspaceInvites")
-      .withIndex("by_company_email", (q) => q.eq("companyId", args.companyId).eq("email", normalizedEmail));
+      .withIndex("by_company_status", (q) => q.eq("companyId", args.companyId));
     for await (const invite of vendorInvites) {
-      if (invite.role === "vendor") {
+      if (invite.email.trim().toLowerCase() === normalizedEmail && invite.role === "vendor") {
         throw new Error("This email is already linked or invited as a vendor contact in this workspace.");
       }
     }
