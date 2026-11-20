@@ -8,6 +8,47 @@ import schema from "./schema";
 const modules = import.meta.glob("./**/*.ts");
 
 describe("vendor answer backfill", () => {
+  test("reports every answer across page boundaries without changing unresolved rows", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const answerIds = await t.run(async (ctx) => {
+      const ids = [];
+      for (let i = 0; i < 51; i++) {
+        const requirementId = `REQ-${String(i).padStart(2, "0")}`;
+        await ctx.db.insert("requirements", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, requirementId,
+          text: "Requirement", type: "user-story", priority: 9, status: "active", createdAt: 1,
+        });
+        ids.push(await ctx.db.insert("scores", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId,
+          vendorUserId: i === 50 ? "unlinked-contact" : "northwind-vendor",
+          requirementId, score: 1, enteredBy: "contact", enteredAt: 1,
+        }));
+      }
+      return ids;
+    });
+    const previous = process.env.APP_ENVIRONMENT;
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      const first = await t.mutation(internal.vendorAnswerBackfill.backfillVendorAnswerOrganizations, {
+        projectId: seeded.projectBId, linksRepaired: true,
+      });
+      expect(first.isDone).toBe(false);
+      const second = await t.mutation(internal.vendorAnswerBackfill.backfillVendorAnswerOrganizations, {
+        projectId: seeded.projectBId, linksRepaired: true, cursor: first.continueCursor,
+      });
+      expect(second.isDone).toBe(true);
+      expect([...first.changes, ...second.changes].map((item) => item.answer.answerId)).toEqual(answerIds.slice(0, 50));
+      expect([...first.unresolved, ...second.unresolved].map((item) => item.answer.answerId)).toEqual([answerIds[50]]);
+      expect((await t.run((ctx) => ctx.db.get(answerIds[50])))?.vendorId).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previous;
+    }
+  });
+
   test("reports duplicates and unmatched answers without changing existing snapshots", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
