@@ -175,6 +175,7 @@ export default defineSchema({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     vendorUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     scorerScopeKey: v.string(),
     scorerScopeLabel: v.string(),
     scorerScopeType: v.union(v.literal("individual"), v.literal("department")),
@@ -189,12 +190,14 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"])
-    .index("by_project_vendor_scope_requirement", ["projectId", "vendorUserId", "scorerScopeKey", "requirementId"]),
+    .index("by_project_vendor_scope_requirement", ["projectId", "vendorUserId", "scorerScopeKey", "requirementId"])
+    .index("by_project_vendor_id_scope_requirement", ["projectId", "vendorId", "scorerScopeKey", "requirementId"]),
 
   scorerCompletions: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     vendorUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     scorerScopeKey: v.string(),
     scorerScopeLabel: v.string(),
     scorerScopeType: v.union(v.literal("individual"), v.literal("department")),
@@ -210,7 +213,8 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_scope", ["projectId", "scorerScopeKey"])
-    .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"]),
+    .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"])
+    .index("by_project_vendor_id_scope", ["projectId", "vendorId", "scorerScopeKey"]),
 
   scoreAmendments: defineTable({
     companyId: v.id("companies"),
@@ -235,19 +239,22 @@ export default defineSchema({
     projectId: v.id("projects"),
     scorerUserId: v.string(),
     vendorUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     viewText: v.string(),
     scorerDepartmentId: v.optional(v.id("workspaceDepartments")),
     scorerDepartmentName: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
-    .index("by_project_scorer", ["projectId", "scorerUserId"]),
+    .index("by_project_scorer", ["projectId", "scorerUserId"])
+    .index("by_project_vendor_id", ["projectId", "vendorId"]),
 
   projectDeadlines: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),
     targetType: v.union(v.literal("vendor"), v.literal("scorer")),
     targetUserId: v.string(),
+    vendorId: v.optional(v.id("vendorOrganizations")),
     dueAt: v.number(),
     status: v.union(v.literal("not-started"), v.literal("in-progress"), v.literal("submitted")),
     submittedAt: v.optional(v.number()),
@@ -255,7 +262,8 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_project_target", ["projectId", "targetType", "targetUserId"])
-    .index("by_project_user", ["projectId", "targetUserId"]),
+    .index("by_project_user", ["projectId", "targetUserId"])
+    .index("by_project_vendor_id", ["projectId", "vendorId"]),
 
   activityLogs: defineTable({
     actorUserId: v.string(),
