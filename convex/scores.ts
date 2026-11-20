@@ -5,6 +5,7 @@ import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectV
 import { getScorerDisplayNames, getWorkspacePersonName, personDisplayName, recordedPersonName, resolveScorerDisplayName } from "./scorerNames";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers, requireWritableVendorAnswer } from "./vendorAnswers";
 import { assertWritableScorerHistory, getVendorScorerCompletion, getVendorScorerHistory, scorerHistoryNeedsMigration } from "./scorerHistory";
+import { getVendorDeadline, requireWritableVendorDeadline, vendorDeadlinesNeedMigration } from "./vendorDeadlines";
 
 const scoreRowValidator = v.object({
   projectId: v.id("projects"),
@@ -92,15 +93,6 @@ const clearProjectScorerDataValidator = v.object({
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
-}
-
-async function getProjectDeadlineForVendor(ctx: any, projectId: string, vendorUserId: string) {
-  return await ctx.db
-    .query("projectDeadlines")
-    .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("targetType"), "vendor"))
-    .filter((q: any) => q.eq(q.field("targetUserId"), vendorUserId))
-    .first();
 }
 
 function isDeadlineLocked(deadline: { status?: string; dueAt?: number } | null, now = Date.now()) {
@@ -518,7 +510,9 @@ export const listVendorAnswerRequirements = query({
         .map(async (id) => [id, await getWorkspacePersonName(ctx, project.companyId, id)] as const),
     ));
     const answeredCount = visibleRequirements.filter((row) => scoreByRequirementId.has(row.requirementId)).length;
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    const deadlineState = await getVendorDeadline(ctx, args.projectId, member.vendorId);
+    const deadline = deadlineState.deadline;
+    const deadlineMigrationRequired = await vendorDeadlinesNeedMigration(ctx, args.projectId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
     const deadlineLocked = isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null);
 
@@ -538,6 +532,8 @@ export const listVendorAnswerRequirements = query({
       vendorOrganizationName: vendorOrganization.name,
       vendorUserId: member.userId,
       migrationRequired: answerState.migrationRequired,
+      deadlineMigrationRequired,
+      deadlineConflict: deadlineState.hasConflict,
       conflictingRequirementIds: [...(answerState.grouped.get(member.vendorId)?.entries() ?? [])]
         .filter(([, answers]) => answers.length > 1).map(([requirementId]) => requirementId),
       deadlineAt,
@@ -572,7 +568,7 @@ export const saveVendorAnswer = mutation({
       throw new Error("Project access denied");
     }
 
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    const deadline = await requireWritableVendorDeadline(ctx, args.projectId, member.vendorId);
     const effectiveDueAt = getEffectiveVendorDueAt(project, deadline);
     if (isDeadlineLocked(effectiveDueAt ? { dueAt: effectiveDueAt } : null)) {
       throw new Error("Vendor scoring is locked after the deadline");
@@ -650,6 +646,7 @@ export const saveVendorAnswer = mutation({
         projectId: args.projectId,
         targetType: "vendor",
         targetUserId: member.userId,
+        vendorId: member.vendorId,
         dueAt: project.vendorDeadline ?? now,
         status: "in-progress",
         createdAt: now,
@@ -698,7 +695,7 @@ export const submitVendorAnswers = mutation({
       throw new Error("Conflicting vendor answers must be resolved before submission. Ask a workspace admin for help.");
     }
 
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, member.userId);
+    const deadline = await requireWritableVendorDeadline(ctx, args.projectId, member.vendorId);
     const effectiveDueAt = getEffectiveVendorDueAt(project, deadline);
     if (isDeadlineLocked(effectiveDueAt ? { dueAt: effectiveDueAt } : null)) {
       throw new Error("Vendor scoring is locked after the deadline");
@@ -717,6 +714,7 @@ export const submitVendorAnswers = mutation({
         projectId: args.projectId,
         targetType: "vendor",
         targetUserId: member.userId,
+        vendorId: member.vendorId,
         dueAt: project.vendorDeadline ?? now,
         status: "submitted",
         submittedAt: now,
@@ -772,7 +770,8 @@ export const getVendorScoringStatus = query({
     const answerState = await getProjectVendorAnswerState(ctx, project);
     const answeredIds = new Set(getUnconflictedVendorAnswers(answerState, vendor.vendorId).keys());
     const answeredCount = eligibleRequirements.filter((row) => answeredIds.has(row.requirementId)).length;
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+    const deadlineState = await getVendorDeadline(ctx, args.projectId, vendor.vendorId);
+    const deadline = deadlineState.deadline;
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
     const hasSubmitted = deadline?.status === "submitted";
 
@@ -787,6 +786,8 @@ export const getVendorScoringStatus = query({
       projectId: args.projectId,
       vendorUserId: args.vendorUserId,
       migrationRequired: answerState.migrationRequired,
+      deadlineMigrationRequired: await vendorDeadlinesNeedMigration(ctx, args.projectId),
+      deadlineConflict: deadlineState.hasConflict,
       status,
       answeredCount,
       totalRequirements: eligibleRequirements.length,
@@ -809,24 +810,14 @@ export const listProjectVendorResponses = query({
 
     const vendors = await getProjectVendors(ctx, project);
     const answerState = await getProjectVendorAnswerState(ctx, project);
+    const deadlineMigrationRequired = await vendorDeadlinesNeedMigration(ctx, args.projectId);
     const rows = await Promise.all(vendors.map(async (vendor) => {
       const selectedContact = vendor.primaryContact;
-      const vendorUserIds = vendor.contacts.map((contact) => contact.userId);
       const answeredRequirementIds = new Set(getUnconflictedVendorAnswers(answerState, vendor.vendorId).keys());
 
-      const deadlines = await Promise.all(vendorUserIds.map((vendorUserId) =>
-        ctx.db
-          .query("projectDeadlines")
-          .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", "vendor").eq("targetUserId", vendorUserId))
-          .first(),
-      ));
-      const submittedRows = deadlines.filter((deadline) => deadline?.status === "submitted" && typeof deadline.submittedAt === "number");
-      const submittedAt = submittedRows.length > 0 ? Math.max(...submittedRows.map((deadline) => deadline!.submittedAt as number)) : null;
-      const latestDueAt = deadlines
-        .map((deadline) => deadline?.dueAt)
-        .filter((value): value is number => typeof value === "number")
-        .sort((a, b) => b - a)[0];
-      const deadlineAt = typeof latestDueAt === "number" ? latestDueAt : (project.vendorDeadline ?? null);
+      const deadlineState = await getVendorDeadline(ctx, args.projectId, vendor.vendorId);
+      const submittedAt = deadlineState.deadline?.status === "submitted" ? deadlineState.deadline.submittedAt ?? null : null;
+      const deadlineAt = getEffectiveVendorDueAt(project, deadlineState.deadline);
       const answeredCount = answeredRequirementIds.size;
       const status = submittedAt
         ? "submitted"
@@ -841,6 +832,8 @@ export const listProjectVendorResponses = query({
         vendorContactName: selectedContact ? personDisplayName(selectedContact.displayName, selectedContact.userId) : null,
         migrationRequired: answerState.migrationRequired,
         hasConflicts: [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
+        deadlineMigrationRequired,
+        deadlineConflict: deadlineState.hasConflict,
         answeredCount,
         totalRequirements,
         status,
@@ -1103,7 +1096,8 @@ export const getVendorResponseReview = query({
       amendmentsByRequirementId.set(amendment.requirementId, current);
     }
 
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, vendorContext.vendorUserId);
+    const deadlineState = await getVendorDeadline(ctx, args.projectId, vendorContext.vendorId);
+    const deadline = deadlineState.deadline;
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
     const deadlineLocked = isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null);
 
@@ -1145,6 +1139,8 @@ export const getVendorResponseReview = query({
       vendorContactName: vendorContext.vendorDisplayName,
       migrationRequired: answerState.migrationRequired,
       hasConflicts: [...(answerState.grouped.get(vendorContext.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
+      deadlineMigrationRequired: await vendorDeadlinesNeedMigration(ctx, args.projectId),
+      deadlineConflict: deadlineState.hasConflict,
       deadlineAt,
       deadlineLocked,
       rows,
@@ -1894,7 +1890,7 @@ export const submitScore = mutation({
         throw new Error("Vendor can only score their own submission");
       }
 
-      const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+      const deadline = await requireWritableVendorDeadline(ctx, args.projectId, member.vendorId);
       const deadlineAt = getEffectiveVendorDueAt(project, deadline);
       if (isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null)) {
         throw new Error("Vendor scoring is locked after the deadline");
@@ -2009,7 +2005,7 @@ export const amendVendorScore = mutation({
     const { project, identity, actorUserId, actorDisplayName } = await assertVendorReviewAccess(ctx, args.projectId);
     const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
 
-    const deadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+    const deadline = await requireWritableVendorDeadline(ctx, args.projectId, vendorContext.vendorId);
     const deadlineAt = getEffectiveVendorDueAt(project, deadline);
     if (!isDeadlineLocked(deadlineAt ? { dueAt: deadlineAt } : null)) {
       throw new Error("Vendor score amendments are only allowed after the deadline");
@@ -2096,13 +2092,13 @@ export const reopenVendorAnswers = mutation({
   args: reopenVendorAnswersValidator,
   handler: async (ctx, args) => {
     const { project, identity, actorUserId } = await assertVendorReviewAccess(ctx, args.projectId);
-    await resolveVendorReviewContext(ctx, project, args.vendorUserId);
+    const vendorContext = await resolveVendorReviewContext(ctx, project, args.vendorUserId);
 
     if (!Number.isFinite(args.dueAt) || args.dueAt <= Date.now()) {
       throw new Error("Choose a future date to reopen this vendor response window");
     }
 
-    const existingDeadline = await getProjectDeadlineForVendor(ctx, args.projectId, args.vendorUserId);
+    const existingDeadline = await requireWritableVendorDeadline(ctx, args.projectId, vendorContext.vendorId);
     const now = Date.now();
 
     if (existingDeadline) {
@@ -2118,6 +2114,7 @@ export const reopenVendorAnswers = mutation({
         projectId: args.projectId,
         targetType: "vendor",
         targetUserId: args.vendorUserId,
+        vendorId: vendorContext.vendorId,
         dueAt: args.dueAt,
         status: "in-progress",
         createdAt: now,

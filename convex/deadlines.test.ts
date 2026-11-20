@@ -8,6 +8,39 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 8 deadline and reminder logic", () => {
+  test("a replacement contact inherits the organisation's deadline and submission status", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const oldContact = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const dueAt = Date.now() + 100000;
+    await admin.mutation(api.deadlines.upsertProjectDeadline, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor", dueAt,
+    });
+    await oldContact.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
+    });
+    const vendorId = await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing test organisation");
+      return member.vendorId;
+    });
+    await admin.mutation(api.admin.deactivateVendorContact, { companyId: seeded.companyBId, vendorId, userId: "northwind-vendor" });
+    await admin.mutation(api.admin.inviteVendorContact, {
+      companyId: seeded.companyBId, vendorId, name: "Replacement", email: "replacement@example.com",
+    });
+    await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "replacement", email: "replacement@example.com" });
+    const replacement = t.withIdentity({ tokenIdentifier: "replacement", email: "replacement@example.com" });
+    const rows = await replacement.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ targetUserId: "replacement", dueAt, status: "submitted" });
+    const page = await replacement.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(page).toMatchObject({ status: "submitted", deadlineAt: dueAt });
+  });
+
   test("a matching name does not authorize deadline access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

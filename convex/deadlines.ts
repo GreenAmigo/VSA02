@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
+import { requireWritableVendorDeadline } from "./vendorDeadlines";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -67,7 +68,7 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     if (!contact) throw new Error("Project access denied");
     return {
       project, identity,
-      member: { companyId: project.companyId, projectId, userId: contact.member.userId, role: "vendor" as const },
+      member: { companyId: project.companyId, projectId, userId: contact.member.userId, vendorId: contact.organization._id, role: "vendor" as const },
     };
   }
 
@@ -128,7 +129,7 @@ export const listProjectDeadlines = query({
       .collect();
 
     const visibleRows = member.role === "vendor"
-      ? rows.filter((row) => row.targetType === "vendor" && row.targetUserId === member.userId)
+      ? rows.filter((row) => row.targetType === "vendor" && row.vendorId === member.vendorId)
       : rows;
 
     return visibleRows.map((row) => ({
@@ -136,7 +137,7 @@ export const listProjectDeadlines = query({
       companyId: row.companyId,
       projectId: row.projectId,
       targetType: row.targetType,
-      targetUserId: row.targetUserId,
+      targetUserId: member.role === "vendor" ? member.userId : row.targetUserId,
       dueAt: row.dueAt,
       status: getDeadlineStatus(row.status),
       submittedAt: row.submittedAt,
@@ -155,10 +156,13 @@ export const upsertProjectDeadline = mutation({
       throw new Error("Project access denied");
     }
 
+    let vendorId;
     if (args.targetType === "vendor") {
-      if (!findProjectVendorByUserId(await getProjectVendors(ctx, project), args.targetUserId)) {
+      const vendor = findProjectVendorByUserId(await getProjectVendors(ctx, project), args.targetUserId);
+      if (!vendor) {
         throw new Error("Target user is not a vendor on this project");
       }
+      vendorId = vendor.vendorId;
     } else {
       const targetMembership = await ctx.db
         .query("projectMembers")
@@ -172,19 +176,19 @@ export const upsertProjectDeadline = mutation({
       }
     }
 
-    const existing = await ctx.db
-      .query("projectDeadlines")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("targetType"), args.targetType))
-      .filter((q: any) => q.eq(q.field("targetUserId"), args.targetUserId))
-      .first();
+    const existing = vendorId
+      ? await requireWritableVendorDeadline(ctx, args.projectId, vendorId)
+      : await ctx.db.query("projectDeadlines")
+        .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", args.targetType).eq("targetUserId", args.targetUserId))
+        .first();
 
     const now = Date.now();
     const record = {
       companyId: project.companyId,
       projectId: args.projectId,
       targetType: args.targetType,
-      targetUserId: args.targetUserId,
+      targetUserId: existing?.targetUserId ?? args.targetUserId,
+      vendorId,
       dueAt: args.dueAt,
       status: existing?.status ?? "not-started",
       submittedAt: existing?.submittedAt,
@@ -207,7 +211,7 @@ export const markDeadlineSubmitted = mutation({
   args: projectDeadlineSubmitValidator,
   returns: deadlineRowValidator,
   handler: async (ctx, args) => {
-    const { member } = await assertProjectDeadlineAccess(ctx, args.projectId);
+    const { member, project } = await assertProjectDeadlineAccess(ctx, args.projectId);
 
     if (member.role === "vendor" && (args.targetType !== "vendor" || args.targetUserId !== member.userId)) {
       throw new Error("Project access denied");
@@ -217,12 +221,17 @@ export const markDeadlineSubmitted = mutation({
       throw new Error("Project access denied");
     }
 
-    const row = await ctx.db
-      .query("projectDeadlines")
-      .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-      .filter((q: any) => q.eq(q.field("targetType"), args.targetType))
-      .filter((q: any) => q.eq(q.field("targetUserId"), args.targetUserId))
-      .first();
+    let row;
+    if (args.targetType === "vendor") {
+      const vendorId = member.role === "vendor" ? member.vendorId
+        : findProjectVendorByUserId(await getProjectVendors(ctx, project), args.targetUserId)?.vendorId;
+      if (!vendorId) throw new Error("Target user is not a vendor on this project");
+      row = await requireWritableVendorDeadline(ctx, args.projectId, vendorId);
+    } else {
+      row = await ctx.db.query("projectDeadlines")
+        .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", args.targetType).eq("targetUserId", args.targetUserId))
+        .first();
+    }
 
     if (!row) {
       throw new Error("Deadline not found");
@@ -242,7 +251,7 @@ export const markDeadlineSubmitted = mutation({
       companyId: row.companyId,
       projectId: row.projectId,
       targetType: row.targetType,
-      targetUserId: row.targetUserId,
+      targetUserId: member.role === "vendor" ? member.userId : row.targetUserId,
       dueAt: row.dueAt,
       status: updated.status,
       submittedAt: updated.submittedAt,
