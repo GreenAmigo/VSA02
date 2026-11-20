@@ -8,6 +8,36 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 7 dashboard totals", () => {
+  test("does not count a partly migrated answer that may conflict with an older one", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    await admin.mutation(api.scores.submitScore, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId,
+        vendorUserId: "old-contact", requirementId: "REQ", score: 0, enteredBy: "old-contact", enteredAt: 1,
+      });
+    });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(dashboard.migrationRequired).toBe(true);
+    expect(dashboard.rows[0]).toMatchObject({ total: 0, scoredCount: 0, missingCount: 1 });
+    const panel = await t.withIdentity({ tokenIdentifier: "northwind-vendor" }).query(
+      api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId },
+    );
+    expect(panel.migrationRequired).toBe(true);
+    expect(panel.rows.find((row) => row.requirementId === "REQ")?.score).toBeNull();
+  });
+
   test("conflicting organisation answers are excluded, even after the contact leaves", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

@@ -29,6 +29,7 @@ export function getUnconflictedVendorAnswers(
   vendorId: Id<"vendorOrganizations">,
 ) {
   const result = new Map<string, Doc<"scores">>();
+  if (state.migrationRequired) return result;
   for (const [requirementId, answers] of state.grouped.get(vendorId) ?? []) {
     if (answers.length === 1) result.set(requirementId, answers[0]);
   }
