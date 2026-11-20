@@ -1420,30 +1420,36 @@ export const inviteVendorContact = mutation({
     const normalizedEmail = args.email.trim().toLowerCase();
     const displayName = args.name.trim() || normalizedEmail;
 
-    const existingMember = await ctx.db
-      .query("companyMembers")
-      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
-      .filter((q: any) => q.eq(q.field("role"), "vendor"))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first();
+    const members = ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId));
+    const matchingMembers = [];
+    for await (const member of members) {
+      if (member.email?.trim().toLowerCase() === normalizedEmail && member.isActive) {
+        matchingMembers.push(member);
+      }
+    }
+
+    const invites = ctx.db.query("workspaceInvites")
+      .withIndex("by_company_email", (q) => q.eq("companyId", args.companyId).eq("email", normalizedEmail));
+    const matchingInvites = [];
+    for await (const invite of invites) matchingInvites.push(invite);
+
+    if (matchingMembers.length > 1 || matchingInvites.length > 1
+      || matchingMembers.some((member) => member.role !== "vendor" || member.vendorId !== args.vendorId)
+      || matchingInvites.some((invite) => invite.role !== "vendor" || invite.vendorId !== args.vendorId)) {
+      throw new Error("This email is already linked or invited in this workspace. Ask an administrator to resolve the existing contact before inviting them.");
+    }
+
+    const existingMember = matchingMembers[0];
 
     if (existingMember) {
       await ctx.db.patch(existingMember._id, {
         displayName,
-        role: "vendor",
-        vendorId: args.vendorId,
-        isActive: true,
       });
       return { vendorId: args.vendorId, email: normalizedEmail, displayName, status: "active" };
     }
 
-    const existingInvite = await ctx.db
-      .query("workspaceInvites")
-      .filter((q: any) => q.eq(q.field("companyId"), args.companyId))
-      .filter((q: any) => q.eq(q.field("email"), normalizedEmail))
-      .filter((q: any) => q.eq(q.field("vendorId"), args.vendorId))
-      .first();
+    const existingInvite = matchingInvites[0];
 
     const expiresAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
     if (existingInvite) {
@@ -1699,6 +1705,18 @@ export const inviteWorkspacePerson = mutation({
     const normalizedEmail = args.email.trim().toLowerCase();
     const displayName = args.name.trim() || normalizedEmail;
 
+    if (args.role === "vendor") {
+      throw new Error("Invite vendor contacts from the vendor organisation's Manage contacts page.");
+    }
+
+    const vendorInvites = ctx.db.query("workspaceInvites")
+      .withIndex("by_company_email", (q) => q.eq("companyId", args.companyId).eq("email", normalizedEmail));
+    for await (const invite of vendorInvites) {
+      if (invite.role === "vendor") {
+        throw new Error("This email is already linked or invited as a vendor contact in this workspace.");
+      }
+    }
+
     if (roleRequiresDepartment(args.role) && !args.departmentId) {
       throw new Error("Select a department before inviting a company admin or scorer.");
     }
@@ -1715,6 +1733,9 @@ export const inviteWorkspacePerson = mutation({
       .first();
 
     if (existingMember) {
+      if (existingMember.role === "vendor") {
+        throw new Error("This email is already linked as a vendor contact in this workspace.");
+      }
       await ctx.db.patch(existingMember._id, {
         displayName,
         role: args.role,

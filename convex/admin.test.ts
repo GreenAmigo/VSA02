@@ -71,6 +71,39 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("vendor invitations cannot duplicate or move a contact between organisations", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      await grantConsultant(t, "invite-admin", "admin@example.com", "Admin");
+      const admin = t.withIdentity({ tokenIdentifier: "invite-admin" });
+      const company = await admin.mutation(api.admin.createCompany, { name: "Invite workspace" });
+      const first = await admin.mutation(api.admin.addWorkspaceVendor, {
+        companyId: company.companyId, name: "First vendor", contactEmail: "contact@example.com",
+      });
+      const second = await admin.mutation(api.admin.addWorkspaceVendor, {
+        companyId: company.companyId, name: "Second vendor",
+      });
+      expect(await admin.query(api.admin.listVendorContacts, {
+        companyId: company.companyId, vendorId: first.vendorId,
+      })).toEqual([]);
+      const invite = { companyId: company.companyId, vendorId: first.vendorId, name: "Contact", email: "contact@example.com" };
+      await admin.mutation(api.admin.inviteVendorContact, invite);
+      await admin.mutation(api.admin.inviteVendorContact, { ...invite, email: " CONTACT@example.com " });
+      await expect(admin.mutation(api.admin.inviteVendorContact, { ...invite, vendorId: second.vendorId }))
+        .rejects.toThrow("already linked or invited");
+      await expect(admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: company.companyId, name: "Contact", email: invite.email, role: "vendor",
+      })).rejects.toThrow("Manage contacts");
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId: "vendor-contact", email: invite.email });
+      await expect(admin.mutation(api.admin.inviteVendorContact, { ...invite, vendorId: second.vendorId }))
+        .rejects.toThrow("already linked or invited");
+      const contacts = await admin.query(api.admin.listVendorContacts, { companyId: company.companyId, vendorId: first.vendorId });
+      expect(contacts).toHaveLength(1);
+      expect(contacts[0]).toMatchObject({ userId: "vendor-contact", status: "active", source: "member" });
+      expect(await admin.query(api.admin.listVendorContacts, { companyId: company.companyId, vendorId: second.vendorId })).toEqual([]);
+    });
+  });
+
   test("a matching display name does not authorize name edits or project roster access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
