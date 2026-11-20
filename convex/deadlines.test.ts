@@ -8,6 +8,33 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 8 deadline and reminder logic", () => {
+  test("does not show a partially migrated deadline as the organisation's final status", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.deadlines.upsertProjectDeadline, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor", dueAt: Date.now() + 100000,
+    });
+    await admin.mutation(api.deadlines.markDeadlineSubmitted, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("projectDeadlines", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor",
+        targetUserId: "old-contact", dueAt: 1, status: "not-started", createdAt: 1, updatedAt: 1,
+      });
+    });
+    const page = await t.withIdentity({ tokenIdentifier: "northwind-vendor" })
+      .query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId });
+    expect(page.deadlineMigrationRequired).toBe(true);
+    expect(page.status).not.toBe("submitted");
+    const summary = await admin.query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
+    expect(summary.find((row) => row.projectId === seeded.projectBId))
+      .toMatchObject({ deadlineMigrationRequired: true, submittedVendors: 0 });
+  });
+
   test("a replacement contact inherits the organisation's deadline and submission status", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

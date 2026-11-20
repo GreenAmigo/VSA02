@@ -15,6 +15,9 @@ export async function getVendorDeadline(
   projectId: Id<"projects">,
   vendorId: Id<"vendorOrganizations">,
 ) {
+  if (await vendorDeadlinesNeedMigration(ctx, projectId)) {
+    return { deadline: null, hasConflict: false };
+  }
   const rows = await ctx.db.query("projectDeadlines")
     .withIndex("by_project_vendor_id", (q) => q.eq("projectId", projectId).eq("vendorId", vendorId))
     .take(2);
