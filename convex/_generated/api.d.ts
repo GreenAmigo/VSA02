@@ -19,7 +19,9 @@ import type * as scorerNames from "../scorerNames.js";
 import type * as scores from "../scores.js";
 import type * as security from "../security.js";
 import type * as vendorAnswerBackfill from "../vendorAnswerBackfill.js";
+import type * as vendorAnswers from "../vendorAnswers.js";
 import type * as vendorAuth from "../vendorAuth.js";
+import type * as vendorHistoryBackfill from "../vendorHistoryBackfill.js";
 import type * as workspaceSeed from "../workspaceSeed.js";
 
 import type {
@@ -40,7 +42,9 @@ declare const fullApi: ApiFromModules<{
   scores: typeof scores;
   security: typeof security;
   vendorAnswerBackfill: typeof vendorAnswerBackfill;
+  vendorAnswers: typeof vendorAnswers;
   vendorAuth: typeof vendorAuth;
+  vendorHistoryBackfill: typeof vendorHistoryBackfill;
   workspaceSeed: typeof workspaceSeed;
 }>;
 

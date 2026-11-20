@@ -191,6 +191,7 @@ export default defineSchema({
   }).index("by_project_vendor", ["projectId", "vendorUserId"])
     .index("by_project_vendor_scope", ["projectId", "vendorUserId", "scorerScopeKey"])
     .index("by_project_vendor_scope_requirement", ["projectId", "vendorUserId", "scorerScopeKey", "requirementId"])
+    .index("by_project_scope_requirement", ["projectId", "scorerScopeKey", "requirementId"])
     .index("by_project_vendor_id_scope_requirement", ["projectId", "vendorId", "scorerScopeKey", "requirementId"]),
 
   scorerCompletions: defineTable({
