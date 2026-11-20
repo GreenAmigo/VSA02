@@ -882,6 +882,36 @@ describe("admin console actions", () => {
     });
   });
 
+  test("project editing cannot overwrite unmigrated or conflicting vendor deadlines", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const dueAt = Date.now() + 100000;
+    await admin.mutation(api.deadlines.upsertProjectDeadline, {
+      projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor", dueAt,
+    });
+    const legacyId = await t.run((ctx) => ctx.db.insert("projectDeadlines", {
+      companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor",
+      targetUserId: "old-contact", dueAt: 1, status: "submitted", createdAt: 1, updatedAt: 1,
+    }));
+    const args = { companyId: seeded.companyBId, projectId: seeded.projectBId, name: "Changed", vendorDeadline: dueAt + 1000 };
+    await expect(admin.mutation(api.admin.updateProject, args)).rejects.toThrow("deadline history needs migration");
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      await ctx.db.patch(legacyId, { vendorId: contact.vendorId });
+    });
+    await expect(admin.mutation(api.admin.updateProject, args)).rejects.toThrow("Conflicting vendor deadlines");
+    expect((await t.run((ctx) => ctx.db.get(legacyId)))?.dueAt).toBe(1);
+    await t.run((ctx) => ctx.db.delete(legacyId));
+    await admin.mutation(api.admin.updateProject, args);
+    const deadlines = await admin.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId });
+    expect(deadlines[0].dueAt).toBe(args.vendorDeadline);
+  });
+
   test("company admins can edit project details, archive and restore, with activity log entries", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });

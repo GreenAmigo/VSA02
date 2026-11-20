@@ -2694,13 +2694,18 @@ export const updateProject = mutation({
     });
 
     if (typeof nextVendorDeadline === "number") {
-      const vendorDeadlineRows = await ctx.db
+      const vendorDeadlineRows = ctx.db
         .query("projectDeadlines")
-        .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
-        .filter((q: any) => q.eq(q.field("targetType"), "vendor"))
-        .collect();
-
-      for (const row of vendorDeadlineRows) {
+        .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", "vendor"));
+      const seenVendors = new Set<Id<"vendorOrganizations">>();
+      for await (const row of vendorDeadlineRows) {
+        if (!row.vendorId) throw new Error("Vendor deadline history needs migration before project deadlines can be updated. Ask a workspace admin for help.");
+        if (seenVendors.has(row.vendorId)) throw new Error("Conflicting vendor deadlines must be resolved before project deadlines can be updated.");
+        seenVendors.add(row.vendorId);
+      }
+      const writableRows = ctx.db.query("projectDeadlines")
+        .withIndex("by_project_target", (q) => q.eq("projectId", args.projectId).eq("targetType", "vendor"));
+      for await (const row of writableRows) {
         await ctx.db.patch(row._id, {
           dueAt: nextVendorDeadline,
           updatedAt: Date.now(),
