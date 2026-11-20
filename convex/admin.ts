@@ -2,7 +2,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { getProjectVendors } from "./projectVendors";
-import { getScorerDisplayNames, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
+import { getScorerDisplayNames, getWorkspacePersonName, resolveScorerDisplayName, updateMemberDisplayName } from "./scorerNames";
 
 const companyAdminRole = "company-admin" as const;
 const consultantRole = "vs-consultant" as const;
@@ -1084,38 +1084,11 @@ export const listActivityLogs = query({
       }
     }
 
-    const actorLabelByUserId = new Map<string, string>();
+    const actorLabelByWorkspaceAndUser = new Map<string, string>();
     for (const log of sortedLogs) {
-      if (actorLabelByUserId.has(log.actorUserId)) {
-        continue;
-      }
-
-      const consultant = await ctx.db
-        .query("consultants")
-        .filter((q: any) => q.eq(q.field("userId"), log.actorUserId))
-        .first();
-      if (consultant?.displayName) {
-        actorLabelByUserId.set(log.actorUserId, consultant.displayName);
-        continue;
-      }
-
-      const member = await ctx.db
-        .query("companyMembers")
-        .filter((q: any) => q.eq(q.field("userId"), log.actorUserId))
-        .first();
-      if (member?.displayName) {
-        actorLabelByUserId.set(log.actorUserId, member.displayName);
-        continue;
-      }
-
-      if (log.actorEmail) {
-        const emailMatch = await ctx.db
-          .query("companyMembers")
-          .filter((q: any) => q.eq(q.field("email"), log.actorEmail))
-          .first();
-        if (emailMatch?.displayName) {
-          actorLabelByUserId.set(log.actorUserId, emailMatch.displayName);
-        }
+      const key = `${log.companyId ?? ""}:${log.actorUserId}`;
+      if (!actorLabelByWorkspaceAndUser.has(key)) {
+        actorLabelByWorkspaceAndUser.set(key, await getWorkspacePersonName(ctx, log.companyId, log.actorUserId));
       }
     }
 
@@ -1153,10 +1126,7 @@ export const listActivityLogs = query({
         ? log.workspaceName
         : workspaceFromCompany ?? "Deleted workspace";
 
-      const actorLabel = actorLabelByUserId.get(log.actorUserId)
-        ?? log.actorEmail
-        ?? log.actorUserId
-        ?? "Unknown actor";
+      const actorLabel = actorLabelByWorkspaceAndUser.get(`${log.companyId ?? ""}:${log.actorUserId}`)!;
 
       const detailLines = changedFields.length > 0
         ? changedFields.map((field) => `${field.label}: ${field.before} -> ${field.after}`)

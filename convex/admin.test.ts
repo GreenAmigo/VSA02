@@ -71,6 +71,38 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("activity actor names are resolved within each workspace without falling back to email", async () => {
+    await withConsultantGrantEnvironment(async () => {
+      const t = convexTest({ schema, modules });
+      const seeded = await t.mutation(internal.access.seedScenario, {
+        companyAName: "Acme Health", companyBName: "Beta Logistics",
+        projectAName: "HR Platform", projectBName: "Supply Chain",
+      });
+      await grantConsultant(t, "activity-consultant", "consultant@example.com", "Activity Consultant");
+      await t.run(async (ctx) => {
+        await ctx.db.insert("companyMembers", {
+          companyId: seeded.companyAId, userId: "beta-scorer", displayName: "Other Workspace Name",
+          role: "company-scorer", isActive: true, createdAt: Date.now(),
+        });
+        for (const companyId of [seeded.companyAId, seeded.companyBId]) {
+          await ctx.db.insert("activityLogs", {
+            companyId, actorUserId: "beta-scorer", actorEmail: "scorer@example.com",
+            action: "name_test", details: "Changed something.", createdAt: Date.now(),
+          });
+        }
+        await ctx.db.insert("activityLogs", {
+          companyId: seeded.companyBId, actorUserId: "user_unknown", actorEmail: "unknown@example.com",
+          action: "name_test", details: "Changed something.", createdAt: Date.now(),
+        });
+      });
+      const consultant = t.withIdentity({ tokenIdentifier: "activity-consultant" });
+      const logs = (await consultant.query(api.admin.listActivityLogs, {})).filter((log) => log.action === "name_test");
+      expect(logs.find((log) => log.companyId === seeded.companyAId)?.actorLabel).toBe("Other Workspace Name");
+      expect(logs.find((log) => log.companyId === seeded.companyBId && log.actorUserId === "beta-scorer")?.actorLabel).toBe("Beta Scorer");
+      expect(logs.find((log) => log.actorUserId === "user_unknown")?.actorLabel).toBe("Name not set — ask an admin to update it");
+    });
+  });
+
   test("admins and consultants can rename people and vendor contacts, with workspace checks and activity logs", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });
