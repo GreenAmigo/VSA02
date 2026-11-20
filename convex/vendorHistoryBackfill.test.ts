@@ -8,6 +8,52 @@ import schema from "./schema";
 const modules = import.meta.glob("./**/*.ts");
 
 describe("vendor history backfill", () => {
+  test("reports paginated history and conflicts spanning pages", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const records = await t.run(async (ctx) => {
+      const ids = [];
+      for (let i = 0; i < 27; i++) {
+        ids.push(await ctx.db.insert("scorerScores", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId,
+          vendorUserId: i === 26 ? "unlinked-contact" : "northwind-vendor",
+          scorerScopeKey: "individual:beta-scorer", scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual",
+          requirementId: `REQ-${i === 25 ? 24 : i}`, score: 1,
+          enteredByUserId: "beta-scorer", enteredByDisplayName: "Beta Scorer", enteredAt: 1, updatedAt: 1,
+        }));
+      }
+      return ids;
+    });
+    const previous = process.env.APP_ENVIRONMENT;
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      const first = await t.mutation(internal.vendorHistoryBackfill.backfillVendorHistoryOrganizations, {
+        projectId: seeded.projectBId, recordType: "scorerScores", linksRepaired: true,
+      });
+      expect(first.isDone).toBe(false);
+      const second = await t.mutation(internal.vendorHistoryBackfill.backfillVendorHistoryOrganizations, {
+        projectId: seeded.projectBId, recordType: "scorerScores", linksRepaired: true, cursor: first.continueCursor,
+      });
+      expect(second.isDone).toBe(true);
+      expect([...first.changes, ...second.changes].map((item) => item.record._id)).toEqual(records.slice(0, 26));
+      expect([...first.unresolved, ...second.unresolved].map((item) => item.record._id)).toEqual([records[26]]);
+      for (const report of [first, second]) {
+        expect(report.conflicts).toContainEqual(expect.objectContaining({
+          records: expect.arrayContaining([
+            expect.objectContaining({ record: expect.objectContaining({ _id: records[24] }) }),
+            expect.objectContaining({ record: expect.objectContaining({ _id: records[25] }) }),
+          ]),
+        }));
+      }
+      expect((await t.run((ctx) => ctx.db.get(records[26])))?.vendorId).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previous;
+    }
+  });
+
   test("reports duplicate scorer history and uses the answer snapshot for amendments", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
