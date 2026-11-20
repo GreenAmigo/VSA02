@@ -347,6 +347,30 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Assign scorers");
   });
 
+  test("comparison renders distinct totals for organisations without active contacts", () => {
+    useQueryMock.mockReset();
+    queueProjectDetailQueries({ email: "admin@example.com", role: "company-admin", isConsultant: false });
+    useQueryMock.mockImplementationOnce(() => undefined);
+    useQueryMock.mockImplementationOnce(() => ({
+      vendors: [
+        { vendorId: "vendor-1", vendorName: "First vendor", vendorUserId: null, vendorContactName: null },
+        { vendorId: "vendor-2", vendorName: "Second vendor", vendorUserId: null, vendorContactName: null },
+      ],
+      rows: [{
+        requirementId: "REQ", text: "Requirement", type: "user-story", priority: 9, status: "active",
+        cells: [
+          { vendorId: "vendor-1", vendorUserId: null, scorerAverage: 1, scorerScoredCount: 1, totalScorers: 1, vendorScore: 1 },
+          { vendorId: "vendor-2", vendorUserId: null, scorerAverage: 0, scorerScoredCount: 1, totalScorers: 1, vendorScore: 0 },
+        ],
+      }],
+    }));
+    const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
+    expect(html).toContain("First vendor");
+    expect(html).toContain("Second vendor");
+    expect(html).toContain("Combined: 9");
+    expect(html).toContain("Combined: 0");
+  });
+
   test("company admin project detail also shows Vendor responses section", () => {
     useQueryMock.mockReset();
     useQueryMock.mockImplementationOnce(() => ({

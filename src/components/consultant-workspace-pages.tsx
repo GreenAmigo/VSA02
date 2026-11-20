@@ -3005,7 +3005,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       projectId: string;
       migrationRequired?: boolean;
       hasVendorAnswerConflicts?: boolean;
-      vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string; vendorContactName: string | null }>;
+      vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string | null; vendorContactName: string | null }>;
       rows: Array<{
         requirementId: string;
         text: string;
@@ -3013,7 +3013,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         priority: 9 | 3 | 1 | 0;
         status: "active" | "withdrawn";
         cells: Array<{
-          vendorUserId: string;
+          vendorId: string;
+          vendorUserId: string | null;
           scorerAverage: number | null;
           scorerScoredCount: number;
           totalScorers: number;
@@ -3037,7 +3038,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         }>;
       }>;
       totalsByVendor: Array<{
-        vendorUserId: string;
+        vendorId: string;
+        vendorUserId: string | null;
         scorer: { requirements: number; nfr: number; combined: number };
         vendor: { requirements: number; nfr: number; combined: number };
       }>;
@@ -3049,7 +3051,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   const [comparisonTypeFilter, setComparisonTypeFilter] = useState<"all" | "user-story" | "nfr">("all");
   const [comparisonPriorityFilter, setComparisonPriorityFilter] = useState<"all" | 9 | 3 | 1 | 0>("all");
   const [comparisonShowWithdrawn, setComparisonShowWithdrawn] = useState(false);
-  const [selectedComparisonCell, setSelectedComparisonCell] = useState<{ requirementId: string; vendorUserId: string } | null>(null);
+  const [selectedComparisonCell, setSelectedComparisonCell] = useState<{ requirementId: string; vendorId: string } | null>(null);
 
   if (isProtectedLoading || access === undefined || vendorContact === undefined || companies === undefined || project === undefined || requirements === undefined || (!isVendorView && projectMembers === undefined) || (isVendorView && vendorScoringPanel === undefined)) {
     return <div className="min-h-screen bg-slate-950 p-6 text-slate-200">Checking access…</div>;
@@ -3239,7 +3241,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         continue;
       }
 
-      const cell = requirement.cells.find((item) => item.vendorUserId === vendor.vendorUserId);
+      const cell = requirement.cells.find((item) => item.vendorId === vendor.vendorId);
       if (!cell) {
         continue;
       }
@@ -3258,7 +3260,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     }
 
     return {
-      vendorUserId: vendor.vendorUserId,
+      vendorId: vendor.vendorId,
       requirementsTotal,
       nfrTotal,
       combinedTotal: requirementsTotal + nfrTotal,
@@ -3269,10 +3271,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
     ? (requirementComparison?.rows ?? []).find((row) => row.requirementId === selectedComparisonCell.requirementId) ?? null
     : null;
   const selectedComparisonVendor = selectedComparisonCell
-    ? (requirementComparison?.vendors ?? []).find((vendor) => vendor.vendorUserId === selectedComparisonCell.vendorUserId) ?? null
+    ? (requirementComparison?.vendors ?? []).find((vendor) => vendor.vendorId === selectedComparisonCell.vendorId) ?? null
     : null;
   const selectedComparisonCellData = selectedComparisonRow && selectedComparisonCell
-    ? selectedComparisonRow.cells.find((cell) => cell.vendorUserId === selectedComparisonCell.vendorUserId) ?? null
+    ? selectedComparisonRow.cells.find((cell) => cell.vendorId === selectedComparisonCell.vendorId) ?? null
     : null;
 
 
@@ -3517,7 +3519,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             {requirementComparison === undefined ? (
               <p className="text-sm text-slate-400">Loading comparison grid...</p>
             ) : requirementComparison.vendors.length === 0 ? (
-              <p className="text-sm text-slate-400">Assign vendor contacts to this project to view comparison data.</p>
+              <p className="text-sm text-slate-400">Assign vendor organisations to this project to view comparison data.</p>
             ) : comparisonRows.length === 0 ? (
               <p className="text-sm text-slate-400">No rows match the selected filters.</p>
             ) : (
@@ -3527,7 +3529,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                     <tr className="bg-slate-900/95">
                       <th className="sticky left-0 top-0 z-30 min-w-[300px] border-b border-r border-slate-800 bg-slate-900 px-3 py-2 text-left">Requirement</th>
                       {requirementComparison.vendors.map((vendor) => (
-                        <th key={vendor.vendorUserId} className="sticky top-0 z-20 min-w-[170px] border-b border-slate-800 bg-slate-900 px-3 py-2 text-left">
+                        <th key={vendor.vendorId} className="sticky top-0 z-20 min-w-[170px] border-b border-slate-800 bg-slate-900 px-3 py-2 text-left">
                           <p className="font-medium text-white">{vendor.vendorName}</p>
                           <p className="text-[11px] text-slate-400">{vendor.vendorContactName ? safeDisplayName(vendor.vendorContactName) : "No contact"}</p>
                         </th>
@@ -3565,10 +3567,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                               ? "Unscored"
                               : `${cell.vendorScore}`);
                           return (
-                            <td key={`${row.requirementId}-${cell.vendorUserId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
+                            <td key={`${row.requirementId}-${cell.vendorId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
                               <button
                                 type="button"
-                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorUserId: cell.vendorUserId })}
+                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
                                 className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
@@ -3609,10 +3611,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                               ? "Unscored"
                               : `${cell.vendorScore}`);
                           return (
-                            <td key={`${row.requirementId}-${cell.vendorUserId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
+                            <td key={`${row.requirementId}-${cell.vendorId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
                               <button
                                 type="button"
-                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorUserId: cell.vendorUserId })}
+                                onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
                                 className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
@@ -3629,10 +3631,10 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                     <tr className="bg-slate-900/95">
                       <td className="sticky left-0 z-20 border-r border-t border-slate-700 bg-slate-900 px-3 py-2 font-semibold text-white">Totals (weighted)</td>
                       {requirementComparison.vendors.map((vendor) => {
-                        const totals = comparisonTotalsByVendor.find((row) => row.vendorUserId === vendor.vendorUserId);
+                        const totals = comparisonTotalsByVendor.find((row) => row.vendorId === vendor.vendorId);
                         const isBest = (totals?.combinedTotal ?? Number.NEGATIVE_INFINITY) === bestComparisonCombined;
                         return (
-                          <td key={`totals-${vendor.vendorUserId}`} className={`border-t border-slate-700 px-3 py-2 ${isBest ? "bg-emerald-500/15" : "bg-slate-900/70"}`}>
+                          <td key={`totals-${vendor.vendorId}`} className={`border-t border-slate-700 px-3 py-2 ${isBest ? "bg-emerald-500/15" : "bg-slate-900/70"}`}>
                             <p className="text-slate-100">Requirements: {formatScoreValue(totals?.requirementsTotal ?? 0)}</p>
                             <p className="text-slate-300">NFRs: {formatScoreValue(totals?.nfrTotal ?? 0)}</p>
                             <p className={`font-semibold ${isBest ? "text-emerald-200" : "text-slate-100"}`}>Combined: {formatScoreValue(totals?.combinedTotal ?? 0)}</p>
