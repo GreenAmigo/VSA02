@@ -113,6 +113,14 @@ describe("Phase 6 project view isolation", () => {
       projectAName: "HR Platform", projectBName: "Supply Chain",
     });
     const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Private scorer view",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectBId, { scorerCanSeePeerScores: true });
+    });
     await t.run(async (ctx) => {
       const membership = await ctx.db.query("projectMembers")
         .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
@@ -121,6 +129,13 @@ describe("Phase 6 project view isolation", () => {
     });
     const views = await vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId });
     expect(views.rows).toHaveLength(0);
+    const filteredViews = await vendor.query(api.projectViews.listProjectViews, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    });
+    expect(filteredViews).toMatchObject({ rows: [], canViewAll: false, peerViewsUnlocked: false });
+    await expect(vendor.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Not allowed",
+    })).rejects.toThrow("Only assigned scorers");
     await t.run(async (ctx) => {
       await ctx.db.insert("projectMembers", {
         companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "northwind-vendor",
@@ -131,6 +146,10 @@ describe("Phase 6 project view isolation", () => {
       if (!assignment) throw new Error("Missing test assignment");
       await ctx.db.delete(assignment._id);
     });
+    const historicalViews = await admin.query(api.projectViews.listProjectViews, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    });
+    expect(historicalViews.rows.map((row) => row.viewText)).toEqual(["Private scorer view"]);
     await expect(vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
   });
 
