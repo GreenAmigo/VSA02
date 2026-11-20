@@ -1,4 +1,4 @@
-import { query, mutation, action, internalMutation } from "./_generated/server";
+import { query, mutation, action, internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -606,6 +606,131 @@ export const acceptPendingInvites = action({
       email: targetEmail,
       displayName: workosUser.displayName ?? identity.name ?? targetEmail,
     });
+  },
+});
+
+function requirePreviewOrDevelopment() {
+  const environment = (process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase();
+  if (environment !== "development" && environment !== "preview") {
+    throw new Error("Display-name repair is only available in development or preview.");
+  }
+}
+
+const repairCandidateValidator = v.object({
+  memberId: v.id("companyMembers"),
+  userId: v.string(),
+  email: v.string(),
+  previousName: v.string(),
+  invitationName: v.union(v.string(), v.null()),
+});
+
+export const listDisplayNameRepairCandidates = internalQuery({
+  args: { companyId: v.id("companies"), cursor: v.optional(v.string()) },
+  returns: v.object({
+    candidates: v.array(repairCandidateValidator),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    requirePreviewOrDevelopment();
+    const company = await ctx.db.get(args.companyId);
+    if (!company) throw new Error("Workspace not found.");
+    const page = await ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", args.companyId))
+      .paginate({ numItems: 50, cursor: args.cursor ?? null });
+    const candidates = [];
+    for (const member of page.page) {
+      const email = member.email?.trim().toLowerCase();
+      if (!email || member.displayName.trim().toLowerCase() !== email) continue;
+      const invites = ctx.db.query("workspaceInvites")
+        .withIndex("by_company_email", (q) => q.eq("companyId", args.companyId).eq("email", email));
+      let invitationName: string | null = null;
+      let acceptedAt = -1;
+      for await (const invite of invites) {
+        const name = invite.displayName.trim();
+        if (invite.status === "active" && invite.role === member.role
+          && (member.role !== "vendor" || invite.vendorId === member.vendorId)
+          && name && name.toLowerCase() !== email && (invite.acceptedAt ?? 0) > acceptedAt) {
+          invitationName = name;
+          acceptedAt = invite.acceptedAt ?? 0;
+        }
+      }
+      candidates.push({ memberId: member._id, userId: member.userId, email, previousName: member.displayName, invitationName });
+    }
+    return { candidates, continueCursor: page.continueCursor, isDone: page.isDone };
+  },
+});
+
+export const applyDisplayNameRepair = internalMutation({
+  args: {
+    companyId: v.id("companies"),
+    memberId: v.id("companyMembers"),
+    email: v.string(),
+    displayName: v.string(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    requirePreviewOrDevelopment();
+    const member = await ctx.db.get(args.memberId);
+    const name = args.displayName.trim();
+    if (!member || member.companyId !== args.companyId || member.email?.trim().toLowerCase() !== args.email
+      || member.displayName.trim().toLowerCase() !== args.email) return false;
+    if (!name || name.toLowerCase() === args.email) throw new Error("A real display name is required.");
+    await ctx.db.patch(member._id, { displayName: name });
+    return true;
+  },
+});
+
+type DisplayNameRepairResult = {
+  changes: Array<{ userId: string; previousName: string; displayName: string; source: "invitation" | "workos" }>;
+  unresolved: Array<{ userId: string; reason: string }>;
+  continueCursor: string;
+  isDone: boolean;
+};
+
+export const repairEmailDisplayNames = internalAction({
+  args: { companyId: v.id("companies"), cursor: v.optional(v.string()) },
+  returns: v.object({
+    changes: v.array(v.object({
+      userId: v.string(), previousName: v.string(), displayName: v.string(),
+      source: v.union(v.literal("invitation"), v.literal("workos")),
+    })),
+    unresolved: v.array(v.object({ userId: v.string(), reason: v.string() })),
+    continueCursor: v.string(),
+    isDone: v.boolean(),
+  }),
+  handler: async (ctx, args): Promise<DisplayNameRepairResult> => {
+    requirePreviewOrDevelopment();
+    const page: {
+      candidates: Array<{ memberId: Id<"companyMembers">; userId: string; email: string; previousName: string; invitationName: string | null }>;
+      continueCursor: string;
+      isDone: boolean;
+    } = await ctx.runQuery(internal.access.listDisplayNameRepairCandidates, args);
+    const changes: DisplayNameRepairResult["changes"] = [];
+    const unresolved: DisplayNameRepairResult["unresolved"] = [];
+    for (const candidate of page.candidates) {
+      let name = candidate.invitationName;
+      let source: "invitation" | "workos" = "invitation";
+      if (!name) {
+        source = "workos";
+        const workos = await resolveWorkOSUserEmail({ subject: candidate.userId });
+        if (workos.source !== "workos" || workos.email !== candidate.email) {
+          unresolved.push({ userId: candidate.userId, reason: "WorkOS user or matching email could not be verified." });
+          continue;
+        }
+        name = workos.displayName?.trim() || null;
+      }
+      if (!name || name.toLowerCase() === candidate.email) {
+        unresolved.push({ userId: candidate.userId, reason: "No name was found in the invitation or WorkOS." });
+        continue;
+      }
+      const changed: boolean = await ctx.runMutation(internal.access.applyDisplayNameRepair, {
+        companyId: args.companyId, memberId: candidate.memberId, email: candidate.email, displayName: name,
+      });
+      if (changed) changes.push({ userId: candidate.userId, previousName: candidate.previousName, displayName: name, source });
+      else unresolved.push({ userId: candidate.userId, reason: "The member changed before the repair was applied." });
+    }
+    return { changes, unresolved, continueCursor: page.continueCursor, isDone: page.isDone };
   },
 });
 

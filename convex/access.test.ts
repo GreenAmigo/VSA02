@@ -16,6 +16,62 @@ async function getFirstDepartmentId(actor: any, companyId: any) {
 }
 
 describe("Phase 2 access checks", () => {
+  test("development name repair reports invitation and WorkOS changes and is blocked in production", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const departmentId = await getFirstDepartmentId(admin, seeded.companyBId);
+    for (const [userId, email, name] of [
+      ["repair-invited", "invited@example.com", "Invited Person"],
+      ["repair-workos", "workos@example.com", ""],
+    ]) {
+      await admin.mutation(api.admin.inviteWorkspacePerson, {
+        companyId: seeded.companyBId, name, email, role: "company-scorer", departmentId,
+      });
+      await t.mutation(internal.access.acceptPendingInvitesForUser, { userId, email });
+      await t.run(async (ctx) => {
+        const member = await ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).unique();
+        if (!member) throw new Error("Missing test member");
+        await ctx.db.patch(member._id, { displayName: email });
+      });
+    }
+
+    const oldEnvironment = process.env.APP_ENVIRONMENT;
+    const oldKey = process.env.WORKOS_API_KEY;
+    const oldFetch = globalThis.fetch;
+    try {
+      process.env.APP_ENVIRONMENT = "preview";
+      process.env.WORKOS_API_KEY = "test-key";
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        email: "workos@example.com", email_verified: true, first_name: "WorkOS", last_name: "Person",
+      }), { status: 200 }));
+      const result = await t.action(internal.access.repairEmailDisplayNames, { companyId: seeded.companyBId });
+      expect(result.isDone).toBe(true);
+      expect(result.unresolved).toEqual([]);
+      expect(result.changes).toEqual(expect.arrayContaining([
+        { userId: "repair-invited", previousName: "invited@example.com", displayName: "Invited Person", source: "invitation" },
+        { userId: "repair-workos", previousName: "workos@example.com", displayName: "WorkOS Person", source: "workos" },
+      ]));
+      const people = await admin.query(api.admin.listWorkspacePeople, { companyId: seeded.companyBId });
+      expect(people.find((person) => person.userId === "repair-invited")?.name).toBe("Invited Person");
+      expect(people.find((person) => person.userId === "repair-workos")?.name).toBe("WorkOS Person");
+      expect((await t.action(internal.access.repairEmailDisplayNames, { companyId: seeded.companyBId })).changes).toEqual([]);
+      process.env.APP_ENVIRONMENT = "production";
+      await expect(t.action(internal.access.repairEmailDisplayNames, { companyId: seeded.companyBId }))
+        .rejects.toThrow("only available in development or preview");
+    } finally {
+      globalThis.fetch = oldFetch;
+      if (oldEnvironment === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = oldEnvironment;
+      if (oldKey === undefined) delete process.env.WORKOS_API_KEY;
+      else process.env.WORKOS_API_KEY = oldKey;
+    }
+  });
+
   test("invite acceptance prefers the invited name and uses WorkOS first and last name when none was supplied", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
