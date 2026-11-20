@@ -129,7 +129,6 @@ export const backfillVendorHistoryOrganizations = internalMutation({
           conflicts.push({ vendorId: result.vendor._id, vendorName: result.vendor.name, records: matches });
           reported.add(key);
         }
-        continue;
       }
       if (!row.vendorId) {
         await ctx.db.patch(row._id, { vendorId: result.vendor._id });

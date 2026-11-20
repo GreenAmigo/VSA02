@@ -2,7 +2,7 @@
 
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -25,8 +25,9 @@ describe("vendor history backfill", () => {
       for (const vendorUserId of ["northwind-vendor", "old-contact"]) {
         await ctx.db.insert("scorerScores", {
           companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId,
-          scorerScopeKey: "individual:scorer", scorerScopeLabel: "Scorer", scorerScopeType: "individual",
-          requirementId: "REQ", score: 1, enteredByUserId: "scorer", enteredByDisplayName: "Scorer", enteredAt: 1, updatedAt: 1,
+          vendorId: vendorUserId === "northwind-vendor" ? vendorId : undefined,
+          scorerScopeKey: "individual:beta-scorer", scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual",
+          requirementId: "REQ", score: 1, enteredByUserId: "beta-scorer", enteredByDisplayName: "Beta Scorer", enteredAt: 1, updatedAt: 1,
         });
       }
       await ctx.db.insert("scores", {
@@ -46,9 +47,13 @@ describe("vendor history backfill", () => {
       const duplicateReport = await t.mutation(internal.vendorHistoryBackfill.backfillVendorHistoryOrganizations, {
         projectId: seeded.projectBId, recordType: "scorerScores", linksRepaired: true,
       });
-      expect(duplicateReport.changes).toEqual([]);
+      expect(duplicateReport.changes).toHaveLength(1);
       expect(duplicateReport.conflicts).toHaveLength(1);
       expect(duplicateReport.conflicts[0].records).toHaveLength(2);
+      const workboard = await t.withIdentity({ tokenIdentifier: "beta-scorer" })
+        .query(api.scores.getScorerWorkboard, { projectId: seeded.projectBId });
+      expect(workboard.scorerHistoryMigrationRequired).toBe(false);
+      expect(workboard.vendors[0]).toMatchObject({ hasScorerHistoryConflicts: true, answeredCount: 0 });
       await t.run(async (ctx) => {
         const other = await ctx.db.insert("vendorOrganizations", {
           companyId: seeded.companyBId, name: "Other", status: "active", createdByUserId: "admin", createdAt: 1, updatedAt: 1,
