@@ -8,6 +8,19 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 7 dashboard totals", () => {
+  test("a matching name does not authorize dashboard access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    for (const name of ["Beta Admin", "Beta Scorer"]) {
+      const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name });
+      await expect(outsider.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId }))
+        .rejects.toThrow("Project access denied");
+    }
+  });
+
   test("the project dashboard calculates weighted totals from real requirements and scope-checked score rows", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
