@@ -10,6 +10,21 @@ import { buildRequirementTemplateWorkbook, parseRequirementFileWithIssues, toReq
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 4 requirement import preview and confirm", () => {
+  test("a matching admin name does not authorize requirement edits", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Admin" });
+    await expect(outsider.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId, rows: [], confirm: true,
+    })).rejects.toThrow("Project access denied");
+    await expect(outsider.mutation(api.requirements.updateRequirementPriority, {
+      projectId: seeded.projectBId, requirementId: "REQ-1", priority: 9,
+    })).rejects.toThrow("Only consultants and company admins");
+  });
+
   test("template parser output matches previewRequirementImport validator contract", async () => {
     const t = convexTest({ schema, modules });
 

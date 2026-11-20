@@ -40,7 +40,6 @@ async function canImportOrEditRequirements(ctx: any, projectId: string, identity
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("displayName"), identity.name?.trim() ?? identity.email.trim().toLowerCase())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -51,7 +50,6 @@ async function canImportOrEditRequirements(ctx: any, projectId: string, identity
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -309,7 +307,6 @@ export const updateRequirementPriority = mutation({
       .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("displayName"), identity.name?.trim() ?? identity.email.trim().toLowerCase())] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();
@@ -320,7 +317,6 @@ export const updateRequirementPriority = mutation({
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
         ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();
