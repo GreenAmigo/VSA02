@@ -1159,7 +1159,14 @@ export const getProjectRequirementComparison = query({
       .collect();
     const requirementRows = requirements.sort((a, b) => a.requirementId.localeCompare(b.requirementId));
 
-    const vendors = await listAssignedVendorUsers(ctx, project);
+    const vendors = (await getProjectVendors(ctx, project)).map((vendor) => ({
+      vendorId: vendor.vendorId,
+      vendorName: vendor.vendorName,
+      vendorUserId: vendor.primaryContact?.userId ?? null,
+      vendorContactName: vendor.primaryContact
+        ? personDisplayName(vendor.primaryContact.displayName, vendor.primaryContact.userId)
+        : null,
+    }));
     const scorerAssignments = await ctx.db
       .query("projectMembers")
       .filter((q: any) => q.eq(q.field("projectId"), args.projectId))
@@ -1236,7 +1243,7 @@ export const getProjectRequirementComparison = query({
       return {
         vendorId: vendor.vendorId,
         vendorName: vendor.vendorName,
-        vendorUserId: vendor.vendorUserId as string,
+        vendorUserId: vendor.vendorUserId,
         vendorContactName: vendor.vendorContactName,
         scorerByRequirementId,
         scorerHasConflicts: scorerState.hasConflicts,
@@ -1260,6 +1267,7 @@ export const getProjectRequirementComparison = query({
           .sort((a, b) => b.amendedAt - a.amendedAt);
 
         return {
+          vendorId: vendor.vendorId,
           vendorUserId: vendor.vendorUserId,
           scorerAverage,
           scorerScoredCount,
@@ -1299,7 +1307,7 @@ export const getProjectRequirementComparison = query({
           continue;
         }
 
-        const cell = requirement.cells.find((item) => item.vendorUserId === vendor.vendorUserId);
+        const cell = requirement.cells.find((item) => item.vendorId === vendor.vendorId);
         if (!cell) {
           continue;
         }
@@ -1324,6 +1332,7 @@ export const getProjectRequirementComparison = query({
       }
 
       return {
+        vendorId: vendor.vendorId,
         vendorUserId: vendor.vendorUserId,
         scorer: {
           requirements: scorerRequirementsTotal,
@@ -1356,8 +1365,8 @@ export const getProjectRequirementComparison = query({
       })),
       rows,
       totalsByVendor,
-      scorerBestVendorUserIds: totalsByVendor.filter((row) => row.scorer.combined === scorerBestCombined).map((row) => row.vendorUserId),
-      vendorBestVendorUserIds: totalsByVendor.filter((row) => row.vendor.combined === vendorBestCombined).map((row) => row.vendorUserId),
+      scorerBestVendorUserIds: totalsByVendor.filter((row) => row.scorer.combined === scorerBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
+      vendorBestVendorUserIds: totalsByVendor.filter((row) => row.vendor.combined === vendorBestCombined).flatMap((row) => row.vendorUserId ? [row.vendorUserId] : []),
     };
   },
 });

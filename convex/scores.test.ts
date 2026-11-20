@@ -569,6 +569,39 @@ describe("Phase 5 score audit trail", () => {
     ).rejects.toThrow("Only consultants and company admins can review vendor responses");
   });
 
+  test("comparison keeps two contactless organisations and their separate historical totals", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    await t.mutation(seedRequirementComparisonFixture as any, {
+      companyId: seeded.companyBId, projectId: seeded.projectBId,
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const before = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    const north = before.vendors.find((vendor) => vendor.vendorUserId === "northwind-vendor");
+    const south = before.vendors.find((vendor) => vendor.vendorUserId === "southwind-vendor");
+    if (!north || !south) throw new Error("Missing test organisations");
+    await t.run(async (ctx) => {
+      for (const userId of ["northwind-vendor", "southwind-vendor"]) {
+        const contact = await ctx.db.query("companyMembers")
+          .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", userId)).unique();
+        if (!contact) throw new Error("Missing test contact");
+        await ctx.db.patch(contact._id, { isActive: false });
+      }
+    });
+    const after = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    expect(after.vendors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ vendorId: north.vendorId, vendorUserId: null }),
+      expect.objectContaining({ vendorId: south.vendorId, vendorUserId: null }),
+    ]));
+    const cells = after.rows.find((row) => row.requirementId === "CMP-REQ-001")?.cells;
+    expect(cells?.find((cell) => cell.vendorId === north.vendorId)?.vendorScore).toBe(1);
+    expect(cells?.find((cell) => cell.vendorId === south.vendorId)?.vendorScore).toBe(0);
+    expect(after.totalsByVendor.find((row) => row.vendorId === north.vendorId)?.vendor.combined).toBe(12);
+    expect(after.totalsByVendor.find((row) => row.vendorId === south.vendorId)?.vendor.combined).toBe(3);
+  });
+
   test("requirement comparison returns correct averages, weighted totals, exclusions, and mode-specific values", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
