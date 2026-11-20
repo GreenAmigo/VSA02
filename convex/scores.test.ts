@@ -425,6 +425,9 @@ describe("Phase 5 score audit trail", () => {
     await scorer.mutation(api.scores.saveScorerScore, {
       projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1, comment: "Company score",
     });
+    const vendorName = (await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId }))
+      .vendors.find((vendor) => vendor.vendorId === vendorId)?.vendorName;
+    if (!vendorName) throw new Error("Missing test organisation");
     await scorer.mutation(api.scores.completeScorerVendor, { projectId: seeded.projectBId, vendorUserId: "northwind-vendor" });
     await admin.mutation(api.admin.deactivateVendorContact, {
       companyId: seeded.companyBId, vendorId, userId: "northwind-vendor",
@@ -467,6 +470,8 @@ describe("Phase 5 score audit trail", () => {
     });
     await expect(oldContact.query(api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId }))
       .rejects.toThrow("Project access denied");
+    const activity = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
+    expect(activity.find((entry) => entry.action === "scorer_score_edit")?.details).toContain(vendorName);
   });
 
   test("vendor answers follow contact links rather than organisation or invitation order", async () => {
@@ -1121,8 +1126,8 @@ describe("Phase 5 score audit trail", () => {
     expect(editedAfterSubmit.status).toBe("submitted");
 
     const companyLogs = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
-    expect(companyLogs.some((entry: { action: string }) => entry.action === "vendor_score_edit")).toBe(true);
-    expect(companyLogs.some((entry: { action: string }) => entry.action === "vendor_score_submit")).toBe(true);
+    expect(companyLogs.find((entry) => entry.action === "vendor_score_edit")?.details).toContain(initialPanel.vendorOrganizationName);
+    expect(companyLogs.find((entry) => entry.action === "vendor_score_submit")?.details).toContain(initialPanel.vendorOrganizationName);
 
     await admin.mutation(api.deadlines.upsertProjectDeadline, {
       projectId: seeded.projectBId,
@@ -1380,8 +1385,11 @@ describe("Phase 5 score audit trail", () => {
     });
 
     const activity = await admin.query(api.admin.listActivityLogs, { companyId: seeded.companyBId });
-    expect(activity.some((entry: { action: string }) => entry.action === "vendor_score_amend_admin")).toBe(true);
-    expect(activity.some((entry: { action: string }) => entry.action === "vendor_answers_reopened")).toBe(true);
+    const organisation = review.vendorName;
+    expect(activity.find((entry) => entry.action === "vendor_score_amend_admin")?.details).toContain(organisation);
+    expect(activity.find((entry) => entry.action === "vendor_answers_reopened")?.details).toContain(organisation);
+    expect(activity.find((entry) => entry.action === "vendor_score_edit")?.details).toContain(organisation);
+    expect(activity.find((entry) => entry.action === "vendor_score_amend_admin")?.details).not.toContain("northwind-vendor");
   });
 
   test("assigned scorers can autosave 0/1 scoring and only see vendor self-answers after completion", async () => {

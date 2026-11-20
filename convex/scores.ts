@@ -173,7 +173,7 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
     if (!contact) throw new Error("Project access denied");
     return {
       project, identity,
-      member: { companyId: project.companyId, projectId, userId: contact.member.userId, role: "vendor", vendorId: contact.organization._id },
+      member: { companyId: project.companyId, projectId, userId: contact.member.userId, role: "vendor", vendorId: contact.organization._id, vendorName: contact.organization.name },
     };
   }
 
@@ -668,7 +668,7 @@ export const saveVendorAnswer = mutation({
       actorUserId: identity.subject ?? identity.tokenIdentifier ?? member.userId,
       actorEmail: identity.email ?? undefined,
       action: "vendor_score_edit",
-      details: `Saved vendor score for ${args.requirementId} as ${args.score}.`,
+      details: `Saved vendor score for ${member.vendorName}, ${args.requirementId}, as ${args.score}.`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
@@ -737,7 +737,7 @@ export const submitVendorAnswers = mutation({
       actorUserId: identity.subject ?? identity.tokenIdentifier ?? member.userId,
       actorEmail: identity.email ?? undefined,
       action: "vendor_score_submit",
-      details: "Submitted vendor requirement answers.",
+      details: `Submitted vendor requirement answers for ${member.vendorName}.`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
@@ -1691,7 +1691,7 @@ export const saveScorerScore = mutation({
       actorUserId: payload.enteredByUserId,
       actorEmail: identity.email ?? undefined,
       action: "scorer_score_edit",
-      details: `Saved scorer score for ${args.requirementId} (${activeScope.label}) as ${args.score}.`,
+      details: `Saved scorer score for ${selectedVendor.vendorName}, ${args.requirementId} (${activeScope.label}), as ${args.score}.`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
@@ -2151,7 +2151,7 @@ export const amendVendorScore = mutation({
       actorUserId,
       actorEmail: identity.email ?? undefined,
       action: "vendor_score_amend_admin",
-      details: `Amended ${args.requirementId} for vendor ${args.vendorUserId}: ${existing.score} -> ${args.score}. Reason: ${reason}`,
+      details: `Amended ${args.requirementId} for vendor ${vendorContext.vendorName}: ${existing.score} -> ${args.score}. Reason: ${reason}`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
@@ -2210,7 +2210,7 @@ export const reopenVendorAnswers = mutation({
       actorUserId,
       actorEmail: identity.email ?? undefined,
       action: "vendor_answers_reopened",
-      details: `Reopened vendor responses for ${args.vendorUserId} until ${new Date(args.dueAt).toISOString()}.`,
+      details: `Reopened vendor responses for ${vendorContext.vendorName} until ${new Date(args.dueAt).toISOString()}.`,
       companyId: project.companyId,
       projectId: args.projectId,
     });
