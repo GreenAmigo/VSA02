@@ -213,7 +213,11 @@ Phase 6 reporting rule:
 - Dashboard and score reporting must use the department recorded on each scorer score entry (snapshot at score time), not the scorer's current department.
 
 Phase 6b vendor-answer rule (planned):
-- Each vendor organisation has one answer per requirement, regardless of how many contacts it has. Dashboard totals must never double-count answers from multiple contacts.
+- Each project has one answer per vendor organisation and requirement. The answer stores the organisation and is shared with its active contact; edits record who changed what and when.
+- A vendor organisation has one active contact. A second contact cannot be invited until the active contact is deactivated; contact changes are logged.
+- Replacement contacts continue the organisation's existing answers.
+- After contact links are repaired, a separate development/preview-only backfill assigns organisations to existing answers. Unmatched answers and duplicate answers for the same organisation and requirement are reported for review, never guessed or included in totals.
+- Before backfill, show a clear migration-required message rather than assigning old answers using current contact links. Dashboard and comparison totals must never double-count.
 
 ### Phase 1 status update
 - Consultant access and preview-only workspace visibility are in place and enforced on the server.
