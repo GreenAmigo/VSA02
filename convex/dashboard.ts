@@ -1,6 +1,6 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { getProjectVendors } from "./projectVendors";
+import { findVendorMembershipForIdentity, getProjectVendors } from "./projectVendors";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -15,6 +15,9 @@ async function assertProjectDashboardAccess(ctx: any, projectId: string) {
   const project = await ctx.db.get(projectId as any);
   if (!project) {
     throw new Error("Project not found");
+  }
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    throw new Error("Project access denied");
   }
 
   const userIds = getIdentityUserIds(identity);
