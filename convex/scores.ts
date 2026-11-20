@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
@@ -449,6 +450,12 @@ async function listAssignedVendorUsers(ctx: any, project: any) {
     vendorUserId: vendor.primaryContact.userId,
     vendorContactName: personDisplayName(vendor.primaryContact.displayName, vendor.primaryContact.userId),
   }] : []);
+}
+
+async function vendorAmendmentsNeedMigration(ctx: Pick<QueryCtx, "db">, projectId: Id<"projects">) {
+  return Boolean(await ctx.db.query("scoreAmendments")
+    .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", projectId).eq("vendorId", undefined))
+    .first());
 }
 
 export const listScoreHistory = query({
@@ -1073,6 +1080,7 @@ export const getVendorResponseReview = query({
     const answerState = await getProjectVendorAnswerState(ctx, project);
     const scoreByRequirementId = getUnconflictedVendorAnswers(answerState, vendorContext.vendorId);
     const scoreRows = [...scoreByRequirementId.values()];
+    const amendmentMigrationRequired = await vendorAmendmentsNeedMigration(ctx, args.projectId);
 
     const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, vendorContext.vendorId);
     const scorerRows = scorerHistory.scores;
@@ -1108,7 +1116,7 @@ export const getVendorResponseReview = query({
       scorerRowsByRequirementId.set(scorerRow.requirementId, current);
     }
 
-    const amendments = await ctx.db
+    const amendments = amendmentMigrationRequired || answerState.migrationRequired ? [] : await ctx.db
       .query("scoreAmendments")
       .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendorContext.vendorId))
       .collect();
@@ -1134,7 +1142,7 @@ export const getVendorResponseReview = query({
 
     const rows = requirementRows.map((requirement) => {
       const score = scoreByRequirementId.get(requirement.requirementId);
-      const history = (amendmentsByRequirementId.get(requirement.requirementId) ?? [])
+      const history = (scoreByRequirementId.has(requirement.requirementId) ? amendmentsByRequirementId.get(requirement.requirementId) ?? [] : [])
         .sort((a, b) => b.amendedAt - a.amendedAt)
         .map((entry) => ({
           originalScore: entry.originalScore,
@@ -1169,6 +1177,7 @@ export const getVendorResponseReview = query({
       vendorName: vendorContext.vendorName,
       vendorContactName: vendorContext.vendorDisplayName,
       migrationRequired: answerState.migrationRequired,
+      amendmentMigrationRequired,
       hasConflicts: [...(answerState.grouped.get(vendorContext.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
       scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
       hasScorerHistoryConflicts: scorerHistory.hasConflicts,
@@ -1208,12 +1217,13 @@ export const getProjectRequirementComparison = query({
     const totalScorers = new Set(scorerAssignments.map((row: any) => row.userId)).size;
 
     const answerState = await getProjectVendorAnswerState(ctx, project);
+    const amendmentMigrationRequired = await vendorAmendmentsNeedMigration(ctx, args.projectId);
     const vendorComparison = await Promise.all(vendors.map(async (vendor) => {
       const scorerState = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
       const scorerRows = scorerState.scores;
       const scorerDisplayNamesByUserId = await getScorerDisplayNames(ctx, project, scorerRows.map((row) => row.enteredByUserId));
       const vendorRows = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
-      const amendmentRows = await ctx.db
+      const amendmentRows = amendmentMigrationRequired || answerState.migrationRequired ? [] : await ctx.db
         .query("scoreAmendments")
         .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendor.vendorId))
         .collect();
@@ -1259,6 +1269,7 @@ export const getProjectRequirementComparison = query({
         reason: string;
       }>>();
       for (const row of amendmentRows) {
+        if (!vendorByRequirementId.has(row.requirementId)) continue;
         const current = amendmentsByRequirementId.get(row.requirementId) ?? [];
         current.push({
           originalScore: row.originalScore,
@@ -1385,6 +1396,7 @@ export const getProjectRequirementComparison = query({
     return {
       projectId: args.projectId,
       migrationRequired: answerState.migrationRequired,
+      amendmentMigrationRequired,
       hasVendorAnswerConflicts: [...answerState.grouped.values()].some((requirements) =>
         [...requirements.values()].some((answers) => answers.length > 1)),
       scorerHistoryMigrationRequired: await scorerHistoryNeedsMigration(ctx, args.projectId),
@@ -2020,12 +2032,21 @@ export const listScoreAmendments = query({
       ? { vendorId: member.vendorId }
       : findProjectVendorByUserId(await getProjectVendors(ctx, project), args.vendorUserId);
     if (!vendor) throw new Error("Vendor not assigned to this project");
+    if (await vendorAmendmentsNeedMigration(ctx, args.projectId)) {
+      throw new Error("Vendor answer history needs migration. Ask a workspace admin for help.");
+    }
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    if (answerState.migrationRequired) throw new Error("Vendor answers need migration before history can be viewed.");
+    if ([...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1)) {
+      throw new Error("Conflicting vendor answers must be resolved before history can be viewed.");
+    }
+    const answers = getUnconflictedVendorAnswers(answerState, vendor.vendorId);
     const rows = await ctx.db.query("scoreAmendments")
       .withIndex("by_project_vendor_id_requirement", (q) => q.eq("projectId", args.projectId).eq("vendorId", vendor.vendorId))
       .collect();
 
     return rows
-      .filter((row) => row.companyId === project.companyId)
+      .filter((row) => row.companyId === project.companyId && answers.has(row.requirementId))
       .map((row) => ({
         _id: row._id,
         projectId: row.projectId,

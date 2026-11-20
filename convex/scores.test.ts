@@ -260,6 +260,37 @@ const seedRequirementComparisonFixture = mutation({
 });
 
 describe("Phase 5 score audit trail", () => {
+  test("partially migrated answer history is hidden until all history has an organisation", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    await t.mutation(seedRequirementComparisonFixture as any, {
+      companyId: seeded.companyBId, projectId: seeded.projectBId,
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    const legacyId = await t.run((ctx) => ctx.db.insert("scoreAmendments", {
+      companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+      requirementId: "CMP-NFR-001", originalScore: 0, newScore: 1,
+      amendedByUserId: "beta-admin", amendedByDisplayName: "Beta Admin", reason: "Older correction", amendedAt: 1,
+    }));
+    const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    const north = comparison.vendors.find((row) => row.vendorUserId === "northwind-vendor");
+    if (!north) throw new Error("Missing test organisation");
+    expect(comparison.amendmentMigrationRequired).toBe(true);
+    expect(comparison.rows.find((row) => row.requirementId === "CMP-NFR-001")?.cells.find((cell) => cell.vendorId === north.vendorId)?.amendmentHistory).toEqual([]);
+    const review = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorId: north.vendorId });
+    expect(review.amendmentMigrationRequired).toBe(true);
+    expect(review.rows.find((row) => row.requirementId === "CMP-NFR-001")?.history).toEqual([]);
+    await expect(admin.query(api.scores.listScoreAmendments, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    })).rejects.toThrow("answer history needs migration");
+    await t.run((ctx) => ctx.db.patch(legacyId, { vendorId: north.vendorId }));
+    const migrated = await admin.query(api.scores.getVendorResponseReview, { projectId: seeded.projectBId, vendorId: north.vendorId });
+    expect(migrated.amendmentMigrationRequired).toBe(false);
+    expect(migrated.rows.find((row) => row.requirementId === "CMP-NFR-001")?.history).toHaveLength(2);
+  });
+
   test("vendor response review reports conflicting scorer history instead of choosing a score", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
