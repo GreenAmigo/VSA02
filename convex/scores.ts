@@ -1973,13 +1973,7 @@ export const listScoreAmendments = query({
     }
 
     const { member, project }: { member: any; project: any } = await assertScoringAccess(ctx, args.projectId);
-    const isAdmin = member.role === "company-admin" || member.role === "company-scorer" || Boolean(await ctx.db
-      .query("consultants")
-      .filter((q: any) => q.eq(q.field("userId"), member.userId))
-      .filter((q: any) => q.eq(q.field("isActive"), true))
-      .first());
-
-    if (!isAdmin && member.role === "vendor" && member.userId !== args.vendorUserId) {
+    if (member.role === "vendor" && member.userId !== args.vendorUserId) {
       throw new Error("Project access denied");
     }
 

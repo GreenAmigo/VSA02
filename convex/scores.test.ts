@@ -298,6 +298,12 @@ describe("Phase 5 score audit trail", () => {
     await expect(firstUser.mutation(api.scores.submitScore, {
       projectId: seeded.projectBId, vendorUserId: "second-contact", requirementId: "REQ-LINK", score: 1,
     })).rejects.toThrow("own submission");
+    await t.run((ctx) => ctx.db.insert("consultants", {
+      userId: "first-contact", displayName: "Stale consultant", isActive: true, grantedAt: Date.now(),
+    }));
+    await expect(firstUser.query(api.scores.listScoreAmendments, {
+      projectId: seeded.projectBId, vendorUserId: "second-contact",
+    })).rejects.toThrow("Project access denied");
     await t.run((ctx) => ctx.db.insert("companyMembers", {
       companyId: seeded.companyBId, userId: "first-contact", email: "first@example.com",
       displayName: "Duplicate contact", role: "vendor", vendorId: second.vendorId, isActive: true, createdAt: Date.now(),
