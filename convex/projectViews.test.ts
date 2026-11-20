@@ -153,6 +153,46 @@ describe("Phase 6 project view isolation", () => {
     await expect(vendor.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId })).rejects.toThrow("Project access denied");
   });
 
+  test("a vendor with a stale scorer assignment cannot read scorer views", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
+    await scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Private scorer view",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectBId, { scorerCanSeePeerScores: true });
+      const membership = await ctx.db.query("projectMembers")
+        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor")).unique();
+      if (!membership) throw new Error("Missing legacy membership");
+      await ctx.db.patch(membership._id, { role: "company-scorer" });
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyBId, userId: "northwind-vendor", role: "company-scorer",
+        displayName: "Northwind Scorer", isActive: true, createdAt: Date.now(),
+      });
+      await ctx.db.insert("consultants", {
+        userId: "northwind-vendor", displayName: "Northwind Consultant", isActive: true, grantedAt: Date.now(),
+      });
+      await ctx.db.insert("scorerCompletions", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+        scorerScopeKey: "individual:northwind-vendor", scorerScopeLabel: "Northwind", scorerScopeType: "individual",
+        status: "completed", answeredCount: 1, totalRequirements: 1, updatedByUserId: "northwind-vendor",
+        updatedByDisplayName: "Northwind", updatedAt: Date.now(),
+      });
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    const views = await vendor.query(api.projectViews.listProjectViews, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor",
+    });
+    expect(views).toMatchObject({ rows: [], canViewAll: false, peerViewsUnlocked: false });
+    await expect(vendor.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", viewText: "Blocked",
+    })).rejects.toThrow("Only assigned scorers");
+  });
+
   test("scorers can autosave views until scorer deadline and each change is activity logged", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

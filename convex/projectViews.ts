@@ -56,6 +56,25 @@ async function assertProjectViewAccess(ctx: any, projectId: string) {
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
 
+  const vendorMemberships = ctx.db.query("companyMembers")
+    .withIndex("by_company_role", (q: any) => q.eq("companyId", project.companyId).eq("role", "vendor"));
+  let hasVendorMembership = false;
+  for await (const candidate of vendorMemberships) {
+    if (candidate.isActive && (userIds.includes(candidate.userId)
+      || (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail))) {
+      hasVendorMembership = true;
+      break;
+    }
+  }
+  if (hasVendorMembership) {
+    const vendors = await getProjectVendors(ctx, project);
+    const contact = vendors.flatMap((vendor) => vendor.contacts).find((candidate) => userIds.includes(candidate.userId));
+    if (contact) {
+      return { project, identity, member: { ...contact, role: "vendor" as const }, consultant: null, actorUserId: contact.userId };
+    }
+    throw new Error("Project access denied");
+  }
+
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
