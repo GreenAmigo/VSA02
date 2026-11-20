@@ -1,5 +1,6 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { findVendorMembershipForIdentity } from "./projectVendors";
 
 const requirementRowValidator = v.object({
   id: v.string(),
@@ -32,6 +33,9 @@ async function canImportOrEditRequirements(ctx: any, projectId: string, identity
   const project = await ctx.db.get(projectId as any);
   if (!project) {
     throw new Error("Project not found");
+  }
+  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+    return { project, identity, allowed: false };
   }
 
   const userIds = getIdentityUserIds(identity);
@@ -299,6 +303,9 @@ export const updateRequirementPriority = mutation({
     const project = await ctx.db.get(args.projectId);
     if (!project) {
       throw new Error("Project not found");
+    }
+    if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
+      throw new Error("Only consultants and company admins can change priorities");
     }
 
     const userIds = getIdentityUserIds(identity);

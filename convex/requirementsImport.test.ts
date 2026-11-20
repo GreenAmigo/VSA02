@@ -10,6 +10,30 @@ import { buildRequirementTemplateWorkbook, parseRequirementFileWithIssues, toReq
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 4 requirement import preview and confirm", () => {
+  test("a vendor's stale admin or consultant role cannot edit requirements", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("consultants", {
+        userId: "northwind-vendor", displayName: "Stale consultant", isActive: true, grantedAt: Date.now(),
+      });
+      await ctx.db.insert("projectMembers", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "northwind-vendor",
+        role: "company-admin", displayName: "Stale admin", isActive: true, createdAt: Date.now(),
+      });
+    });
+    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
+    await expect(vendor.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId, rows: [], confirm: true,
+    })).rejects.toThrow("Project access denied");
+    await expect(vendor.mutation(api.requirements.updateRequirementPriority, {
+      projectId: seeded.projectBId, requirementId: "REQ-1", priority: 9,
+    })).rejects.toThrow("Only consultants and company admins");
+  });
+
   test("a matching admin name does not authorize requirement edits", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
