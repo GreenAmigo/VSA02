@@ -504,6 +504,26 @@ function ScorerViewNotice({ migrationRequired, hasConflicts }: { migrationRequir
   );
 }
 
+function ScoringHistoryNotice({ migrationRequired, hasConflicts }: { migrationRequired?: boolean; hasConflicts?: boolean }) {
+  if (!migrationRequired && !hasConflicts) return null;
+  return (
+    <div role="alert" className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+      {migrationRequired ? <p>Some older company scores and completion records need migration. They are hidden until a workspace admin resolves this.</p> : null}
+      {hasConflicts ? <p>Some company scoring records conflict and are excluded. Ask a workspace admin to resolve them.</p> : null}
+    </div>
+  );
+}
+
+function VendorDeadlineNotice({ migrationRequired, hasConflict }: { migrationRequired?: boolean; hasConflict?: boolean }) {
+  if (!migrationRequired && !hasConflict) return null;
+  return (
+    <div role="alert" className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+      {migrationRequired ? <p>Some older vendor deadlines need migration. Deadline and submission status may be incomplete; ask a workspace admin for help.</p> : null}
+      {hasConflict ? <p>Some vendor deadlines conflict. Ask a workspace admin to resolve them before changes can be made.</p> : null}
+    </div>
+  );
+}
+
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const selectedReviewRef = useRef<HTMLDivElement | null>(null);
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
@@ -520,6 +540,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       deadlineAt: number | null;
       migrationRequired?: boolean;
       hasConflicts?: boolean;
+      deadlineMigrationRequired?: boolean;
+      deadlineConflict?: boolean;
     }>
     | undefined;
 
@@ -550,7 +572,8 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
     if (linked) setShouldScrollSelectedReview(true);
   }, [vendorResponses, selectedVendorId]);
 
-  const selectedVendorUserId = vendorResponses?.find((row) => row.vendorId === selectedVendorId)?.vendorUserId ?? "";
+  const selectedVendor = vendorResponses?.find((row) => row.vendorId === selectedVendorId);
+  const selectedVendorUserId = selectedVendor?.vendorUserId ?? "";
 
   useEffect(() => {
     if (!shouldScrollSelectedReview || !selectedVendorId || !selectedReviewRef.current) {
@@ -572,6 +595,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       vendorContactName: string | null;
       deadlineAt: number | null;
       deadlineLocked: boolean;
+      migrationRequired?: boolean;
+      hasConflicts?: boolean;
+      scorerHistoryMigrationRequired?: boolean;
+      hasScorerHistoryConflicts?: boolean;
       rows: Array<{
         requirementId: string;
         text: string;
@@ -717,6 +744,10 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
         migrationRequired={vendorResponses?.some((vendor) => vendor.migrationRequired)}
         hasConflicts={vendorResponses?.some((vendor) => vendor.hasConflicts)}
       />
+      <VendorDeadlineNotice
+        migrationRequired={vendorResponses?.some((vendor) => vendor.deadlineMigrationRequired)}
+        hasConflict={vendorResponses?.some((vendor) => vendor.deadlineConflict)}
+      />
 
       {vendorResponses === undefined ? (
         <p className="text-sm text-slate-400">Loading vendor responses...</p>
@@ -795,6 +826,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                 </div>
               </div>
 
+              <ScoringHistoryNotice migrationRequired={selectedReview.scorerHistoryMigrationRequired} hasConflicts={selectedReview.hasScorerHistoryConflicts} />
               {!selectedVendorUserId ? <p className="mb-3 text-sm text-amber-200">One active contact is needed to amend or reopen answers.</p> : null}
               <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
                 <label className="text-sm text-slate-300">
@@ -809,7 +841,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   onClick={() => void handleReopen()}
-                  disabled={busy || !selectedVendorUserId}
+                  disabled={busy || !selectedVendorUserId || Boolean(selectedVendor?.deadlineMigrationRequired || selectedVendor?.deadlineConflict)}
                   className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:opacity-60"
                 >
                   Reopen for this vendor
@@ -876,6 +908,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
                               <button
                                 type="button"
                                 onClick={() => beginAmend(row)}
+                                disabled={Boolean(selectedVendor?.deadlineMigrationRequired || selectedVendor?.deadlineConflict || selectedReview.migrationRequired || selectedReview.hasConflicts)}
                                 className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 hover:border-amber-400"
                               >
                                 Amend
@@ -1026,6 +1059,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
     | {
       projectId: string;
       scorerCanSeePeerScores: boolean;
+      scorerHistoryMigrationRequired?: boolean;
       scorerScopes: Array<{ scopeKey: string; scopeType: "individual" | "department"; label: string }>;
       activeScopeKey: string;
       vendors: Array<{
@@ -1033,6 +1067,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
         vendorName: string;
         vendorUserId: string;
         vendorContactName: string | null;
+        hasScorerHistoryConflicts?: boolean;
         answeredCount: number;
         totalRequirements: number;
         status: "not-started" | "in-progress" | "completed";
@@ -1072,6 +1107,8 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       isCompleted: boolean;
       migrationRequired?: boolean;
       hasVendorAnswerConflicts?: boolean;
+      scorerHistoryMigrationRequired?: boolean;
+      hasScorerHistoryConflicts?: boolean;
       completedAt: number | null;
       rows: Array<{
         requirementId: string;
@@ -1120,6 +1157,8 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       }>;
     }
     | undefined;
+
+  const scorerHistoryLocked = Boolean(workboard?.scorerHistoryMigrationRequired || grid?.scorerHistoryMigrationRequired || grid?.hasScorerHistoryConflicts);
 
   useEffect(() => () => {
     if (saveViewTimerRef.current !== null) {
@@ -1240,6 +1279,10 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold text-white">Scorer scoring</h3>
       </div>
+      <ScoringHistoryNotice
+        migrationRequired={workboard?.scorerHistoryMigrationRequired}
+        hasConflicts={workboard?.vendors.some((vendor) => vendor.hasScorerHistoryConflicts)}
+      />
 
       {workboard === undefined ? (
         <p className="text-sm text-slate-400">Loading scorer workboard...</p>
@@ -1292,7 +1335,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                       <button
                         type="button"
                         onClick={() => void reopenCompletion()}
-                        disabled={busyKey === "reopen"}
+                        disabled={busyKey === "reopen" || scorerHistoryLocked}
                         className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-60"
                       >
                         Reopen
@@ -1303,7 +1346,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                   <button
                     type="button"
                     onClick={() => void markComplete()}
-                    disabled={busyKey === "complete"}
+                    disabled={busyKey === "complete" || scorerHistoryLocked}
                     className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
                   >
                     Mark complete
@@ -1372,7 +1415,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                               type="radio"
                               name={`scorer-score-${row.requirementId}`}
                               checked={row.ownScore === 0}
-                              disabled={busyKey.startsWith(`${row.requirementId}:`)}
+                              disabled={scorerHistoryLocked || busyKey.startsWith(`${row.requirementId}:`)}
                               onChange={() => void saveScore({ requirementId: row.requirementId, score: 0, comment: row.ownComment })}
                             />
                             0
@@ -1382,7 +1425,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                               type="radio"
                               name={`scorer-score-${row.requirementId}`}
                               checked={row.ownScore === 1}
-                              disabled={busyKey.startsWith(`${row.requirementId}:`)}
+                              disabled={scorerHistoryLocked || busyKey.startsWith(`${row.requirementId}:`)}
                               onChange={() => void saveScore({ requirementId: row.requirementId, score: 1, comment: row.ownComment })}
                             />
                             1
@@ -1394,6 +1437,7 @@ function ScorerScoringPanel({ projectId, scorerDeadlineAt }: { projectId: string
                         <span className="mb-1 block">Your comment</span>
                         <textarea
                           defaultValue={row.ownComment}
+                          disabled={scorerHistoryLocked}
                           onBlur={(event) => {
                             if (row.ownScore === null) {
                               setNotice({ kind: "error", message: "Choose 0 or 1 before saving a scorer comment." });
@@ -2940,6 +2984,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       answeredCount: number;
       totalRequirements: number;
       migrationRequired?: boolean;
+      deadlineMigrationRequired?: boolean;
+      deadlineConflict?: boolean;
       conflictingRequirementIds?: string[];
     }
     | undefined;
@@ -2973,6 +3019,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   ) as
     | {
       projectId: string;
+      scorerHistoryMigrationRequired?: boolean;
+      hasScorerHistoryConflicts?: boolean;
       vendors: Array<{ vendorUserId: string; vendorName: string; vendorContactName: string | null }>;
       groups: Array<{
         departmentId: string | null;
@@ -2994,6 +3042,8 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       projectId: string;
       migrationRequired?: boolean;
       hasVendorAnswerConflicts?: boolean;
+      scorerHistoryMigrationRequired?: boolean;
+      hasScorerHistoryConflicts?: boolean;
       vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string | null; vendorContactName: string | null }>;
       rows: Array<{
         requirementId: string;
@@ -3505,6 +3555,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
 
             <VendorAnswerNotice migrationRequired={requirementComparison?.migrationRequired} hasConflicts={requirementComparison?.hasVendorAnswerConflicts} />
+            <ScoringHistoryNotice migrationRequired={requirementComparison?.scorerHistoryMigrationRequired} hasConflicts={requirementComparison?.hasScorerHistoryConflicts} />
             {requirementComparison === undefined ? (
               <p className="text-sm text-slate-400">Loading comparison grid...</p>
             ) : requirementComparison.vendors.length === 0 ? (
@@ -3819,6 +3870,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
           </div>
 
+          <ScoringHistoryNotice migrationRequired={scoringProgress?.scorerHistoryMigrationRequired} hasConflicts={scoringProgress?.hasScorerHistoryConflicts} />
           {scoringProgress === undefined ? (
             <p className="text-sm text-slate-400">Loading scorer progress...</p>
           ) : scoringProgress.groups.length === 0 ? (
@@ -3885,6 +3937,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
           </div>
 
           <VendorAnswerNotice migrationRequired={vendorScoringPanel?.migrationRequired} hasConflicts={Boolean(vendorScoringPanel?.conflictingRequirementIds?.length)} />
+          <VendorDeadlineNotice migrationRequired={vendorScoringPanel?.deadlineMigrationRequired} hasConflict={vendorScoringPanel?.deadlineConflict} />
           <div className="mt-5">
             <Link
               href={`/workspaces/${companyId}/projects/${projectId}/answer-requirements`}
@@ -3943,6 +3996,8 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
       answeredCount: number;
       totalRequirements: number;
       migrationRequired?: boolean;
+      deadlineMigrationRequired?: boolean;
+      deadlineConflict?: boolean;
       conflictingRequirementIds?: string[];
       rows: Array<{
         requirementId: string;
@@ -4004,7 +4059,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
     setDrafts((current) => ({ ...current, [requirementId]: nextDraft }));
     setNotice(null);
 
-    if (panel.deadlineLocked || panel.migrationRequired || panel.conflictingRequirementIds?.includes(requirementId) || nextDraft.score === null) {
+    if (panel.deadlineLocked || panel.deadlineMigrationRequired || panel.deadlineConflict || panel.migrationRequired || panel.conflictingRequirementIds?.includes(requirementId) || nextDraft.score === null) {
       return;
     }
 
@@ -4031,7 +4086,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
   };
 
   const handleSubmit = async () => {
-    if (panel.deadlineLocked || panel.migrationRequired || panel.conflictingRequirementIds?.length) {
+    if (panel.deadlineLocked || panel.deadlineMigrationRequired || panel.deadlineConflict || panel.migrationRequired || panel.conflictingRequirementIds?.length) {
       return;
     }
 
@@ -4096,6 +4151,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
         ) : null}
 
         <VendorAnswerNotice migrationRequired={panel.migrationRequired} hasConflicts={Boolean(panel.conflictingRequirementIds?.length)} />
+        <VendorDeadlineNotice migrationRequired={panel.deadlineMigrationRequired} hasConflict={panel.deadlineConflict} />
         {notice ? (
           <div className={`mt-4 rounded-xl border p-3 text-sm ${notice.kind === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100" : "border-rose-500/40 bg-rose-500/10 text-rose-100"}`}>
             {notice.message}
@@ -4125,7 +4181,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
           const draft = drafts[row.requirementId] ?? { score: row.score, comment: row.comment ?? "" };
           const unanswered = draft.score === null;
           const state = saveState[row.requirementId] ?? "idle";
-          const answerLocked = panel.deadlineLocked || Boolean(panel.migrationRequired) || Boolean(panel.conflictingRequirementIds?.includes(row.requirementId));
+          const answerLocked = panel.deadlineLocked || Boolean(panel.deadlineMigrationRequired || panel.deadlineConflict || panel.migrationRequired || panel.conflictingRequirementIds?.includes(row.requirementId));
 
           return (
             <div key={row.requirementId} className={`rounded-2xl border p-4 ${unanswered ? "border-amber-500/40 bg-amber-500/5" : "border-slate-800 bg-slate-900"}`}>
@@ -4194,7 +4250,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={panel.deadlineLocked || Boolean(panel.migrationRequired) || Boolean(panel.conflictingRequirementIds?.length)}
+          disabled={panel.deadlineLocked || Boolean(panel.deadlineMigrationRequired || panel.deadlineConflict || panel.migrationRequired || panel.conflictingRequirementIds?.length)}
           className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
         >
           Submit
@@ -5138,6 +5194,9 @@ export function ConsultantWorkspaceScoringPage({ companyId }: { companyId: strin
       totalVendors: number;
       completedScorerVendorPairs: number;
       totalScorerVendorPairs: number;
+      deadlineMigrationRequired?: boolean;
+      scorerHistoryMigrationRequired?: boolean;
+      hasHistoryConflicts?: boolean;
     }>
     | undefined;
 
@@ -5200,6 +5259,11 @@ export function ConsultantWorkspaceScoringPage({ companyId }: { companyId: strin
                   <StatusPill label={`${summary.submittedVendors} / ${summary.totalVendors} vendors submitted`} className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200" />
                   <StatusPill label={`${summary.completedScorerVendorPairs} / ${summary.totalScorerVendorPairs} scorer completions`} className="border-sky-500/40 bg-sky-500/10 text-sky-200" />
                 </div>
+                <VendorDeadlineNotice migrationRequired={summary.deadlineMigrationRequired} />
+                <ScoringHistoryNotice migrationRequired={summary.scorerHistoryMigrationRequired} />
+                {summary.hasHistoryConflicts ? (
+                  <p role="alert" className="mt-3 text-sm text-amber-200">Some deadline or scoring records conflict and are excluded. Ask a workspace admin to resolve them.</p>
+                ) : null}
               </div>
             ))}
           </div>

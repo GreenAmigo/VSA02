@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { api } from "../../convex/_generated/api";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
-import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage, ConsultantWorkspaceVendorsPage, VendorProjectAnswerRequirementsPage } from "./consultant-workspace-pages";
+import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceScoringPage, ConsultantWorkspaceVendorContactsPage, ConsultantWorkspaceVendorsPage, VendorProjectAnswerRequirementsPage } from "./consultant-workspace-pages";
 
 const { useQueryMock, useMutationMock, useAuthMock, useConvexAuthMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -127,6 +127,43 @@ describe("vendor answer migration warning", () => {
     expect(html).toContain("Some older vendor answers need migration");
     expect(html).toMatch(/type="radio"[^>]*disabled/);
     expect(html).toContain("They are not included in the answers or totals shown");
+  });
+
+  test("explains deadline migration and prevents editing and submission", () => {
+    useQueryMock.mockReset();
+    useAuthMock.mockReturnValue({ user: { email: "vendor@example.com" }, loading: false });
+    useConvexAuthMock.mockReturnValue({ isLoading: false, isAuthenticated: true });
+    useQueryMock.mockImplementationOnce(() => ({ isVendor: true, role: "vendor" }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Workspace" }]);
+    useQueryMock.mockImplementationOnce(() => ({
+      companyName: "Workspace", projectName: "Project", vendorOrganizationName: "Vendor",
+      deadlineLocked: false, status: "not-started", answeredCount: 0, totalRequirements: 1,
+      deadlineMigrationRequired: true, conflictingRequirementIds: [],
+      rows: [{ requirementId: "REQ", text: "Requirement", score: null, comment: "" }],
+    }));
+    const html = renderToStaticMarkup(<VendorProjectAnswerRequirementsPage companyId="company-1" projectId="project-1" />);
+    expect(html).toContain("Some older vendor deadlines need migration");
+    expect(html).toMatch(/type="radio"[^>]*disabled/);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Submit/);
+  });
+});
+
+describe("scoring summary migration warnings", () => {
+  test("shows incomplete and conflicting history instead of presenting it as final", () => {
+    useQueryMock.mockReset();
+    useAuthMock.mockReturnValue({ user: { email: "admin@example.com" }, loading: false });
+    useConvexAuthMock.mockReturnValue({ isLoading: false, isAuthenticated: true });
+    useQueryMock.mockImplementationOnce(() => ({ email: "admin@example.com", role: "company-admin" }));
+    useQueryMock.mockImplementationOnce(() => [{ _id: "company-1", name: "Workspace" }]);
+    useQueryMock.mockImplementationOnce(() => [{
+      projectId: "project-1", projectName: "Project", submittedVendors: 0, totalVendors: 1,
+      completedScorerVendorPairs: 0, totalScorerVendorPairs: 1,
+      deadlineMigrationRequired: true, scorerHistoryMigrationRequired: true, hasHistoryConflicts: true,
+    }]);
+    const html = renderToStaticMarkup(<ConsultantWorkspaceScoringPage companyId="company-1" />);
+    expect(html).toContain("Some older vendor deadlines need migration");
+    expect(html).toContain("Some older company scores and completion records need migration");
+    expect(html).toContain("Some deadline or scoring records conflict");
   });
 });
 
@@ -352,6 +389,8 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     queueProjectDetailQueries({ email: "admin@example.com", role: "company-admin", isConsultant: false });
     useQueryMock.mockImplementationOnce(() => undefined);
     useQueryMock.mockImplementationOnce(() => ({
+      scorerHistoryMigrationRequired: true,
+      hasScorerHistoryConflicts: true,
       vendors: [
         { vendorId: "vendor-1", vendorName: "First vendor", vendorUserId: null, vendorContactName: null },
         { vendorId: "vendor-2", vendorName: "Second vendor", vendorUserId: null, vendorContactName: null },
@@ -369,6 +408,8 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Second vendor");
     expect(html).toContain("Combined: 9");
     expect(html).toContain("Combined: 0");
+    expect(html).toContain("Some older company scores and completion records need migration");
+    expect(html).toContain("Some company scoring records conflict");
   });
 
   test("vendor responses can be opened when the organisation has no active contact", () => {
