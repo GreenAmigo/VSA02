@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { api } from "../../convex/_generated/api";
 
 import { ConsultantHomeHeader } from "./consultant-home-header";
-import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage } from "./consultant-workspace-pages";
+import { ConsultantWorkspaceOverviewPage, ConsultantWorkspacePeoplePage, ConsultantWorkspaceProjectDetailPage, ConsultantWorkspaceProjectsPage, ConsultantWorkspaceVendorContactsPage, ConsultantWorkspaceVendorsPage } from "./consultant-workspace-pages";
 
 const { useQueryMock, useMutationMock, useAuthMock, useConvexAuthMock } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
@@ -71,6 +71,16 @@ describe("ConsultantHomeHeader", () => {
       const html = renderToStaticMarkup(<ConsultantWorkspaceVendorContactsPage companyId="company-1" vendorId="vendor-1" />);
       expect(html.match(/Edit name/g)).toHaveLength(2);
       expect(useMutationMock).toHaveBeenCalledWith(api.admin.updateWorkspacePersonName);
+    });
+
+    test("adding a vendor directs admins to Manage contacts instead of asking for an email", () => {
+      useQueryMock.mockImplementationOnce(() => null);
+      useQueryMock.mockImplementationOnce(() => [{ vendorId: "vendor-1", name: "Vendor", contactEmail: "reference@example.com", status: "active", contactCount: 0 }]);
+      useQueryMock.mockImplementationOnce(() => undefined);
+      const html = renderToStaticMarkup(<ConsultantWorkspaceVendorsPage companyId="company-1" />);
+      expect(html).toContain("Invite contacts from Manage contacts");
+      expect(html).not.toContain("Primary contact email");
+      expect(html).toContain("Reference email: reference@example.com");
     });
   });
 

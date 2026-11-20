@@ -4815,7 +4815,6 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
   const deactivateVendor = useMutation((api as any).admin.deactivateWorkspaceVendor);
   const reactivateVendor = useMutation((api as any).admin.reactivateWorkspaceVendor);
   const [vendorName, setVendorName] = useState("");
-  const [vendorEmail, setVendorEmail] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -4900,9 +4899,8 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
 
     setBusy(true);
     try {
-      await createVendor({ companyId: companyId as any, name, contactEmail: vendorEmail || undefined });
+      await createVendor({ companyId: companyId as any, name });
       setVendorName("");
-      setVendorEmail("");
       setNotice({ kind: "success", message: `Created ${name}.` });
     } catch (error) {
       setNotice({ kind: "error", message: error instanceof Error ? error.message : "Failed to create the vendor organisation." });
@@ -4960,10 +4958,8 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
 
         {canManage ? (
           <form onSubmit={handleCreateVendor} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <div className="grid gap-3 md:grid-cols-2">
-              <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Vendor organisation name" />
-              <input value={vendorEmail} onChange={(event) => setVendorEmail(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Primary contact email" type="email" />
-            </div>
+            <input value={vendorName} onChange={(event) => setVendorName(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" placeholder="Vendor organisation name" />
+            <p className="mt-2 text-sm text-slate-400">Invite contacts from Manage contacts after adding the organisation.</p>
             <div className="mt-4 flex justify-end">
               <button type="submit" disabled={busy} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60">Add vendor organisation</button>
             </div>
@@ -4983,7 +4979,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
                     <h2 className="truncate text-lg font-semibold text-white" title={vendor.name}>{vendor.name}</h2>
                     <StatusPill label={vendor.status === "deactivated" ? "Deactivated" : "Active"} className={vendor.status === "deactivated" ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"} />
                   </div>
-                  {vendor.contactEmail ? <p className="mt-2 truncate text-sm text-slate-400" title={vendor.contactEmail}>Primary contact: {vendor.contactEmail}</p> : null}
+                  {vendor.contactEmail ? <p className="mt-2 truncate text-sm text-slate-400" title={vendor.contactEmail}>Reference email: {vendor.contactEmail}</p> : null}
                 </div>
 
                 {canManage ? (
