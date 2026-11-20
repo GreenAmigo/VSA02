@@ -154,13 +154,20 @@ export const listProjectViews = query({
     const canViewAll = Boolean(member?.role === "company-admin" || !member);
     const peerVisibilityEnabled = Boolean(project.scorerCanSeePeerScores);
 
-    const visibleRows = member?.role === "company-scorer"
-      ? rows.filter((row) => row.scorerUserId === requesterUserId || (peerVisibilityEnabled && peerViewsUnlocked))
-      : rows;
     const missingSnapshots = await ctx.db.query("projectViews")
       .withIndex("by_project_vendor_id", (q) => q.eq("projectId", args.projectId).eq("vendorId", undefined))
       .first();
-
+    const counts = new Map<string, number>();
+    if (assignedVendor) {
+      for (const row of rows) counts.set(row.scorerUserId, (counts.get(row.scorerUserId) ?? 0) + 1);
+    }
+    const hasViewConflicts = [...counts.values()].some((count) => count > 1);
+    const nonConflictingRows = assignedVendor
+      ? missingSnapshots ? [] : rows.filter((row) => counts.get(row.scorerUserId) === 1)
+      : rows;
+    const visibleRows = member?.role === "company-scorer"
+      ? nonConflictingRows.filter((row) => row.scorerUserId === requesterUserId || (peerVisibilityEnabled && peerViewsUnlocked))
+      : nonConflictingRows;
     const orderedRows = visibleRows
       .slice()
       .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
@@ -172,6 +179,7 @@ export const listProjectViews = query({
       peerVisibilityEnabled,
       peerViewsUnlocked,
       historyMigrationRequired: Boolean(missingSnapshots) || await scorerHistoryNeedsMigration(ctx, args.projectId),
+      hasViewConflicts,
       rows: orderedRows.map((row) => ({
         _id: row._id,
         projectId: row.projectId,

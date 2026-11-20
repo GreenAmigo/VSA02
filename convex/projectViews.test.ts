@@ -38,6 +38,30 @@ describe("Phase 6 project view isolation", () => {
     const after = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
     expect(after.rows).toHaveLength(1);
     expect(after.rows[0].viewText).toBe("Updated view");
+    const legacyId = await t.run(async (ctx) => {
+      const original = await ctx.db.query("projectViews")
+        .withIndex("by_project_vendor_id", (q) => q.eq("projectId", seeded.projectBId).eq("vendorId", vendorId)).first();
+      if (!original) throw new Error("Missing test view");
+      const { _id, _creationTime, vendorId: _vendorId, ...legacy } = original;
+      return await ctx.db.insert("projectViews", { ...legacy, viewText: "Unmigrated conflicting view" });
+    });
+    const pending = await admin.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
+    expect(pending.historyMigrationRequired).toBe(true);
+    expect(pending.rows).toEqual([]);
+    await t.run(async (ctx) => { await ctx.db.delete(legacyId); });
+    await t.run(async (ctx) => {
+      const original = await ctx.db.query("projectViews")
+        .withIndex("by_project_vendor_id", (q) => q.eq("projectId", seeded.projectBId).eq("vendorId", vendorId)).first();
+      if (!original) throw new Error("Missing test view");
+      const { _id, _creationTime, ...duplicate } = original;
+      await ctx.db.insert("projectViews", { ...duplicate, viewText: "Conflicting view" });
+    });
+    const conflicting = await scorer.query(api.projectViews.listProjectViews, { projectId: seeded.projectBId, vendorUserId: "replacement" });
+    expect(conflicting.hasViewConflicts).toBe(true);
+    expect(conflicting.rows).toEqual([]);
+    await expect(scorer.mutation(api.projectViews.saveProjectView, {
+      projectId: seeded.projectBId, vendorUserId: "replacement", viewText: "Must not overwrite",
+    })).rejects.toThrow("Conflicting scorer views");
   });
 
   test("a matching scorer name does not authorize project views", async () => {
