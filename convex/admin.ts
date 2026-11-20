@@ -180,7 +180,6 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
 
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
-  const normalizedDisplayName = identity.name?.trim();
 
   const identityMatches: Array<{ userId: string; role?: string; displayName?: string | null; email?: string | null }> = await ctx.db
     .query("companyMembers")
@@ -188,7 +187,6 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-      ...(normalizedDisplayName ? [q.eq(q.field("displayName"), normalizedDisplayName)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -283,31 +281,22 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
   }
 
   const userIds = getIdentityUserIds(identity);
-  const companyMatches: Array<{ userId: string; displayName?: string | null }> = await ctx.db
+  const companyMatches: Array<{ userId: string }> = await ctx.db
     .query("companyMembers")
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-      ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
 
   const candidateUserIds = new Set([...userIds, ...companyMatches.map((member: { userId: string }) => member.userId)]);
-  const candidateNames = new Set([
-    ...(identity.name?.trim() ? [identity.name.trim()] : []),
-    ...companyMatches
-      .map((member: { displayName?: string | null }) => member.displayName?.trim())
-      .filter((displayName): displayName is string => Boolean(displayName)),
-  ]);
-
   const member = await ctx.db
     .query("projectMembers")
     .filter((q: any) => q.eq(q.field("projectId"), projectId))
     .filter((q: any) => q.or(
       ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
-      ...Array.from(candidateNames).map((displayName) => q.eq(q.field("displayName"), displayName)),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -3088,7 +3077,6 @@ export const listProjectMembers = query({
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
         ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .collect();
@@ -3103,7 +3091,6 @@ export const listProjectMembers = query({
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.name?.trim() ? [q.eq(q.field("displayName"), identity.name.trim())] : []),
       ))
       .collect();
 

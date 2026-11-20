@@ -71,6 +71,24 @@ const seedLegacyProjectMember = mutation({
 });
 
 describe("admin console actions", () => {
+  test("a matching display name does not authorize name edits or project roster access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const target = await t.run((ctx) => ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "beta-scorer")).unique());
+    if (!target) throw new Error("Missing test scorer");
+    const spoofedAdmin = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Admin" });
+    await expect(spoofedAdmin.mutation(api.admin.updateWorkspacePersonName, {
+      companyId: seeded.companyBId, memberId: target._id, displayName: "Changed Name",
+    })).rejects.toThrow("Only company admins");
+    const spoofedScorer = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name: "Beta Scorer" });
+    await expect(spoofedScorer.query(api.admin.listProjectMembers, { projectId: seeded.projectBId }))
+      .rejects.toThrow("Project access denied");
+  });
+
   test("activity actor names are resolved within each workspace without falling back to email", async () => {
     await withConsultantGrantEnvironment(async () => {
       const t = convexTest({ schema, modules });
