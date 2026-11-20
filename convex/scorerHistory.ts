@@ -17,6 +17,9 @@ export async function getVendorScorerHistory(
   vendorId: Id<"vendorOrganizations">,
 ) {
   const grouped = new Map<string, Map<string, Doc<"scorerScores">[]>>();
+  if (await scorerHistoryNeedsMigration(ctx, projectId)) {
+    return { scores: [] as Doc<"scorerScores">[], hasConflicts: false, grouped };
+  }
   const rows = ctx.db.query("scorerScores")
     .withIndex("by_project_vendor_id_scope_requirement", (q) => q.eq("projectId", projectId).eq("vendorId", vendorId));
   for await (const row of rows) {
@@ -43,6 +46,9 @@ export async function getVendorScorerCompletion(
   vendorId: Id<"vendorOrganizations">,
   scopeKey: string,
 ) {
+  if (await scorerHistoryNeedsMigration(ctx, projectId)) {
+    return { completion: null, hasConflict: false };
+  }
   const rows = await ctx.db.query("scorerCompletions")
     .withIndex("by_project_vendor_id_scope", (q) => q.eq("projectId", projectId).eq("vendorId", vendorId).eq("scorerScopeKey", scopeKey))
     .take(2);

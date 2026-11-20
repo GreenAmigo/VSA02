@@ -346,6 +346,42 @@ describe("Phase 2 access checks", () => {
       .toMatchObject({ totalVendors: 1, submittedVendors: 1 });
   });
 
+  test("scoring summary hides partially migrated scorer history", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    await t.run(async (ctx) => {
+      const contact = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!contact?.vendorId) throw new Error("Missing test organisation");
+      for (const vendorId of [contact.vendorId, undefined]) {
+        await ctx.db.insert("scorerCompletions", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId,
+          vendorUserId: "northwind-vendor", scorerScopeKey: "individual:beta-scorer",
+          scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual", status: "completed",
+          answeredCount: 1, totalRequirements: 1, updatedByUserId: "beta-scorer",
+          updatedByDisplayName: "Beta Scorer", updatedAt: 1,
+        });
+        await ctx.db.insert("scorerScores", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId,
+          vendorUserId: "northwind-vendor", scorerScopeKey: "individual:beta-scorer",
+          scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual", requirementId: "REQ",
+          score: 1, enteredByUserId: "beta-scorer", enteredByDisplayName: "Beta Scorer",
+          enteredAt: 1, updatedAt: 1,
+        });
+      }
+    });
+    const summary = await t.withIdentity({ tokenIdentifier: "beta-admin" })
+      .query(api.access.listWorkspaceScoringSummary, { companyId: seeded.companyBId });
+    expect(summary.find((row) => row.projectId === seeded.projectBId))
+      .toMatchObject({ scorerHistoryMigrationRequired: true, completedScorerVendorPairs: 0 });
+    const workboard = await t.withIdentity({ tokenIdentifier: "beta-scorer" })
+      .query(api.scores.getScorerWorkboard, { projectId: seeded.projectBId });
+    expect(workboard.scorerHistoryMigrationRequired).toBe(true);
+    expect(workboard.vendors[0]).toMatchObject({ status: "not-started", answeredCount: 0 });
+  });
+
   test("a user can only see companies and projects they belong to", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
