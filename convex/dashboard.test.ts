@@ -8,6 +8,36 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 7 dashboard totals", () => {
+  test("conflicting organisation answers are excluded, even after the contact leaves", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      confirm: true,
+    });
+    await admin.mutation(api.scores.submitScore, {
+      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1,
+    });
+    const vendorId = await t.run(async (ctx) => {
+      const member = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+      if (!member?.vendorId) throw new Error("Missing test organisation");
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId: member.vendorId,
+        vendorUserId: "old-contact", requirementId: "REQ", score: 1, enteredBy: "old-contact", enteredAt: 1,
+      });
+      await ctx.db.patch(member._id, { isActive: false });
+      return member.vendorId;
+    });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    const row = dashboard.rows.find((entry) => entry.vendorId === vendorId);
+    expect(row).toMatchObject({ vendorUserId: null, hasConflicts: true, total: 0, scoredCount: 0, missingCount: 1 });
+  });
+
   test("a matching name does not authorize dashboard access", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {

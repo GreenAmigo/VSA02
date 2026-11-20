@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { findVendorMembershipForIdentity, getProjectVendors } from "./projectVendors";
+import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./vendorAnswers";
 
 function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
   return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
@@ -76,16 +77,12 @@ export const getProjectDashboard = query({
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
       .collect();
 
-    const scores = await ctx.db
-      .query("scores")
-      .withIndex("by_project_requirement", (q) => q.eq("projectId", args.projectId))
-      .collect();
-
-    const vendors = (await getProjectVendors(ctx, project)).filter((vendor) => vendor.primaryContact !== null);
+    const answerState = await getProjectVendorAnswerState(ctx, project);
+    const vendors = await getProjectVendors(ctx, project);
 
     const rows = vendors.map((vendor) => {
-      const vendorUserId = vendor.primaryContact!.userId;
-      const vendorScores = scores.filter((entry) => entry.vendorUserId === vendorUserId);
+      const vendorUserId = vendor.primaryContact?.userId ?? null;
+      const vendorScores = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
       const userStoryTotal = vendorScores
         .filter((entry) => {
           const requirement = requirements.find((item) => item.requirementId === entry.requirementId);
@@ -118,8 +115,10 @@ export const getProjectDashboard = query({
       const total = userStoryTotal + nfrTotal - unmetCount;
 
       return {
+        vendorId: vendor.vendorId,
         vendorUserId,
         vendorName: vendor.vendorName,
+        hasConflicts: [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
         userStoryTotal,
         nfrTotal,
         total,
@@ -129,7 +128,7 @@ export const getProjectDashboard = query({
       };
     });
 
-    const leadingVendor = rows.reduce<{ vendorUserId: string; total: number } | null>((best, row) => {
+    const leadingVendor = rows.reduce<{ vendorUserId: string | null; total: number } | null>((best, row) => {
       if (!best || row.total > best.total) {
         return { vendorUserId: row.vendorUserId, total: row.total };
       }
@@ -139,6 +138,7 @@ export const getProjectDashboard = query({
     return {
       projectId: args.projectId,
       companyId: project.companyId,
+      migrationRequired: answerState.migrationRequired,
       canViewScorerDetails: member.role === "company-admin" || member.role === "company-scorer",
       leadingVendorUserId: leadingVendor?.vendorUserId ?? null,
       rows,
