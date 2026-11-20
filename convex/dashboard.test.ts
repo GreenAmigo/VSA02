@@ -51,6 +51,7 @@ describe("Phase 7 dashboard totals", () => {
     });
     const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
     expect(dashboard.migrationRequired).toBe(true);
+    expect(dashboard.leadingVendorUserId).toBeNull();
     expect(dashboard.rows[0]).toMatchObject({ total: 0, scoredCount: 0, missingCount: 1 });
     const panel = await t.withIdentity({ tokenIdentifier: "northwind-vendor" }).query(
       api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId },
@@ -87,6 +88,7 @@ describe("Phase 7 dashboard totals", () => {
     const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
     const row = dashboard.rows.find((entry) => entry.vendorId === vendorId);
     expect(row).toMatchObject({ vendorUserId: null, hasConflicts: true, total: 0, scoredCount: 0, missingCount: 1 });
+    expect(dashboard.leadingVendorUserId).toBeNull();
   });
 
   test("a matching name does not authorize dashboard access", async () => {

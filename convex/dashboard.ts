@@ -140,7 +140,7 @@ export const getProjectDashboard = query({
       companyId: project.companyId,
       migrationRequired: answerState.migrationRequired,
       canViewScorerDetails: member.role === "company-admin" || member.role === "company-scorer",
-      leadingVendorUserId: leadingVendor?.vendorUserId ?? null,
+      leadingVendorUserId: answerState.migrationRequired || rows.some((row) => row.hasConflicts) ? null : leadingVendor?.vendorUserId ?? null,
       rows,
     };
   },
