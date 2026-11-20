@@ -524,6 +524,15 @@ function VendorDeadlineNotice({ migrationRequired, hasConflict }: { migrationReq
   );
 }
 
+function VendorAmendmentNotice({ migrationRequired }: { migrationRequired?: boolean }) {
+  if (!migrationRequired) return null;
+  return (
+    <div role="alert" className="my-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+      Older vendor answer change history needs migration and is hidden until a workspace admin resolves it.
+    </div>
+  );
+}
+
 function VendorResponsesPanel({ projectId }: { projectId: string }) {
   const selectedReviewRef = useRef<HTMLDivElement | null>(null);
   const vendorResponses = useQuery((api as any).scores.listProjectVendorResponses, { projectId: projectId as any }) as
@@ -597,6 +606,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
       deadlineLocked: boolean;
       migrationRequired?: boolean;
       hasConflicts?: boolean;
+      amendmentMigrationRequired?: boolean;
       scorerHistoryMigrationRequired?: boolean;
       hasScorerHistoryConflicts?: boolean;
       rows: Array<{
@@ -827,6 +837,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
               </div>
 
               <ScoringHistoryNotice migrationRequired={selectedReview.scorerHistoryMigrationRequired} hasConflicts={selectedReview.hasScorerHistoryConflicts} />
+              <VendorAmendmentNotice migrationRequired={selectedReview.amendmentMigrationRequired} />
               {!selectedVendorUserId ? <p className="mb-3 text-sm text-amber-200">One active contact is needed to amend or reopen answers.</p> : null}
               <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
                 <label className="text-sm text-slate-300">
@@ -3042,6 +3053,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       projectId: string;
       migrationRequired?: boolean;
       hasVendorAnswerConflicts?: boolean;
+      amendmentMigrationRequired?: boolean;
       scorerHistoryMigrationRequired?: boolean;
       hasScorerHistoryConflicts?: boolean;
       vendors: Array<{ vendorId: string; vendorName: string; vendorUserId: string | null; vendorContactName: string | null }>;
@@ -3555,6 +3567,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
 
             <VendorAnswerNotice migrationRequired={requirementComparison?.migrationRequired} hasConflicts={requirementComparison?.hasVendorAnswerConflicts} />
+            <VendorAmendmentNotice migrationRequired={requirementComparison?.amendmentMigrationRequired} />
             <ScoringHistoryNotice migrationRequired={requirementComparison?.scorerHistoryMigrationRequired} hasConflicts={requirementComparison?.hasScorerHistoryConflicts} />
             {requirementComparison === undefined ? (
               <p className="text-sm text-slate-400">Loading comparison grid...</p>

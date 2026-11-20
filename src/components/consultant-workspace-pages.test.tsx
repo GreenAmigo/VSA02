@@ -391,6 +391,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     useQueryMock.mockImplementationOnce(() => ({
       scorerHistoryMigrationRequired: true,
       hasScorerHistoryConflicts: true,
+      amendmentMigrationRequired: true,
       vendors: [
         { vendorId: "vendor-1", vendorName: "First vendor", vendorUserId: null, vendorContactName: null },
         { vendorId: "vendor-2", vendorName: "Second vendor", vendorUserId: null, vendorContactName: null },
@@ -410,6 +411,7 @@ describe("ConsultantWorkspaceProjectsPage", () => {
     expect(html).toContain("Combined: 0");
     expect(html).toContain("Some older company scores and completion records need migration");
     expect(html).toContain("Some company scoring records conflict");
+    expect(html).toContain("Older vendor answer change history needs migration");
   });
 
   test("vendor responses can be opened when the organisation has no active contact", () => {
