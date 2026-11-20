@@ -48,7 +48,6 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
 
   const userIds = getIdentityUserIds(identity);
   const normalizedEmail = identity.email?.trim().toLowerCase();
-  const normalizedName = identity.name?.trim();
 
   const member = await ctx.db
     .query("projectMembers")
@@ -56,7 +55,6 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .first();
 
@@ -70,7 +68,6 @@ async function assertProjectDeadlineAccess(ctx: any, projectId: string) {
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
       ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-      ...(normalizedName ? [q.eq(q.field("displayName"), normalizedName)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();

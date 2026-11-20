@@ -8,6 +8,19 @@ import { api, internal } from "./_generated/api";
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
 describe("Phase 8 deadline and reminder logic", () => {
+  test("a matching name does not authorize deadline access", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    for (const name of ["Beta Admin", "Beta Scorer"]) {
+      const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name });
+      await expect(outsider.query(api.deadlines.listProjectDeadlines, { projectId: seeded.projectBId }))
+        .rejects.toThrow("Project access denied");
+    }
+  });
+
   test("vendor deadlines use active contacts of assigned organisations", async () => {
     const t = convexTest({ schema, modules });
     const seeded = await t.mutation(internal.access.seedScenario, {
