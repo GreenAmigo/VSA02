@@ -73,6 +73,9 @@ This is a multi-company app for IT vendor selection. Each company has its own us
 - Use an authentication service that supports per-company SSO and works with Convex (e.g. WorkOS or Clerk). Recommend one and explain the choice and any costs in plain English.
 - Build with a simple temporary login first, and make SSO easy to switch on per company later.
 - Vendors: separate external login (e.g. emailed sign-in link), restricted to their own project and their own scores only.
+- Vendor contacts are invited from an organisation's Manage contacts page. Adding an organisation with an email stores the email but does not send or create an invitation.
+- A contact's workspace membership links to its vendor organisation; project access requires that organisation to be assigned to the project. Conflicting workspace invitations or memberships must not choose an organisation by order.
+- Existing incorrect links require the development/preview-only contact repair and, where evidence conflicts, explicitly confirmed mappings. Repairing a link can change which organisation existing contact-keyed answers appear under; inspect those answers before running it.
 
 ## Build status
 
