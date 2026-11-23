@@ -911,6 +911,8 @@ export const getCurrentUserAccess = query({
         role: null,
         isConsultant: false,
         companyIds: [] as string[],
+        consultantDisplayName: null,
+        profiles: [] as Array<{ companyId: string; role: string; displayName: string; departmentName: string | null }>,
       };
     }
 
@@ -944,7 +946,21 @@ export const getCurrentUserAccess = query({
       companyIds = allCompanies.filter((company) => company.isActive !== false).map((company) => company._id);
     }
 
+    // Per-workspace name and department, for the "Signed in" panel.
+    const profiles: Array<{ companyId: string; role: string; displayName: string; departmentName: string | null }> = [];
+    for (const member of memberships) {
+      const department = member.departmentId ? await ctx.db.get(member.departmentId) : null;
+      profiles.push({
+        companyId: member.companyId,
+        role: member.role,
+        displayName: member.displayName,
+        departmentName: department && department.isActive !== false ? department.name : null,
+      });
+    }
+
     return {
+      consultantDisplayName: consultantRecord?.displayName ?? null,
+      profiles,
       email: identity.email ?? memberships[0]?.email ?? consultantRecord?.email ?? null,
       displayName: identity.name ?? memberships[0]?.displayName ?? consultantRecord?.displayName ?? null,
       tokenIdentifier: identity.tokenIdentifier,

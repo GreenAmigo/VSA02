@@ -10,6 +10,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { parseRequirementFileWithIssues, toRequirementImportRows, type RequirementImportRow } from "../lib/projectRequirements";
 import { SignOutButton } from "./sign-out-button";
+import { SignedInPanel } from "./signed-in-panel";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -1603,6 +1604,7 @@ export function WorkspaceShell({
   serverRole,
   serverLookupId,
   showConsultantLinks = true,
+  access,
   children,
 }: {
   workspace: WorkspaceShellWorkspace;
@@ -1613,6 +1615,7 @@ export function WorkspaceShell({
   serverRole?: string | null;
   serverLookupId?: string | null;
   showConsultantLinks?: boolean;
+  access?: any;
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1658,7 +1661,7 @@ export function WorkspaceShell({
         />
       ) : null}
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -1682,13 +1685,7 @@ export function WorkspaceShell({
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-          <div className="mt-3 space-y-2 text-sm text-slate-300">
-            <p className="truncate" title={userEmail ?? "Unknown user"}>{userEmail ?? "Unknown user"}</p>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{roleLabel}</p>
-          </div>
-        </div>
+        <SignedInPanel access={access} companyId={workspace.id} fallbackEmail={userEmail} roleLabel={roleLabel} className="mt-6" />
 
         {role === "consultant" && showConsultantLinks ? (
           <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -1726,7 +1723,7 @@ export function WorkspaceShell({
       </aside>
 
       <main className="min-h-screen lg:ml-80">
-        <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+        <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="mb-3 flex items-center gap-2 lg:hidden">
@@ -1940,7 +1937,7 @@ export function ConsultantWorkspaceDirectoryPage() {
         />
       ) : null}
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -1981,18 +1978,11 @@ export function ConsultantWorkspaceDirectoryPage() {
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-          <div className="mt-3 space-y-2 text-sm text-slate-300">
-            <p className="truncate" title={access.email ?? user?.email ?? "Unknown user"}>{access.email ?? user?.email ?? "Unknown user"}</p>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{displayRole}</p>
-          </div>
-          <SignOutButton className="mt-2" />
-        </div>
+        <SignedInPanel access={access} fallbackEmail={user?.email} roleLabel={displayRole} className="mt-6" />
       </aside>
 
       <main className="min-h-screen lg:ml-80">
-      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0 flex-1">
             <div className="mb-3 flex items-center gap-2 lg:hidden">
@@ -2255,7 +2245,7 @@ export function ConsultantActivityLogPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur">
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Consultant view</p>
@@ -2429,6 +2419,7 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={workspace}
       activeTab="overview"
       breadcrumbs={isVendorView
@@ -2697,6 +2688,7 @@ export function ConsultantWorkspaceDepartmentsPage({ companyId }: { companyId: s
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={workspace}
       activeTab="departments"
       breadcrumbs={[
@@ -2838,6 +2830,7 @@ export function ConsultantWorkspaceProjectsPage({ companyId }: { companyId: stri
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -3317,6 +3310,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -4114,6 +4108,7 @@ export function VendorProjectAnswerRequirementsPage({ companyId, projectId }: { 
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -4473,6 +4468,7 @@ export function ConsultantWorkspacePeoplePage({ companyId }: { companyId: string
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -4810,6 +4806,7 @@ export function ConsultantWorkspaceVendorContactsPage({ companyId, vendorId }: {
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -4937,6 +4934,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
     const companyName = company?.name ?? "Unknown workspace";
     return (
       <WorkspaceShell
+      access={access}
         workspace={{
           id: companyId,
           slug: companyId,
@@ -5033,6 +5031,7 @@ export function ConsultantWorkspaceVendorsPage({ companyId }: { companyId: strin
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -5127,6 +5126,7 @@ export function ConsultantWorkspaceRequirementsPage({ companyId }: { companyId: 
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,
@@ -5218,6 +5218,7 @@ export function ConsultantWorkspaceScoringPage({ companyId }: { companyId: strin
 
   return (
     <WorkspaceShell
+      access={access}
       workspace={{
         id: companyId,
         slug: companyId,

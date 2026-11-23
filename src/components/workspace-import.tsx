@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { parseWorkspaceCsv } from "@/lib/workspaceImport";
 import { SignOutButton } from "./sign-out-button";
+import { SignedInPanel } from "./signed-in-panel";
 
 const emptyJsonTemplate = "[]";
 const emptyCsvTemplate = `workspace_id,workspace_slug,workspace_name,project_name
@@ -80,7 +81,7 @@ export function WorkspaceImportForm() {
         />
       ) : null}
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-80 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-950/90 p-5 transition-transform duration-200 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-8">
           <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-sky-300">Authorized</p>
           <div className="mt-3 flex items-center justify-between gap-2">
@@ -110,18 +111,11 @@ export function WorkspaceImportForm() {
           </div>
         </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-          <div className="mt-3 space-y-2 text-sm text-slate-300">
-            <p className="truncate" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
-          </div>
-          <SignOutButton className="mt-2" />
-        </div>
+        <SignedInPanel access={access} className="mt-6" />
       </aside>
 
       <main className="min-h-screen lg:ml-80">
-      <header className="border-b border-slate-800 bg-slate-950/60 px-6 py-5">
+      <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0 flex-1">
             <div className="mb-3 flex items-center gap-2 lg:hidden">
@@ -136,17 +130,8 @@ export function WorkspaceImportForm() {
             <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Seed import</p>
             <h1 className="mt-2 text-2xl font-semibold text-white">Bulk data import</h1>
           </div>
-          <div className="flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-900 p-3 xl:ml-auto">
-            <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Signed in</p>
-            <p className="truncate text-sm font-medium text-white" title={access?.email ?? "Unknown user"}>{access?.email ?? "Unknown user"}</p>
-            <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{access?.isConsultant ? "VS Consultant" : access?.role ?? "User"}</p>
-            <Link
-              href="/workspaces"
-              className="mt-1 inline-flex w-fit rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs text-sky-200 hover:border-sky-400"
-            >
-              All workspaces
-            </Link>
-            <SignOutButton className="mt-1" />
+          <div className="flex w-full justify-start xl:w-auto xl:justify-end xl:ml-auto">
+            <SignOutButton />
           </div>
         </div>
       </header>

@@ -80,6 +80,7 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
 
   const shell = (children: React.ReactNode) => (
     <WorkspaceShell
+      access={access}
       workspace={{ id: companyId, slug: companyId, name: company.name, isTestData: false, projects: [], people: [], vendors: [], requirements: [], scores: [] }}
       activeTab="projects"
       breadcrumbs={breadcrumbs}
