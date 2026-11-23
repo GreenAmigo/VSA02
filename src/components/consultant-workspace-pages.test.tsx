@@ -403,6 +403,10 @@ describe("ConsultantWorkspaceProjectsPage", () => {
           { vendorId: "vendor-2", vendorUserId: null, scorerAverage: 0, scorerScoredCount: 1, totalScorers: 1, vendorScore: 0 },
         ],
       }],
+      totalsByVendor: [
+        { vendorId: "vendor-1", vendorUserId: null, scorer: { requirements: 9, nfr: 0, combined: 9 }, vendor: { requirements: 9, nfr: 0, combined: 9 } },
+        { vendorId: "vendor-2", vendorUserId: null, scorer: { requirements: 0, nfr: 0, combined: 0 }, vendor: { requirements: 0, nfr: 0, combined: 0 } },
+      ],
     }));
     const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
     expect(html).toContain("First vendor");
@@ -437,6 +441,10 @@ describe("ConsultantWorkspaceProjectsPage", () => {
           { vendorId: "vendor-2", scorerAverage: 0, scorerScoredCount: 1, totalScorers: 1, vendorScore: 0 },
         ],
       }],
+      totalsByVendor: [
+        { vendorId: "vendor-1", vendorUserId: null, scorer: { requirements: 9, nfr: 0, combined: 9 }, vendor: { requirements: 9, nfr: 0, combined: 9 } },
+        { vendorId: "vendor-2", vendorUserId: null, scorer: { requirements: 0, nfr: 0, combined: 0 }, vendor: { requirements: 0, nfr: 0, combined: 0 } },
+      ],
     }));
     const html = renderToStaticMarkup(<ConsultantWorkspaceProjectDetailPage companyId="company-1" projectId="project-1" />);
     expect(html.includes("bg-emerald-500/15")).toBe(showsWinner);

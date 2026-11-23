@@ -15,6 +15,7 @@ import type * as deadlines from "../deadlines.js";
 import type * as projectVendors from "../projectVendors.js";
 import type * as projectViews from "../projectViews.js";
 import type * as requirements from "../requirements.js";
+import type * as scoreTotals from "../scoreTotals.js";
 import type * as scorerHistory from "../scorerHistory.js";
 import type * as scorerNames from "../scorerNames.js";
 import type * as scores from "../scores.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   projectVendors: typeof projectVendors;
   projectViews: typeof projectViews;
   requirements: typeof requirements;
+  scoreTotals: typeof scoreTotals;
   scorerHistory: typeof scorerHistory;
   scorerNames: typeof scorerNames;
   scores: typeof scores;

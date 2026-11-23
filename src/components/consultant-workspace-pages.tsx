@@ -28,7 +28,7 @@ type CompanyId = Id<"companies">;
 
 type WorkspaceBreadcrumb = { label: string; href?: string };
 
-function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
+export function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
     <span className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${className}`}>
       {label}
@@ -55,11 +55,11 @@ function fromDateInputValue(value: string) {
   return new Date(value).getTime();
 }
 
-function requirementTypeLabel(type: "user-story" | "nfr") {
+export function requirementTypeLabel(type: "user-story" | "nfr") {
   return type === "user-story" ? "Requirement" : "NFR";
 }
 
-function requirementTypePillClassName(type: "user-story" | "nfr") {
+export function requirementTypePillClassName(type: "user-story" | "nfr") {
   return type === "user-story"
     ? "border-sky-500/40 bg-sky-500/10 text-sky-200"
     : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
@@ -71,7 +71,7 @@ function requirementCardClassName(type: "user-story" | "nfr") {
     : "border-emerald-500/25 bg-emerald-500/5";
 }
 
-function priorityLabel(priority: 9 | 3 | 1 | 0) {
+export function priorityLabel(priority: 9 | 3 | 1 | 0) {
   if (priority === 9) {
     return "Must";
   }
@@ -84,7 +84,7 @@ function priorityLabel(priority: 9 | 3 | 1 | 0) {
   return "Out of scope";
 }
 
-function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
+export function priorityPillClassName(priority: 9 | 3 | 1 | 0) {
   if (priority === 9) {
     return "border-rose-500/50 bg-rose-500/10 text-rose-200";
   }
@@ -154,7 +154,7 @@ function formatScoreValue(value: number) {
   return `${Math.round(value * 100) / 100}`;
 }
 
-function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
+export function getVendorLifecycleLabel(params: { status: "not-started" | "in-progress" | "submitted"; deadlineLocked: boolean }) {
   if (params.deadlineLocked) {
     return "CLOSED";
   }
@@ -1594,7 +1594,7 @@ function WorkspaceBreadcrumbs({ items }: { items: WorkspaceBreadcrumb[] }) {
   );
 }
 
-function WorkspaceShell({
+export function WorkspaceShell({
   workspace,
   activeTab,
   breadcrumbs,
@@ -3289,37 +3289,14 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
   });
   const comparisonUserStoryRows = comparisonRows.filter((row) => row.type === "user-story");
   const comparisonNfrRows = comparisonRows.filter((row) => row.type === "nfr");
-  const comparisonTotalsByVendor = (requirementComparison?.vendors ?? []).map((vendor) => {
-    let requirementsTotal = 0;
-    let nfrTotal = 0;
-    for (const requirement of comparisonRows) {
-      if (requirement.status === "withdrawn" || requirement.priority === 0) {
-        continue;
-      }
-
-      const cell = requirement.cells.find((item) => item.vendorId === vendor.vendorId);
-      if (!cell) {
-        continue;
-      }
-
-      const value = comparisonMode === "scorer" ? cell.scorerAverage : cell.vendorScore;
-      if (typeof value !== "number") {
-        continue;
-      }
-
-      const weighted = requirement.priority * value;
-      if (requirement.type === "nfr") {
-        nfrTotal += weighted;
-      } else {
-        requirementsTotal += weighted;
-      }
-    }
-
+  // Totals come from the server's shared calculation (convex/scoreTotals.ts), never recalculated here.
+  const comparisonTotalsByVendor = (requirementComparison?.totalsByVendor ?? []).map((row) => {
+    const totals = comparisonMode === "scorer" ? row.scorer : row.vendor;
     return {
-      vendorId: vendor.vendorId,
-      requirementsTotal,
-      nfrTotal,
-      combinedTotal: requirementsTotal + nfrTotal,
+      vendorId: row.vendorId,
+      requirementsTotal: totals.requirements,
+      nfrTotal: totals.nfr,
+      combinedTotal: totals.combined,
     };
   });
   const bestComparisonCombined = comparisonTotalsByVendor.reduce((max, row) => Math.max(max, row.combinedTotal), Number.NEGATIVE_INFINITY);
@@ -3385,6 +3362,11 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </div>
 
         <p className="text-sm text-slate-300">{(isVendorView ? vendorScoringPanel?.projectDescription : project.description) || "No description for this project yet."}</p>
+        {!isVendorView && canManageProjects ? (
+          <Link href={`/workspaces/${companyId}/projects/${projectId}/dashboard`} className="mt-4 inline-block rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+            Open dashboard
+          </Link>
+        ) : null}
       </section>
 
       {!isVendorView && canManageProjects ? <ProjectEditPanel companyId={companyId} projectId={projectId} project={project} /> : null}
