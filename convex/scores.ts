@@ -1,5 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
-import { computeVendorTotals } from "./scoreTotals";
+import { computeVendorTotals, scorerOutcome } from "./scoreTotals";
 import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -1318,6 +1318,7 @@ export const getProjectRequirementComparison = query({
           vendorId: vendor.vendorId,
           vendorUserId: vendor.vendorUserId,
           scorerAverage,
+          scorerOutcome: scorerAverage === null ? null : scorerOutcome(scorerAverage),
           scorerScoredCount,
           totalScorers,
           scorerDetails,

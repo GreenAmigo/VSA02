@@ -37,11 +37,11 @@ describe("Phase 6b project dashboard", () => {
       confirm: true,
     });
     // Two assigned scorers.
-    //   R1 (9): scorer1 1, scorer2 0 -> avg 0.5 -> 4.5
-    //   R2 (3): scorer1 1 only       -> avg 1   -> 3   (partly scored)
-    //   N1 (9): scorer1 1, scorer2 1 -> avg 1   -> 9
+    //   R1 (9): scorer1 1, scorer2 0 -> avg 0.5 -> Met -> 9
+    //   R2 (3): scorer1 1 only       -> avg 1   -> Met -> 3   (partly scored)
+    //   N1 (9): scorer1 1, scorer2 1 -> avg 1   -> Met -> 9
     //   R0 (0): out of scope         -> ignored
-    // Scorers: requirements 7.5, NFR 9, combined 16.5. Vendor self: R1 = 1 -> 9.
+    // Scorers: requirements 12, NFR 9, combined 21. Vendor self: R1 = 1 -> 9.
     await t.run(async (ctx) => {
       await ctx.db.insert("projectMembers", {
         companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "beta-scorer-2",
@@ -67,7 +67,7 @@ describe("Phase 6b project dashboard", () => {
     expect(dashboard.vendors).toHaveLength(1);
     const north = dashboard.vendors[0];
     expect(north.vendorName).toBe("Northwind Labs");
-    expect(north.totals.scorers).toEqual({ requirements: 7.5, nfr: 9, combined: 16.5, must: 13.5, should: 3, could: 0 });
+    expect(north.totals.scorers).toEqual({ requirements: 12, nfr: 9, combined: 21, must: 18, should: 3, could: 0 });
     expect(north.totals.vendorSelf.combined).toBe(9);
     expect(north.totals.coverage).toEqual({ scorableRequirements: 3, fullyScored: 2, partlyScored: 1, unscored: 0, vendorAnswered: 1 });
 

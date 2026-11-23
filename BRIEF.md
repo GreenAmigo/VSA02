@@ -151,7 +151,7 @@ The app uses a single canonical consultant home route for the workspace director
 
 ### Phase 6b status and handover (built with Claude, Nov 2026)
 - ONE scoring calculation: `convex/scoreTotals.ts` (pure functions, hand-worked tests in `convex/scoreTotals.test.ts`). Used by `api.dashboard.getProjectDashboard` AND `api.scores.getProjectRequirementComparison`; the project page's comparison totals read the server's `totalsByVendor`. Never add another copy of the totals maths.
-- Official total = sum of priority x average of company scorers' scores; vendor self-scores shown alongside for comparison only. Out of scope (0) and withdrawn are excluded; nothing is ever subtracted. Totals rounded to 2 decimal places.
+- Official total = sum of priority x the scorers' VERDICT per requirement: average the scorers' 0/1 scores, then 0.5 or more = Met (1), under 0.5 = Not Met (0). A 50/50 split counts as Met (decided by the product owner, Nov 2026). Examples: 1 of 2 Met -> Met; 4 of 8 -> Met; 3 of 8 -> Not Met. Vendor self-scores shown alongside for comparison only. Out of scope (0) and withdrawn are excluded; nothing is ever subtracted. Totals rounded to 2 decimal places.
 - Leader: highest combined total among vendors with any score; ties report all tied vendors; "Provisional" until every assigned scorer has completed every vendor; hidden when migrations are pending or records conflict.
 - Dashboard access: consultants and company admins of the workspace only (scorers and vendors rejected on the server).
 - Done: 6b(a) totals query, 6b(b) vendor status / unscored / scorer progress, 6b(c) dashboard page.

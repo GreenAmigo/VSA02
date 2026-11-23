@@ -3072,6 +3072,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
           vendorId: string;
           vendorUserId: string | null;
           scorerAverage: number | null;
+          scorerOutcome?: 0 | 1 | null;
           scorerScoredCount: number;
           totalScorers: number;
           scorerDetails: Array<{ scorerName: string; scorerDepartmentName: string; score: 0 | 1; comment: string; enteredAt: number }>;
@@ -3608,7 +3609,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                           const valueText = comparisonMode === "scorer"
                             ? (cell.scorerAverage === null
                               ? "Unscored"
-                              : `${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                              : `${(cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met"} · avg ${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
                             : (cell.vendorScore === null
                               ? "Unscored"
                               : `${cell.vendorScore}`);
@@ -3652,7 +3653,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                           const valueText = comparisonMode === "scorer"
                             ? (cell.scorerAverage === null
                               ? "Unscored"
-                              : `${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                              : `${(cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met"} · avg ${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
                             : (cell.vendorScore === null
                               ? "Unscored"
                               : `${cell.vendorScore}`);

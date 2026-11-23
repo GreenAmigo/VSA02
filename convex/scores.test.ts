@@ -771,10 +771,11 @@ describe("Phase 5 score audit trail", () => {
     const northwindTotals = comparison.totalsByVendor.find((row: any) => row.vendorUserId === "northwind-vendor");
     const southwindTotals = comparison.totalsByVendor.find((row: any) => row.vendorUserId === "southwind-vendor");
 
-    // Hand-checked scorer totals: (REQ p9 * 0.5) + (NFR p3 * 1) = 7.5
-    expect(northwindTotals.scorer.requirements).toBe(4.5);
+    // CMP-REQ-001 (Must, 9): scorers split 1/0 -> avg 0.5 -> Met -> 9; CMP-NFR-001 (Should, 3): Met -> 3.
+    expect(northwindReqCell.scorerOutcome).toBe(1);
+    expect(northwindTotals.scorer.requirements).toBe(9);
     expect(northwindTotals.scorer.nfr).toBe(3);
-    expect(northwindTotals.scorer.combined).toBe(7.5);
+    expect(northwindTotals.scorer.combined).toBe(12);
 
     // Hand-checked vendor totals: (REQ p9 * 1) + (NFR p3 * 1) = 12
     expect(northwindTotals.vendor.requirements).toBe(9);
@@ -785,8 +786,8 @@ describe("Phase 5 score audit trail", () => {
     expect(southwindTotals.scorer.combined).toBe(0);
     expect(southwindTotals.vendor.combined).toBe(3);
 
-    // Mode switch changes values (scorer average vs vendor self-score)
-    expect(northwindTotals.scorer.combined).not.toBe(northwindTotals.vendor.combined);
+    // Mode switch changes values (scorers' verdict vs vendor self-score)
+    expect(southwindTotals.scorer.combined).not.toBe(southwindTotals.vendor.combined);
     expect(comparison.scorerBestVendorUserIds).toContain("northwind-vendor");
     expect(comparison.vendorBestVendorUserIds).toContain("northwind-vendor");
 

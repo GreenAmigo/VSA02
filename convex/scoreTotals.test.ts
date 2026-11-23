@@ -1,10 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { averageScorerScore, computeVendorTotals, pickLeaders, type TotalsRequirement } from "./scoreTotals";
+import { averageScorerScore, computeVendorTotals, pickLeaders, scorerOutcome, type TotalsRequirement } from "./scoreTotals";
 
 // Hand-worked dataset (3 assigned scorers: A, B, C)
-//   R1 user story, Must (9)   scorers A1 B1 C0 -> avg 2/3 -> 6      vendor 1 -> 9
-//   R2 user story, Should (3) scorers A1 B0    -> avg 1/2 -> 1.5    vendor 0 -> 0
-//   R3 NFR, Must (9)          scorers A1 B1 C1 -> avg 1   -> 9      vendor 1 -> 9
+// Scorers' verdict per requirement: average >= 0.5 is Met (1), otherwise Not Met (0).
+//   R1 user story, Must (9)   scorers A1 B1 C0 -> avg 2/3 -> Met -> 9   vendor 1 -> 9
+//   R2 user story, Should (3) scorers A1 B0    -> avg 1/2 -> Met -> 3   vendor 0 -> 0
+//   R3 NFR, Must (9)          scorers A1 B1 C1 -> avg 1   -> Met -> 9   vendor 1 -> 9
 //   R4 NFR, Could (1)         no scorer scores -> unscored          vendor 1 -> 1
 //   R0 out of scope (0)       ignored everywhere
 //   RW withdrawn              ignored everywhere
@@ -35,8 +36,8 @@ describe("dashboard scoring maths", () => {
     ],
   });
 
-  test("scorers' totals: priority x average, out of scope and withdrawn excluded, nothing subtracted", () => {
-    expect(totals.scorers).toEqual({ requirements: 7.5, nfr: 9, combined: 16.5, must: 15, should: 1.5, could: 0 });
+  test("scorers' totals: priority x Met/Not Met verdict, out of scope and withdrawn excluded, nothing subtracted", () => {
+    expect(totals.scorers).toEqual({ requirements: 12, nfr: 9, combined: 21, must: 18, should: 3, could: 0 });
   });
 
   test("vendor self-score totals are calculated the same way", () => {
@@ -51,21 +52,20 @@ describe("dashboard scoring maths", () => {
     expect(averageScorerScore([s("R1", "A", 1), s("R1", "A", 0), s("R1", "B", 1)])).toEqual({ average: 0.5, count: 2 });
   });
 
-  test("awkward averages are rounded to 2 decimal places", () => {
-    const thirds = computeVendorTotals({
-      requirements: [{ requirementId: "R", type: "user-story", priority: 3, status: "active" }],
-      assignedScorerCount: 3,
-      scorerScores: [s("R", "A", 1), s("R", "B", 0), s("R", "C", 0)],
+  test("verdict: 0.5 or more is Met, under 0.5 is Not Met", () => {
+    expect(scorerOutcome(1 / 2)).toBe(1);
+    expect(scorerOutcome(4 / 8)).toBe(1);
+    expect(scorerOutcome(3 / 8)).toBe(0);
+    expect(scorerOutcome(1 / 3)).toBe(0);
+    expect(scorerOutcome(0)).toBe(0);
+    const eight = (mets: number) => computeVendorTotals({
+      requirements: [{ requirementId: "R", type: "user-story", priority: 9, status: "active" }],
+      assignedScorerCount: 8,
+      scorerScores: ["A", "B", "C", "D", "E", "F", "G", "H"].map((key, i) => s("R", key, i < mets ? 1 : 0)),
       vendorAnswers: [],
-    });
-    expect(thirds.scorers.combined).toBe(1);
-    const sevenths = computeVendorTotals({
-      requirements: [{ requirementId: "R", type: "user-story", priority: 1, status: "active" }],
-      assignedScorerCount: 7,
-      scorerScores: ["A", "B", "C", "D", "E", "F", "G"].map((key, i) => s("R", key, i === 0 ? 1 : 0)),
-      vendorAnswers: [],
-    });
-    expect(sevenths.scorers.combined).toBe(0.14);
+    }).scorers.combined;
+    expect(eight(4)).toBe(9);
+    expect(eight(3)).toBe(0);
   });
 
   test("leader: highest combined total, ties reported, no leader before anyone scores", () => {

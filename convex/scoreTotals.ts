@@ -61,6 +61,15 @@ export function averageScorerScore(
   return { average: sum / count, count };
 }
 
+/**
+ * The scorers' verdict for one requirement: Met (1) when the average is 0.5 or more,
+ * Not Met (0) otherwise. A 50/50 split counts as Met.
+ * e.g. 1 of 2 Met -> Met; 4 of 8 -> Met; 3 of 8 -> Not Met.
+ */
+export function scorerOutcome(average: number): 0 | 1 {
+  return average >= 0.5 ? 1 : 0;
+}
+
 function emptyBreakdown(): TotalsBreakdown {
   return { requirements: 0, nfr: 0, combined: 0, must: 0, should: 0, could: 0 };
 }
@@ -92,7 +101,7 @@ function finish(breakdown: TotalsBreakdown): TotalsBreakdown {
 
 /**
  * Weighted totals for ONE vendor organisation.
- * - scorers: priority x average of company scorers' scores (the official total)
+ * - scorers: priority x the scorers' verdict (Met if their average is 0.5 or more) - the official total
  * - vendorSelf: priority x the vendor's own answer (for comparison only)
  * Nothing is ever subtracted: a 0 score simply adds nothing.
  */
@@ -120,7 +129,7 @@ export function computeVendorTotals(input: {
     coverage.scorableRequirements += 1;
 
     const { average, count } = averageScorerScore(scorerByRequirement.get(requirement.requirementId) ?? []);
-    if (average !== null) addWeighted(scorers, requirement, average);
+    if (average !== null) addWeighted(scorers, requirement, scorerOutcome(average));
     if (count === 0) coverage.unscored += 1;
     else if (input.assignedScorerCount > 0 && count >= input.assignedScorerCount) coverage.fullyScored += 1;
     else coverage.partlyScored += 1;
