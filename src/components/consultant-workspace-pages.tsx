@@ -3598,7 +3598,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Vendor comparison</p>
-                <p className="text-xs text-slate-400">Rows are requirements. Columns are assigned vendors (up to 10).</p>
+                <p className="text-xs text-slate-400">Rows are requirements. Columns are assigned vendors (up to 10). Click a score to see who scored it and their comments.</p>
               </div>
               <div role="group" aria-label="Show scores from" className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 p-1 text-xs">
                 <span className="px-2 text-slate-400">Show:</span>
@@ -3713,19 +3713,20 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                         </td>
                         {row.cells.map((cell) => {
                           const isUnscored = comparisonMode === "scorer" ? cell.scorerAverage === null : cell.vendorScore === null;
+                          // Met / Not met only; who scored, comments and counts are in the detail panel (click the cell).
                           const valueText = comparisonMode === "scorer"
                             ? (cell.scorerAverage === null
                               ? "Unscored"
-                              : `${(cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met"} · avg ${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                              : (cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met")
                             : (cell.vendorScore === null
                               ? "Unscored"
-                              : `${cell.vendorScore}`);
+                              : cell.vendorScore === 1 ? "Met" : "Not met");
                           return (
                             <td key={`${row.requirementId}-${cell.vendorId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
                               <button
                                 type="button"
                                 onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
-                                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
+                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
                                 {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
@@ -3757,19 +3758,20 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                         </td>
                         {row.cells.map((cell) => {
                           const isUnscored = comparisonMode === "scorer" ? cell.scorerAverage === null : cell.vendorScore === null;
+                          // Met / Not met only; who scored, comments and counts are in the detail panel (click the cell).
                           const valueText = comparisonMode === "scorer"
                             ? (cell.scorerAverage === null
                               ? "Unscored"
-                              : `${(cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met"} · avg ${formatScoreValue(cell.scorerAverage)} · ${cell.scorerScoredCount} of ${cell.totalScorers} scored`)
+                              : (cell.scorerOutcome ?? (cell.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met")
                             : (cell.vendorScore === null
                               ? "Unscored"
-                              : `${cell.vendorScore}`);
+                              : cell.vendorScore === 1 ? "Met" : "Not met");
                           return (
                             <td key={`${row.requirementId}-${cell.vendorId}`} className={`border-t border-slate-800 px-3 py-2 align-top ${isUnscored ? "bg-amber-500/10" : "bg-slate-950/60"}`}>
                               <button
                                 type="button"
                                 onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
-                                className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left hover:border-sky-400"
+                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
                                 {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
@@ -3823,6 +3825,13 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
                 <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Scorer entries</p>
+                {selectedComparisonCellData.scorerAverage !== null ? (
+                  <p className="mt-2 text-sm text-slate-200">
+                    {(selectedComparisonCellData.scorerOutcome ?? (selectedComparisonCellData.scorerAverage >= 0.5 ? 1 : 0)) === 1 ? "Met" : "Not met"}
+                    {" · "}{selectedComparisonCellData.scorerScoredCount} of {selectedComparisonCellData.totalScorers} scorers scored
+                    {" · "}{Math.round(selectedComparisonCellData.scorerAverage * 100)}% said Met
+                  </p>
+                ) : null}
                 {selectedComparisonCellData.scorerDetails.length === 0 ? (
                   <p className="mt-2 text-sm text-amber-200">Unscored</p>
                 ) : (
