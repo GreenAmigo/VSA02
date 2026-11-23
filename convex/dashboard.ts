@@ -1,4 +1,5 @@
-import { query } from "./_generated/server";
+import { query, type QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { getProjectVendors } from "./projectVendors";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./vendorAnswers";
@@ -17,6 +18,16 @@ export const getProjectDashboard = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
     const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+    return await buildProjectDashboard(ctx, project, args.projectId);
+  },
+});
+
+/**
+ * Builds the dashboard figures. Shared by the dashboard and the sign-off report so
+ * both always show the same numbers. Callers MUST check access first.
+ */
+export async function buildProjectDashboard(ctx: QueryCtx, project: Doc<"projects">, projectId: Id<"projects">) {
+    const args = { projectId };
 
     const requirementDocs = await ctx.db
       .query("requirements")
@@ -159,5 +170,4 @@ export const getProjectDashboard = query({
         vendorSelf: { ...vendorSelfLeader, isProvisional: !allScoringComplete },
       },
     };
-  },
-});
+}

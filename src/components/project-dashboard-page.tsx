@@ -318,7 +318,10 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
         )}
       </Panel>
 
-      <p className="text-sm"><Link href={projectHref} className="text-sky-300 hover:text-sky-200">Back to project</Link></p>
+      <div className="flex flex-wrap items-center gap-4 text-sm">
+        <Link href={`${projectHref}/report`} className="rounded-xl bg-emerald-500 px-4 py-2 font-medium text-slate-950 hover:bg-emerald-400">Sign-off report (Excel / PDF)</Link>
+        <Link href={projectHref} className="text-sky-300 hover:text-sky-200">Back to project</Link>
+      </div>
     </>,
   );
 }
