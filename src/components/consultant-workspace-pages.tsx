@@ -3434,8 +3434,11 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Active rows</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{activeRequirements.length}</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Scored requirements</p>
+            <p className="mt-2 text-2xl font-semibold text-white">{activeRequirements.filter((row) => row.priority !== 0).length}</p>
+            <p className="mt-1 text-xs text-slate-400">
+              {activeRequirements.filter((row) => row.priority === 0).length} out of scope · {requirements.filter((row) => row.status === "withdrawn").length} withdrawn (hidden below) · {requirements.length} total
+            </p>
           </div>
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
             <p className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Requirements</p>
