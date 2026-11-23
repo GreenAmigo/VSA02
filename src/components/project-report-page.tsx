@@ -12,6 +12,8 @@ import {
   leaderText,
   metLabel,
   priorityName,
+  reportTitle,
+  SCORING_RULE_TEXT,
   type ProjectReport,
 } from "../lib/projectReportExport";
 
@@ -23,6 +25,24 @@ function n(value: number) {
 
 function Heading({ children }: { children: React.ReactNode }) {
   return <h2 className="mt-8 border-b border-slate-300 pb-1 text-lg font-semibold text-slate-900 print:break-after-avoid">{children}</h2>;
+}
+
+/** Green for Met, red for Not met, amber for Unscored; the words are always shown too. */
+function MetBadge({ value, suffix = "" }: { value: 0 | 1 | null; suffix?: string }) {
+  const colour = value === 1 ? "bg-emerald-100 text-emerald-900" : value === 0 ? "bg-rose-100 text-rose-900" : "bg-amber-100 text-amber-900";
+  return <span className={`inline-block rounded px-1 font-medium ${colour}`}>{metLabel(value)}{suffix}</span>;
+}
+
+/** Browsers use the page title as the suggested PDF file name. */
+function saveAsPdf(report: ProjectReport) {
+  const previousTitle = document.title;
+  document.title = reportTitle(report);
+  const restore = () => {
+    document.title = previousTitle;
+    window.removeEventListener("afterprint", restore);
+  };
+  window.addEventListener("afterprint", restore);
+  window.print();
 }
 
 const th = "border border-slate-300 bg-slate-100 px-2 py-1 text-left align-top font-semibold";
@@ -68,14 +88,17 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
           <button type="button" onClick={() => downloadReportWorkbook(report)} className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400">
             Download Excel
           </button>
-          <button type="button" onClick={() => window.print()} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
+          <button type="button" onClick={() => saveAsPdf(report)} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400">
             Save as PDF
           </button>
         </div>
       </div>
       <p className="px-6 pt-3 text-xs text-slate-600 print:hidden">Save as PDF opens your browser&apos;s print window: choose &quot;Save as PDF&quot; as the printer. Landscape fits the comparison table best.</p>
 
-      <article className="mx-auto my-6 max-w-5xl bg-white p-10 text-sm text-slate-800 shadow print:my-0 print:max-w-none print:p-0 print:shadow-none">
+      <article
+        style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}
+        className="mx-auto my-6 max-w-5xl bg-white p-10 text-sm text-slate-800 shadow print:my-0 print:max-w-none print:p-0 print:shadow-none"
+      >
         <header>
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Vendor selection report</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">{report.projectName}</h1>
@@ -88,7 +111,8 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
 
         <Heading>Result</Heading>
         <p className="mt-2 text-base"><span className="font-semibold">Leading vendor:</span> {leaderText(report)}</p>
-        <p className="mt-1 text-xs text-slate-500">Weighted total = priority (Must 9, Should 3, Could 1) × the scorers&apos; verdict (Met if at least half of the scorers said Met). Out of scope and withdrawn requirements are excluded.</p>
+        <p className="mt-1 text-xs text-slate-500">{SCORING_RULE_TEXT}</p>
+        <p className="mt-1 text-xs text-slate-500">Key: <MetBadge value={1} /> <MetBadge value={0} /> <MetBadge value={null} /></p>
 
         <Heading>Vendor totals</Heading>
         <table className="mt-2 w-full border-collapse text-xs">
@@ -105,7 +129,7 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
               <td className={td}>{n(max.must)}</td><td className={td}>{n(max.should)}</td><td className={td}>{n(max.could)}</td><td className={td} /><td className={td} /><td className={td} />
             </tr>
             {report.summary.vendors.map((vendor) => (
-              <tr key={vendor.vendorId} className={report.summary.leader.scorers.vendorIds.includes(vendor.vendorId) ? "font-semibold" : ""}>
+              <tr key={vendor.vendorId} className={report.summary.leader.scorers.vendorIds.includes(vendor.vendorId) ? "bg-emerald-50 font-semibold" : ""}>
                 <td className={td}>{vendor.vendorName}</td>
                 <td className={td}>{n(vendor.totals.scorers.requirements)}</td>
                 <td className={td}>{n(vendor.totals.scorers.nfr)}</td>
@@ -138,8 +162,8 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
                 <td className={td}>{priorityName(row.priority)}</td>
                 {row.cells.map((cell) => (
                   <td key={cell.vendorId} className={td}>
-                    <div>Scorers: {metLabel(cell.scorerVerdict)}</div>
-                    <div className="text-slate-500">Vendor: {metLabel(cell.vendorScore)}{cell.vendorAmended ? " (amended)" : ""}</div>
+                    <div>Scorers: <MetBadge value={cell.scorerVerdict} /></div>
+                    <div className="mt-0.5 text-slate-500">Vendor: <MetBadge value={cell.vendorScore} suffix={cell.vendorAmended ? " (amended)" : ""} /></div>
                     {cell.vendorComment ? <div className="text-[10px] italic text-slate-500">“{cell.vendorComment}”</div> : null}
                   </td>
                 ))}
@@ -170,7 +194,7 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
               {report.amendments.map((row, index) => (
                 <tr key={index} className="print:break-inside-avoid">
                   <td className={td}>{row.vendorName}</td><td className={td}>{row.requirementId}</td>
-                  <td className={td}>{metLabel(row.originalScore)} → {metLabel(row.newScore)}</td>
+                  <td className={td}><MetBadge value={row.originalScore} /> → <MetBadge value={row.newScore} /></td>
                   <td className={td}>{row.amendedBy}</td><td className={td}>{row.reason}</td><td className={td}>{formatReportDate(row.amendedAt)}</td>
                 </tr>
               ))}
@@ -188,7 +212,7 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
               {report.scorerScores.map((row, index) => (
                 <tr key={index} className="print:break-inside-avoid">
                   <td className={td}>{row.vendorName}</td><td className={td}>{row.requirementId}</td><td className={td}>{row.scorerName}</td>
-                  <td className={td}>{row.departmentName}</td><td className={td}>{metLabel(row.score)}</td><td className={td}>{row.comment}</td><td className={td}>{formatReportDate(row.enteredAt)}</td>
+                  <td className={td}>{row.departmentName}</td><td className={td}><MetBadge value={row.score} /></td><td className={td}>{row.comment}</td><td className={td}>{formatReportDate(row.enteredAt)}</td>
                 </tr>
               ))}
             </tbody>

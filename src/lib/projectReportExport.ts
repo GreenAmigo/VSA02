@@ -71,7 +71,7 @@ export function buildReportWorkbook(report: ProjectReport, generatedAt: Date) {
     ["Vendor deadline", formatReportDate(report.vendorDeadlineAt)],
     ["Scorer deadline", formatReportDate(report.scorerDeadlineAt)],
     ["Leading vendor", leaderText(report)],
-    ["Scoring rule", "Weighted total = priority (Must 9, Should 3, Could 1) x scorers' verdict (Met if at least half of scorers said Met). Out of scope and withdrawn excluded."],
+    ["Scoring rule", SCORING_RULE_TEXT],
     [],
     ["Vendor", "Requirements", "NFRs", "Combined", "Must", "Should", "Could", "Vendor self-score total", "Requirements fully scored", "Vendor status", "Submitted"],
     ["Range (all Met)", max.requirements, max.nfr, max.combined, max.must, max.should, max.could, "", "", "", ""],
@@ -130,12 +130,20 @@ export function buildReportWorkbook(report: ProjectReport, generatedAt: Date) {
   return workbook;
 }
 
-export function reportFileName(report: ProjectReport, generatedAt: Date, extension: string) {
-  const safe = `${report.companyName} ${report.projectName}`.replace(/[^A-Za-z0-9 ]+/g, "").trim().replace(/\s+/g, "-");
-  return `${safe || "project"}-vendor-selection-report-${generatedAt.toISOString().slice(0, 10)}.${extension}`;
+export const REPORT_VERSION = "v1.0";
+
+/** "[Project Name] - Vendor Selection Report v1.0" (without extension), safe for Windows file names. */
+export function reportTitle(report: ProjectReport) {
+  const project = report.projectName.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ").trim() || "Project";
+  return `${project} - Vendor Selection Report ${REPORT_VERSION}`;
 }
 
+export function reportFileName(report: ProjectReport, extension: "xlsx" | "pdf") {
+  return `${reportTitle(report)}.${extension}`;
+}
+
+export const SCORING_RULE_TEXT = "Met = 1, Not met = 0. Weighted total = priority (Must 9, Should 3, Could 1) x the scorers' verdict (Met if at least half of the scorers said Met). Out of scope and withdrawn requirements are excluded.";
+
 export function downloadReportWorkbook(report: ProjectReport) {
-  const now = new Date();
-  XLSX.writeFile(buildReportWorkbook(report, now), reportFileName(report, now, "xlsx"));
+  XLSX.writeFile(buildReportWorkbook(report, new Date()), reportFileName(report, "xlsx"));
 }

@@ -45,6 +45,7 @@ describe("sign-off report Excel export", () => {
   test("summary shows the leader, the range and each vendor's totals", () => {
     const summary = rows("Summary");
     expect(summary.find((row) => row[0] === "Leading vendor")?.[1]).toBe("Acme Software Test");
+    expect(String(summary.find((row) => row[0] === "Scoring rule")?.[1])).toContain("Met = 1, Not met = 0");
     expect(summary.find((row) => row[0] === "Range (all Met)")?.slice(1, 4)).toEqual([18, 0, 18]);
     expect(summary.find((row) => row[0] === "Acme Software Test")?.slice(1, 4)).toEqual([9, 0, 9]);
   });
@@ -64,6 +65,8 @@ describe("sign-off report Excel export", () => {
   test("leader text explains ties and provisional results, and file names are safe", () => {
     expect(leaderText({ ...report, summary: { ...report.summary, leader: { scorers: { vendorIds: ["v1"], isTie: false, isProvisional: true } } } }))
       .toBe("Acme Software Test (provisional: scoring not complete)");
-    expect(reportFileName(report, new Date(Date.UTC(2026, 10, 23)), "xlsx")).toBe("Harbor-Logistics-Test-Test-Project-1-vendor-selection-report-2026-11-23.xlsx");
+    expect(reportFileName(report, "xlsx")).toBe("Test Project 1 - Vendor Selection Report v1.0.xlsx");
+    expect(reportFileName(report, "pdf")).toBe("Test Project 1 - Vendor Selection Report v1.0.pdf");
+    expect(reportFileName({ ...report, projectName: "HR / Payroll: 2027?" }, "pdf")).toBe("HR Payroll 2027 - Vendor Selection Report v1.0.pdf");
   });
 });
