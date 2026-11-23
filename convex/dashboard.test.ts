@@ -71,6 +71,15 @@ describe("Phase 6b project dashboard", () => {
     expect(north.totals.vendorSelf.combined).toBe(9);
     expect(north.totals.coverage).toEqual({ scorableRequirements: 3, fullyScored: 2, partlyScored: 1, unscored: 0, vendorAnswered: 1 });
 
+    // Scorer progress per vendor: scorer 1 scored R1, R2, N1 (R0 is out of scope); scorer 2 scored R1, N1.
+    expect(north.scorerProgress.map((row) => [row.userId, row.answered, row.total, row.completed])).toEqual([
+      ["beta-scorer", 3, 3, false],
+      ["beta-scorer-2", 2, 3, false],
+    ]);
+    expect(north.scorerProgress[0]).toMatchObject({ name: "Beta Scorer", departmentName: "General" });
+    expect(north.unscoredRequirements).toEqual([]);
+    expect(north.submission).toMatchObject({ status: "in-progress", submittedAt: null, hasConflict: false });
+
     const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
     const compared = comparison.totalsByVendor.find((row) => row.vendorId === vendorId);
     expect(compared?.scorer.combined).toBe(north.totals.scorers.combined);
@@ -166,5 +175,34 @@ describe("Phase 6b project dashboard", () => {
     expect(dashboard.migrationRequired).toBe(true);
     expect(dashboard.vendors[0].totals.vendorSelf.combined).toBe(0);
     expect(dashboard.leader.vendorSelf.vendorIds).toEqual([]);
+  });
+
+  test("lists requirements no scorer has scored, and shows when a vendor has submitted", async () => {
+    const { t, seeded, vendorId } = await seed();
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId,
+      rows: [
+        { id: "A", text: "Scored", type: "user-story", priority: 9 },
+        { id: "B", text: "Not scored yet", type: "nfr", priority: 3 },
+        { id: "C", text: "Out of scope", type: "user-story", priority: 0 },
+      ],
+      confirm: true,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("scorerScores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor", vendorId,
+        scorerScopeKey: "individual:beta-scorer", scorerScopeLabel: "Beta Scorer", scorerScopeType: "individual",
+        requirementId: "A", score: 1, enteredByUserId: "beta-scorer", enteredByDisplayName: "Beta Scorer", enteredAt: 1, updatedAt: 1,
+      });
+      await ctx.db.insert("projectDeadlines", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, targetType: "vendor", targetUserId: "northwind-vendor",
+        vendorId, dueAt: 2000, status: "submitted", submittedAt: 1500, createdAt: 1, updatedAt: 1,
+      });
+    });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    const north = dashboard.vendors[0];
+    expect(north.unscoredRequirements).toEqual([{ requirementId: "B", text: "Not scored yet", type: "nfr", priority: 3 }]);
+    expect(north.submission).toEqual({ status: "submitted", submittedAt: 1500, deadlineAt: 2000, hasConflict: false });
   });
 });

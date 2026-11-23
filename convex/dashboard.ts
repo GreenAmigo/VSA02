@@ -4,7 +4,8 @@ import { getProjectVendors } from "./projectVendors";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./vendorAnswers";
 import { getVendorScorerCompletion, getVendorScorerHistory, scorerHistoryNeedsMigration } from "./scorerHistory";
 import { assertVendorReviewAccess } from "./scores";
-import { computeVendorTotals, pickLeaders, type TotalsRequirement } from "./scoreTotals";
+import { getVendorDeadline } from "./vendorDeadlines";
+import { computeVendorTotals, isScorable, pickLeaders, type TotalsRequirement } from "./scoreTotals";
 
 /**
  * Project dashboard (Phase 6b). Consultants and company admins only.
@@ -36,6 +37,22 @@ export const getProjectDashboard = query({
       .filter((row) => row.isActive && row.role === "company-scorer")
       .map((row) => row.userId))];
 
+    // Scorer names and CURRENT departments (per-score department snapshots are used for score reporting).
+    const scorers = await Promise.all(assignedScorerUserIds.map(async (userId) => {
+      const membership = await ctx.db.query("companyMembers")
+        .withIndex("by_company_user", (q) => q.eq("companyId", project.companyId).eq("userId", userId))
+        .first();
+      const assignment = scorerAssignments.find((row) => row.userId === userId);
+      const department = membership?.departmentId ? await ctx.db.get(membership.departmentId) : null;
+      const name = membership?.displayName && !membership.displayName.includes("@")
+        ? membership.displayName
+        : assignment?.displayName ?? membership?.email ?? "Unnamed scorer";
+      return { userId, name, departmentName: department?.name ?? null };
+    }));
+    const scorableRequirementDocs = requirementDocs
+      .filter((row) => isScorable(row))
+      .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
+
     const answerState = await getProjectVendorAnswerState(ctx, project);
     const scorerHistoryMigrationRequired = await scorerHistoryNeedsMigration(ctx, args.projectId);
     const vendors = await getProjectVendors(ctx, project);
@@ -54,11 +71,39 @@ export const getProjectDashboard = query({
         vendorAnswers: vendorAnswers.map((row) => ({ requirementId: row.requirementId, score: row.score })),
       });
 
-      let scorersCompleted = 0;
-      for (const userId of assignedScorerUserIds) {
-        const { completion } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, `individual:${userId}`);
-        if (completion?.status === "completed") scorersCompleted += 1;
-      }
+      const scorableIds = new Set(scorableRequirementDocs.map((row) => row.requirementId));
+      const scorerProgress = await Promise.all(scorers.map(async (scorer) => {
+        const scopeKey = `individual:${scorer.userId}`;
+        const { completion } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, scopeKey);
+        const answered = new Set(scorerHistory.scores
+          .filter((row) => row.scorerScopeKey === scopeKey && scorableIds.has(row.requirementId))
+          .map((row) => row.requirementId)).size;
+        return {
+          userId: scorer.userId,
+          name: scorer.name,
+          departmentName: scorer.departmentName,
+          answered,
+          total: scorableIds.size,
+          completed: completion?.status === "completed",
+          completedAt: completion?.status === "completed" ? completion.completedAt ?? null : null,
+        };
+      }));
+      const scorersCompleted = scorerProgress.filter((row) => row.completed).length;
+
+      const scoredIds = new Set(scorerHistory.scores.map((row) => row.requirementId));
+      const unscoredRequirements = scorableRequirementDocs
+        .filter((row) => !scoredIds.has(row.requirementId))
+        .map((row) => ({ requirementId: row.requirementId, text: row.text, type: row.type, priority: row.priority }));
+
+      // Vendor submission status. The page compares deadlineAt with the current time to show CLOSED.
+      const deadlineState = await getVendorDeadline(ctx, args.projectId, vendor.vendorId);
+      const deadline = deadlineState.deadline;
+      const deadlineAt = typeof deadline?.dueAt === "number"
+        ? deadline.dueAt
+        : typeof project.vendorDeadline === "number" ? project.vendorDeadline as number : null;
+      const submissionStatus: "not-started" | "in-progress" | "submitted" = deadline?.status === "submitted"
+        ? "submitted"
+        : totals.coverage.vendorAnswered > 0 ? "in-progress" : "not-started";
 
       const hasAnswerConflicts = [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])]
         .some((answers) => answers.length > 1);
@@ -68,6 +113,14 @@ export const getProjectDashboard = query({
         vendorName: vendor.vendorName,
         totals,
         scorersCompleted,
+        scorerProgress,
+        unscoredRequirements,
+        submission: {
+          status: submissionStatus,
+          submittedAt: deadline?.submittedAt ?? null,
+          deadlineAt,
+          hasConflict: deadlineState.hasConflict,
+        },
         hasScorerConflicts: scorerHistory.hasConflicts,
         hasAnswerConflicts,
       };
@@ -93,6 +146,7 @@ export const getProjectDashboard = query({
     return {
       projectId: args.projectId,
       projectName: project.name as string,
+      scorerDeadlineAt: typeof project.scorerDeadline === "number" ? project.scorerDeadline as number : null,
       assignedScorerCount: assignedScorerUserIds.length,
       migrationRequired: answerState.migrationRequired,
       scorerHistoryMigrationRequired,
