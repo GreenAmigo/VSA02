@@ -103,7 +103,9 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
   const leader = dashboard.leader[basis];
   const leaderNames = leader.vendorIds.map((id) => vendors.find((row) => row.vendorId === id)?.vendorName ?? "Unknown vendor");
   const totalsFor = (row: (typeof vendors)[number]) => (basis === "scorers" ? row.totals.scorers : row.totals.vendorSelf);
-  const maxCombined = Math.max(1, ...vendors.map((row) => totalsFor(row).combined));
+  const range = dashboard.maximum;
+  // Bars are drawn against the range, so a full-width bar means every requirement Met.
+  const maxCombined = Math.max(1, range.combined, ...vendors.map((row) => totalsFor(row).combined));
   const incompletePairs = vendors.flatMap((vendor) => vendor.scorerProgress
     .filter((scorer) => !scorer.completed)
     .map((scorer) => ({ vendorName: vendor.vendorName, ...scorer })));
@@ -229,6 +231,17 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
             <span className="flex items-center gap-2"><span className="inline-block h-3 w-3 rounded-sm" style={{ background: NFR_COLOUR }} />NFRs</span>
           </div>
           <div className="space-y-3">
+            <div className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3 border-b border-slate-800 pb-3 text-sm">
+              <span className="truncate font-medium text-slate-200" title="Range: the totals if every requirement were Met">Range (all Met)</span>
+              <div className="flex h-4 gap-[2px]" title={`Range: Requirements ${formatTotal(range.requirements)}, NFRs ${formatTotal(range.nfr)}, total ${formatTotal(range.combined)}`}>
+                {range.requirements > 0 ? <div className="h-full rounded-l-[4px]" style={{ width: `${(range.requirements / maxCombined) * 100}%`, background: REQUIREMENTS_COLOUR }} /> : null}
+                {range.nfr > 0 ? <div className="h-full rounded-r-[4px]" style={{ width: `${(range.nfr / maxCombined) * 100}%`, background: NFR_COLOUR }} /> : null}
+              </div>
+              <span className="w-14 text-right font-semibold text-white">{formatTotal(range.combined)}</span>
+              <span className="col-span-3 -mt-2 text-xs text-slate-400">
+                Requirements {formatTotal(range.requirements)} · NFRs {formatTotal(range.nfr)} · Total {formatTotal(range.combined)}
+              </span>
+            </div>
             {vendors.map((vendor) => {
               const totals = totalsFor(vendor);
               return (

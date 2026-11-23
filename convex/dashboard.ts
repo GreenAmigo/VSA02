@@ -5,7 +5,7 @@ import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./ven
 import { getVendorScorerCompletion, getVendorScorerHistory, scorerHistoryNeedsMigration } from "./scorerHistory";
 import { assertVendorReviewAccess } from "./scores";
 import { getVendorDeadline } from "./vendorDeadlines";
-import { computeVendorTotals, isScorable, pickLeaders, type TotalsRequirement } from "./scoreTotals";
+import { computeMaximumTotals, computeVendorTotals, isScorable, pickLeaders, type TotalsRequirement } from "./scoreTotals";
 
 /**
  * Project dashboard (Phase 6b). Consultants and company admins only.
@@ -148,6 +148,8 @@ export const getProjectDashboard = query({
       projectName: project.name as string,
       scorerDeadlineAt: typeof project.scorerDeadline === "number" ? project.scorerDeadline as number : null,
       assignedScorerCount: assignedScorerUserIds.length,
+      // The range: totals if every requirement were Met.
+      maximum: computeMaximumTotals(requirements),
       migrationRequired: answerState.migrationRequired,
       scorerHistoryMigrationRequired,
       hasDataConflicts: vendorRows.some((row) => row.hasScorerConflicts || row.hasAnswerConflicts),

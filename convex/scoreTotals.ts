@@ -145,6 +145,18 @@ export function computeVendorTotals(input: {
 }
 
 /**
+ * The range: the highest possible totals, i.e. what a vendor would score if every
+ * requirement were Met. Out of scope and withdrawn requirements are excluded.
+ */
+export function computeMaximumTotals(requirements: TotalsRequirement[]): TotalsBreakdown {
+  const maximum = emptyBreakdown();
+  for (const requirement of requirements) {
+    if (isScorable(requirement)) addWeighted(maximum, requirement, 1);
+  }
+  return finish(maximum);
+}
+
+/**
  * Picks the vendor(s) with the highest combined total.
  * Returns no leader when nobody has scored anything yet; returns several ids for a tie.
  */

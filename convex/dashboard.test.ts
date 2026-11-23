@@ -64,6 +64,8 @@ describe("Phase 6b project dashboard", () => {
 
     const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
     expect(dashboard.assignedScorerCount).toBe(2);
+    // Range: R1 9 + R2 3 = 12 requirements, N1 9 NFRs, 21 in total (R0 out of scope excluded).
+    expect(dashboard.maximum).toMatchObject({ requirements: 12, nfr: 9, combined: 21 });
     expect(dashboard.vendors).toHaveLength(1);
     const north = dashboard.vendors[0];
     expect(north.vendorName).toBe("Northwind Labs");

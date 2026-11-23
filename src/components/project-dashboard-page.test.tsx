@@ -51,6 +51,7 @@ function setup(access: Record<string, unknown>, dashboard: unknown) {
 function dashboardWith(vendors: unknown[], leaderIds: string[], isTie = false) {
   return {
     projectId: "project-1", projectName: "Test Project 1", scorerDeadlineAt: null, assignedScorerCount: 1,
+    maximum: { requirements: 21, nfr: 9, combined: 30, must: 27, should: 3, could: 0 },
     migrationRequired: false, scorerHistoryMigrationRequired: false, hasDataConflicts: false,
     vendors,
     leader: {
@@ -74,6 +75,8 @@ describe("ProjectDashboardPage", () => {
     expect(html).toContain("Acme Software Test");
     expect(html).toContain("Provisional");
     expect(html).toContain("16.5");
+    expect(html).toContain("Range (all Met)");
+    expect(html).toContain("Requirements 21 · NFRs 9 · Total 30");
     expect(html).toContain("Scorers&#x27; scores");
     expect(html).toContain("Green Test1 (IT) hasn&#x27;t completed Acme Software Test: 2 of 3 scored.");
     expect(html).toContain("All workspaces");

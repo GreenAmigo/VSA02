@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { averageScorerScore, computeVendorTotals, pickLeaders, scorerOutcome, type TotalsRequirement } from "./scoreTotals";
+import { averageScorerScore, computeMaximumTotals, computeVendorTotals, pickLeaders, scorerOutcome, type TotalsRequirement } from "./scoreTotals";
 
 // Hand-worked dataset (3 assigned scorers: A, B, C)
 // Scorers' verdict per requirement: average >= 0.5 is Met (1), otherwise Not Met (0).
@@ -66,6 +66,10 @@ describe("dashboard scoring maths", () => {
     }).scorers.combined;
     expect(eight(4)).toBe(9);
     expect(eight(3)).toBe(0);
+  });
+
+  test("range: every scorable requirement Met (R1 9 + R2 3 requirements, R3 9 + R4 1 NFRs)", () => {
+    expect(computeMaximumTotals(requirements)).toEqual({ requirements: 12, nfr: 10, combined: 22, must: 18, should: 3, could: 1 });
   });
 
   test("leader: highest combined total, ties reported, no leader before anyone scores", () => {
