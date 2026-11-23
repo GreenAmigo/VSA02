@@ -29,6 +29,30 @@ type CompanyId = Id<"companies">;
 
 type WorkspaceBreadcrumb = { label: string; href?: string };
 
+/** A section that folds down to its title. Closed by default; click the title to open. */
+export function CollapsibleSection({ title, subtitle, defaultOpen = false, children }: {
+  title: string;
+  subtitle?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open={defaultOpen} className="group rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          {subtitle ? <p className="mt-1 text-xs text-slate-400">{subtitle}</p> : null}
+        </div>
+        <span aria-hidden="true" className="shrink-0 rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-300">
+          <span className="group-open:hidden">Show</span>
+          <span className="hidden group-open:inline">Hide</span>
+        </span>
+      </summary>
+      <div className="mt-4">{children}</div>
+    </details>
+  );
+}
+
 export function StatusPill({ label, className = "border-slate-700 bg-slate-800 text-slate-200" }: { label: string; className?: string }) {
   return (
     <span className={`rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${className}`}>
@@ -747,10 +771,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
   };
 
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white">Vendor responses</h3>
-      </div>
+    <CollapsibleSection title="Vendor responses" subtitle="Each vendor's status, answers and amendments">
       <VendorAnswerNotice
         migrationRequired={vendorResponses?.some((vendor) => vendor.migrationRequired)}
         hasConflicts={vendorResponses?.some((vendor) => vendor.hasConflicts)}
@@ -1048,7 +1069,7 @@ function VendorResponsesPanel({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : null}
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -3420,9 +3441,11 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       ) : null}
 
       {!isVendorView ? (
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold text-white">Requirements</h3>
+      <CollapsibleSection
+        title="Requirements"
+        subtitle={`${activeRequirements.filter((row) => row.priority !== 0).length} scored · ${activeRequirements.filter((row) => row.priority === 0).length} out of scope · ${requirements.filter((row) => row.status === "withdrawn").length} withdrawn`}
+      >
+        <div className="mb-4 flex justify-end">
           <Link href={`/workspaces/${companyId}/requirements`} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
             Open workspace summary
           </Link>
@@ -3484,15 +3507,104 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         </div>
 
         {canManageProjects ? (
+          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium text-slate-100">Import requirements for this project</p>
+              {importFileName ? <StatusPill label={importFileName} className="border-slate-700 bg-slate-900 text-slate-200" /> : null}
+            </div>
+            <p className="text-xs text-slate-400">Upload CSV or XLSX. Preview runs first, then apply when the summary looks correct.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
+                Choose file
+                <input
+                  type="file"
+                  accept=".csv,.xlsx"
+                  onChange={(event) => void handleImportFileSelected(event)}
+                  className="hidden"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleApplyRequirementImport()}
+                disabled={busy || importRows.length === 0}
+                className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
+              >
+                Apply import
+              </button>
+            </div>
+
+            {importSummary ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-300">
+                  <p className="text-slate-400">Rows parsed</p>
+                  <p className="mt-1 text-base font-semibold text-white">{importSummary.total}</p>
+                </div>
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
+                  <p className="text-emerald-200/80">Added</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.added}</p>
+                </div>
+                <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
+                  <p className="text-sky-200/80">Updated</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.updated}</p>
+                </div>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
+                  <p className="text-amber-200/80">Will be withdrawn</p>
+                  <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {importRows.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-300">Import preview</p>
+                <div className="mt-2 space-y-2">
+                  {importRows.slice(0, 8).map((row) => (
+                    <div key={row.id} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.id}</p>
+                      <p className="mt-1 text-sm text-slate-100">{row.text}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
+                        <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
+                      </div>
+                    </div>
+                  ))}
+                  {importRows.length > 8 ? <p className="text-xs text-slate-400">+ {importRows.length - 8} more rows in preview</p> : null}
+                </div>
+              </div>
+            ) : null}
+
+            {importIssues.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
+                <p className="font-medium">Rows skipped during parsing</p>
+                <div className="mt-1 space-y-1">
+                  {importIssues.slice(0, 5).map((issue, index) => (
+                    <p key={`${issue.requirementId ?? "unknown"}-${index}`}>{issue.reason}</p>
+                  ))}
+                  {importIssues.length > 5 ? <p>+ {importIssues.length - 5} more issue(s)</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-400">Only consultants and company admins can import requirements.</p>
+        )}
+      </CollapsibleSection>
+      ) : null}
+
+      {!isVendorView && canManageProjects ? (
+      <CollapsibleSection title="Vendor comparison" subtitle="Every requirement against every assigned vendor, with scorers' and vendors' scores">
+        {canManageProjects ? (
           <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Vendor comparison</p>
                 <p className="text-xs text-slate-400">Rows are requirements. Columns are assigned vendors (up to 10).</p>
               </div>
-              <div className="inline-flex rounded-xl border border-slate-700 bg-slate-900 p-1 text-xs">
+              <div role="group" aria-label="Show scores from" className="inline-flex items-center rounded-xl border border-slate-700 bg-slate-900 p-1 text-xs">
+                <span className="px-2 text-slate-400">Show:</span>
                 <button
                   type="button"
+                  aria-pressed={comparisonMode === "scorer"}
                   onClick={() => setComparisonMode("scorer")}
                   className={`rounded-lg px-3 py-1.5 ${comparisonMode === "scorer" ? "bg-sky-500 text-slate-950" : "text-slate-300"}`}
                 >
@@ -3500,6 +3612,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={comparisonMode === "vendor"}
                   onClick={() => setComparisonMode("vendor")}
                   className={`rounded-lg px-3 py-1.5 ${comparisonMode === "vendor" ? "bg-sky-500 text-slate-950" : "text-slate-300"}`}
                 >
@@ -3761,98 +3874,14 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             </div>
           </div>
         ) : null}
-
-        {canManageProjects ? (
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium text-slate-100">Import requirements for this project</p>
-              {importFileName ? <StatusPill label={importFileName} className="border-slate-700 bg-slate-900 text-slate-200" /> : null}
-            </div>
-            <p className="text-xs text-slate-400">Upload CSV or XLSX. Preview runs first, then apply when the summary looks correct.</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <label className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 hover:border-slate-500">
-                Choose file
-                <input
-                  type="file"
-                  accept=".csv,.xlsx"
-                  onChange={(event) => void handleImportFileSelected(event)}
-                  className="hidden"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void handleApplyRequirementImport()}
-                disabled={busy || importRows.length === 0}
-                className="rounded-xl bg-sky-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-60"
-              >
-                Apply import
-              </button>
-            </div>
-
-            {importSummary ? (
-              <div className="mt-3 grid gap-3 md:grid-cols-4">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-xs text-slate-300">
-                  <p className="text-slate-400">Rows parsed</p>
-                  <p className="mt-1 text-base font-semibold text-white">{importSummary.total}</p>
-                </div>
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
-                  <p className="text-emerald-200/80">Added</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.added}</p>
-                </div>
-                <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
-                  <p className="text-sky-200/80">Updated</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.updated}</p>
-                </div>
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-                  <p className="text-amber-200/80">Will be withdrawn</p>
-                  <p className="mt-1 text-base font-semibold">{importSummary.withdrawn}</p>
-                </div>
-              </div>
-            ) : null}
-
-            {importRows.length > 0 ? (
-              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-300">Import preview</p>
-                <div className="mt-2 space-y-2">
-                  {importRows.slice(0, 8).map((row) => (
-                    <div key={row.id} className="rounded-lg border border-slate-800 bg-slate-950/70 p-2">
-                      <p className="text-xs uppercase tracking-[0.14em] text-slate-400">{row.id}</p>
-                      <p className="mt-1 text-sm text-slate-100">{row.text}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <StatusPill label={requirementTypeLabel(row.type)} className={requirementTypePillClassName(row.type)} />
-                        <StatusPill label={priorityLabel(row.priority)} className={priorityPillClassName(row.priority)} />
-                      </div>
-                    </div>
-                  ))}
-                  {importRows.length > 8 ? <p className="text-xs text-slate-400">+ {importRows.length - 8} more rows in preview</p> : null}
-                </div>
-              </div>
-            ) : null}
-
-            {importIssues.length > 0 ? (
-              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200">
-                <p className="font-medium">Rows skipped during parsing</p>
-                <div className="mt-1 space-y-1">
-                  {importIssues.slice(0, 5).map((issue, index) => (
-                    <p key={`${issue.requirementId ?? "unknown"}-${index}`}>{issue.reason}</p>
-                  ))}
-                  {importIssues.length > 5 ? <p>+ {importIssues.length - 5} more issue(s)</p> : null}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-slate-400">Only consultants and company admins can import requirements.</p>
-        )}
-      </section>
+      </CollapsibleSection>
       ) : null}
 
       {!isVendorView && canManageProjects ? <VendorResponsesPanel projectId={projectId} /> : null}
 
       {!isVendorView && canManageProjects ? (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <CollapsibleSection title="Scoring progress by department">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold text-white">Scoring progress by department</h3>
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill
                 label={`${mixedHistoryScorerCount} mixed history`}
@@ -3903,7 +3932,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
               ))}
             </div>
           )}
-        </section>
+        </CollapsibleSection>
       ) : null}
 
       {!isVendorView && isScorerView ? <ScorerScoringPanel projectId={projectId} scorerDeadlineAt={project.scorerDeadline ?? null} /> : null}
@@ -3954,8 +3983,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
       ) : null}
 
       {!isVendorView ? (
-      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-        <h3 className="text-lg font-semibold text-white">Assigned members</h3>
+      <CollapsibleSection title="Assigned members" subtitle={`${projectMembersList.length} assigned`}>
         <div className="mt-4 space-y-3">
           {projectMembersList.length === 0 ? (
             <p className="text-sm text-slate-400">No people or vendors are assigned yet.</p>
@@ -3971,7 +3999,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
             ))
           )}
         </div>
-      </section>
+      </CollapsibleSection>
       ) : null}
     </WorkspaceShell>
   );
