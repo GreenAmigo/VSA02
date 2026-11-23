@@ -3726,7 +3726,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                               <button
                                 type="button"
                                 onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
-                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left"
+                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left transition hover:border-sky-400 hover:bg-sky-500/10"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
                                 {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
@@ -3771,7 +3771,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                               <button
                                 type="button"
                                 onClick={() => setSelectedComparisonCell({ requirementId: row.requirementId, vendorId: cell.vendorId })}
-                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left"
+                                className="w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-2 text-left transition hover:border-sky-400 hover:bg-sky-500/10"
                               >
                                 <p className={`font-medium ${isUnscored ? "text-amber-200" : "text-slate-100"}`}>{valueText}</p>
                                 {comparisonMode === "vendor" && cell.vendorIsAmended ? <p className="mt-1 text-[11px] text-amber-200">amended</p> : null}
@@ -3806,7 +3806,9 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
         ) : null}
 
         {selectedComparisonCell && selectedComparisonCellData && selectedComparisonRow && selectedComparisonVendor ? (
-          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/80 p-4">
+          <div role="dialog" aria-modal="true" aria-label="Score details" className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <button type="button" aria-label="Close score details" onClick={() => setSelectedComparisonCell(null)} className="absolute inset-0 cursor-default bg-slate-950/75" />
+          <div className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5 shadow-2xl">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p className="text-xs uppercase tracking-[0.14em] text-slate-400">Detail view</p>
@@ -3881,6 +3883,7 @@ export function ConsultantWorkspaceProjectDetailPage({ companyId, projectId }: {
                 ) : null}
               </div>
             </div>
+          </div>
           </div>
         ) : null}
       </CollapsibleSection>
