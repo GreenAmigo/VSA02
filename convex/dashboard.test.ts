@@ -4,193 +4,167 @@ import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
 
-describe("Phase 7 dashboard totals", () => {
-  test("does not choose a contact when an organisation has multiple active contacts", async () => {
-    const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(internal.access.seedScenario, {
-      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
-    });
-    await t.run(async (ctx) => {
-      const contact = await ctx.db.query("companyMembers")
-        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
-      if (!contact?.vendorId) throw new Error("Missing test organisation");
-      await ctx.db.insert("companyMembers", {
-        companyId: seeded.companyBId, vendorId: contact.vendorId, userId: "second-contact",
-        displayName: "Second Contact", role: "vendor", isActive: true, createdAt: 1,
-      });
-    });
-    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
-    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
-    expect(dashboard.rows[0].vendorUserId).toBeNull();
-    const responses = await admin.query(api.scores.listProjectVendorResponses, { projectId: seeded.projectBId });
-    expect(responses[0]).toMatchObject({ vendorUserId: null, vendorContactName: null, contactConflict: true });
+async function seed() {
+  const t = convexTest({ schema, modules });
+  const seeded = await t.mutation(internal.access.seedScenario, {
+    companyAName: "Acme Health", companyBName: "Beta Logistics", projectAName: "HR Platform", projectBName: "Supply Chain",
   });
+  const vendorId = await t.run(async (ctx) => {
+    const member = await ctx.db.query("companyMembers")
+      .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
+    if (!member?.vendorId) throw new Error("Missing test organisation");
+    return member.vendorId;
+  });
+  return { t, seeded, vendorId };
+}
 
-  test("does not count a partly migrated answer that may conflict with an older one", async () => {
-    const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(internal.access.seedScenario, {
-      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
-    });
+describe("Phase 6b project dashboard", () => {
+  test("scorers' totals match a hand-worked example and the comparison grid exactly", async () => {
+    const { t, seeded, vendorId } = await seed();
     const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
     await admin.mutation(api.requirements.applyRequirementImport, {
       projectId: seeded.projectBId,
-      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
+      rows: [
+        { id: "R1", text: "Must user story", type: "user-story", priority: 9 },
+        { id: "R2", text: "Should user story", type: "user-story", priority: 3 },
+        { id: "N1", text: "Must NFR", type: "nfr", priority: 9 },
+        { id: "R0", text: "Out of scope", type: "user-story", priority: 0 },
+      ],
       confirm: true,
     });
-    await admin.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1,
+    // Two assigned scorers.
+    //   R1 (9): scorer1 1, scorer2 0 -> avg 0.5 -> 4.5
+    //   R2 (3): scorer1 1 only       -> avg 1   -> 3   (partly scored)
+    //   N1 (9): scorer1 1, scorer2 1 -> avg 1   -> 9
+    //   R0 (0): out of scope         -> ignored
+    // Scorers: requirements 7.5, NFR 9, combined 16.5. Vendor self: R1 = 1 -> 9.
+    await t.run(async (ctx) => {
+      await ctx.db.insert("projectMembers", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "beta-scorer-2",
+        role: "company-scorer", displayName: "Beta Scorer 2", isActive: true, createdAt: 1,
+      });
+      const score = (requirementId: string, scorer: string, value: 0 | 1) => ctx.db.insert("scorerScores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor", vendorId,
+        scorerScopeKey: `individual:${scorer}`, scorerScopeLabel: scorer, scorerScopeType: "individual",
+        requirementId, score: value, enteredByUserId: scorer, enteredByDisplayName: scorer, enteredAt: 1, updatedAt: 1,
+      });
+      await score("R1", "beta-scorer", 1); await score("R1", "beta-scorer-2", 0);
+      await score("R2", "beta-scorer", 1);
+      await score("N1", "beta-scorer", 1); await score("N1", "beta-scorer-2", 1);
+      await score("R0", "beta-scorer", 1);
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor", vendorId,
+        requirementId: "R1", score: 1, enteredBy: "northwind-vendor", enteredAt: 1,
+      });
+    });
+
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(dashboard.assignedScorerCount).toBe(2);
+    expect(dashboard.vendors).toHaveLength(1);
+    const north = dashboard.vendors[0];
+    expect(north.vendorName).toBe("Northwind Labs");
+    expect(north.totals.scorers).toEqual({ requirements: 7.5, nfr: 9, combined: 16.5, must: 13.5, should: 3, could: 0 });
+    expect(north.totals.vendorSelf.combined).toBe(9);
+    expect(north.totals.coverage).toEqual({ scorableRequirements: 3, fullyScored: 2, partlyScored: 1, unscored: 0, vendorAnswered: 1 });
+
+    const comparison = await admin.query(api.scores.getProjectRequirementComparison, { projectId: seeded.projectBId });
+    const compared = comparison.totalsByVendor.find((row) => row.vendorId === vendorId);
+    expect(compared?.scorer.combined).toBe(north.totals.scorers.combined);
+    expect(compared?.vendor.combined).toBe(north.totals.vendorSelf.combined);
+
+    // Leader is provisional until every assigned scorer has completed every vendor.
+    expect(dashboard.leader.scorers).toEqual({ vendorIds: [vendorId], isTie: false, isProvisional: true });
+    await t.run(async (ctx) => {
+      for (const scorer of ["beta-scorer", "beta-scorer-2"]) {
+        await ctx.db.insert("scorerCompletions", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor", vendorId,
+          scorerScopeKey: `individual:${scorer}`, scorerScopeLabel: scorer, scorerScopeType: "individual",
+          status: "completed", answeredCount: 3, totalRequirements: 3,
+          updatedByUserId: scorer, updatedByDisplayName: scorer, updatedAt: 1, completedAt: 1,
+        });
+      }
+    });
+    const final = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(final.vendors[0].scorersCompleted).toBe(2);
+    expect(final.leader.scorers.isProvisional).toBe(false);
+  });
+
+  test("only consultants and company admins of the workspace can open the dashboard", async () => {
+    const { t, seeded } = await seed();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("consultants", { userId: "platform-consultant", displayName: "Consultant", isActive: true, grantedAt: 1 });
+    });
+    await expect(t.withIdentity({ tokenIdentifier: "beta-admin" })
+      .query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId })).resolves.toBeTruthy();
+    await expect(t.withIdentity({ tokenIdentifier: "platform-consultant" })
+      .query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId })).resolves.toBeTruthy();
+    for (const outsider of ["beta-scorer", "northwind-vendor", "acme-admin", "unrelated-user"]) {
+      await expect(t.withIdentity({ tokenIdentifier: outsider, name: "Beta Admin" })
+        .query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId }))
+        .rejects.toThrow("Only consultants and company admins");
+    }
+  });
+
+  test("an organisation with several contacts is one row, and nothing is double-counted", async () => {
+    const { t, seeded, vendorId } = await seed();
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId, rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }], confirm: true,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("companyMembers", {
+        companyId: seeded.companyBId, vendorId, userId: "second-contact",
+        displayName: "Second Contact", role: "vendor", isActive: true, createdAt: 1,
+      });
+      await ctx.db.insert("scores", {
+        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: "northwind-vendor", vendorId,
+        requirementId: "REQ", score: 1, enteredBy: "northwind-vendor", enteredAt: 1,
+      });
+    });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(dashboard.vendors).toHaveLength(1);
+    expect(dashboard.vendors[0].totals.vendorSelf.combined).toBe(9);
+  });
+
+  test("conflicting answers for one organisation are excluded and block the leader", async () => {
+    const { t, seeded, vendorId } = await seed();
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId, rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }], confirm: true,
+    });
+    await t.run(async (ctx) => {
+      for (const [user, score] of [["northwind-vendor", 1], ["old-contact", 0]] as const) {
+        await ctx.db.insert("scores", {
+          companyId: seeded.companyBId, projectId: seeded.projectBId, vendorUserId: user, vendorId,
+          requirementId: "REQ", score, enteredBy: user, enteredAt: 1,
+        });
+      }
+    });
+    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
+    expect(dashboard.hasDataConflicts).toBe(true);
+    expect(dashboard.vendors[0].totals.vendorSelf.combined).toBe(0);
+    expect(dashboard.leader.vendorSelf.vendorIds).toEqual([]);
+  });
+
+  test("answers awaiting migration are not counted and block the leader", async () => {
+    const { t, seeded } = await seed();
+    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
+    await admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectBId, rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }], confirm: true,
     });
     await t.run(async (ctx) => {
       await ctx.db.insert("scores", {
-        companyId: seeded.companyBId, projectId: seeded.projectBId,
-        vendorUserId: "old-contact", requirementId: "REQ", score: 0, enteredBy: "old-contact", enteredAt: 1,
+        companyId: seeded.companyBId, projectId: seeded.projectBId as Id<"projects">,
+        vendorUserId: "old-contact", requirementId: "REQ", score: 1, enteredBy: "old-contact", enteredAt: 1,
       });
     });
     const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
     expect(dashboard.migrationRequired).toBe(true);
-    expect(dashboard.leadingVendorUserId).toBeNull();
-    expect(dashboard.rows[0]).toMatchObject({ total: 0, scoredCount: 0, missingCount: 1 });
-    const panel = await t.withIdentity({ tokenIdentifier: "northwind-vendor" }).query(
-      api.scores.listVendorAnswerRequirements, { projectId: seeded.projectBId },
-    );
-    expect(panel.migrationRequired).toBe(true);
-    expect(panel.rows.find((row) => row.requirementId === "REQ")?.score).toBeNull();
-  });
-
-  test("conflicting organisation answers are excluded, even after the contact leaves", async () => {
-    const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(internal.access.seedScenario, {
-      companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
-    });
-    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
-    await admin.mutation(api.requirements.applyRequirementImport, {
-      projectId: seeded.projectBId,
-      rows: [{ id: "REQ", text: "Requirement", type: "user-story", priority: 9 }],
-      confirm: true,
-    });
-    await admin.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId, vendorUserId: "northwind-vendor", requirementId: "REQ", score: 1,
-    });
-    const vendorId = await t.run(async (ctx) => {
-      const member = await ctx.db.query("companyMembers")
-        .withIndex("by_company_user", (q) => q.eq("companyId", seeded.companyBId).eq("userId", "northwind-vendor")).unique();
-      if (!member?.vendorId) throw new Error("Missing test organisation");
-      await ctx.db.insert("scores", {
-        companyId: seeded.companyBId, projectId: seeded.projectBId, vendorId: member.vendorId,
-        vendorUserId: "old-contact", requirementId: "REQ", score: 1, enteredBy: "old-contact", enteredAt: 1,
-      });
-      await ctx.db.patch(member._id, { isActive: false });
-      return member.vendorId;
-    });
-    const dashboard = await admin.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId });
-    const row = dashboard.rows.find((entry) => entry.vendorId === vendorId);
-    expect(row).toMatchObject({ vendorUserId: null, hasConflicts: true, total: 0, scoredCount: 0, missingCount: 1 });
-    expect(dashboard.leadingVendorUserId).toBeNull();
-  });
-
-  test("a matching name does not authorize dashboard access", async () => {
-    const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(internal.access.seedScenario, {
-      companyAName: "Acme Health", companyBName: "Beta Logistics",
-      projectAName: "HR Platform", projectBName: "Supply Chain",
-    });
-    for (const name of ["Beta Admin", "Beta Scorer"]) {
-      const outsider = t.withIdentity({ tokenIdentifier: "unrelated-user", email: "unrelated@example.com", name });
-      await expect(outsider.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId }))
-        .rejects.toThrow("Project access denied");
-    }
-  });
-
-  test("the project dashboard calculates weighted totals from real requirements and scope-checked score rows", async () => {
-    const t = convexTest({ schema, modules });
-    const seeded = await t.mutation(internal.access.seedScenario, {
-      companyAName: "Acme Health",
-      companyBName: "Beta Logistics",
-      projectAName: "HR Platform",
-      projectBName: "Supply Chain",
-    });
-
-    const admin = t.withIdentity({ tokenIdentifier: "beta-admin" });
-    const scorer = t.withIdentity({ tokenIdentifier: "beta-scorer" });
-    const vendor = t.withIdentity({ tokenIdentifier: "northwind-vendor" });
-
-    await admin.mutation(api.requirements.applyRequirementImport, {
-      projectId: seeded.projectBId,
-      rows: [
-        { id: "REQ-201", text: "Deliver on time", type: "user-story", priority: 9 },
-        { id: "REQ-202", text: "Support full traceability", type: "nfr", priority: 3 },
-        { id: "REQ-203", text: "Optional feature", type: "user-story", priority: 1 },
-      ],
-      confirm: true,
-    });
-
-    await scorer.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId,
-      vendorUserId: "northwind-vendor",
-      requirementId: "REQ-201",
-      score: 1,
-      comment: "Good",
-    });
-
-    await scorer.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId,
-      vendorUserId: "northwind-vendor",
-      requirementId: "REQ-202",
-      score: 0,
-      comment: "Needs work",
-    });
-
-    await scorer.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId,
-      vendorUserId: "northwind-vendor",
-      requirementId: "REQ-203",
-      score: 1,
-      comment: "Good",
-    });
-
-    await vendor.mutation(api.scores.submitScore, {
-      projectId: seeded.projectBId,
-      vendorUserId: "northwind-vendor",
-      requirementId: "REQ-201",
-      score: 1,
-      comment: "Self-score",
-    });
-
-    await t.run(async (ctx) => {
-      const legacyMember = await ctx.db.query("projectMembers")
-        .withIndex("by_project_user", (q) => q.eq("projectId", seeded.projectBId).eq("userId", "northwind-vendor"))
-        .unique();
-      if (!legacyMember) throw new Error("Missing test membership");
-      await ctx.db.patch(legacyMember._id, { role: "company-scorer" });
-      await ctx.db.insert("projectMembers", {
-        companyId: seeded.companyBId, projectId: seeded.projectBId, userId: "unassigned-vendor",
-        role: "vendor", displayName: "Unassigned vendor", isActive: true, createdAt: Date.now(),
-      });
-    });
-
-    const dashboard = await scorer.query(api.dashboard.getProjectDashboard, {
-      projectId: seeded.projectBId,
-    });
-
-    expect(dashboard.leadingVendorUserId).toBe("northwind-vendor");
-    expect(dashboard.rows).toHaveLength(1);
-    expect(dashboard.rows[0].vendorUserId).toBe("northwind-vendor");
-    expect(dashboard.rows[0].userStoryTotal).toBe(10);
-    expect(dashboard.rows[0].nfrTotal).toBe(0);
-    expect(dashboard.rows[0].total).toBe(9);
-    expect(dashboard.rows[0].unmetCount).toBe(1);
-    expect(dashboard.rows[0].missingCount).toBe(0);
-
-    await expect(
-      vendor.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectBId }),
-    ).rejects.toThrow("Project access denied");
-
-    await expect(
-      scorer.query(api.dashboard.getProjectDashboard, { projectId: seeded.projectAId }),
-    ).rejects.toThrow("Project access denied");
+    expect(dashboard.vendors[0].totals.vendorSelf.combined).toBe(0);
+    expect(dashboard.leader.vendorSelf.vendorIds).toEqual([]);
   });
 });
-

@@ -1,147 +1,107 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
-import { findVendorMembershipForIdentity, getProjectVendors } from "./projectVendors";
+import { getProjectVendors } from "./projectVendors";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./vendorAnswers";
+import { getVendorScorerCompletion, getVendorScorerHistory, scorerHistoryNeedsMigration } from "./scorerHistory";
+import { assertVendorReviewAccess } from "./scores";
+import { computeVendorTotals, pickLeaders, type TotalsRequirement } from "./scoreTotals";
 
-function getIdentityUserIds(identity: { subject?: string; tokenIdentifier?: string }) {
-  return Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
-}
-
-async function assertProjectDashboardAccess(ctx: any, projectId: string) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) {
-    throw new Error("Not signed in");
-  }
-
-  const project = await ctx.db.get(projectId as any);
-  if (!project) {
-    throw new Error("Project not found");
-  }
-  if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
-    throw new Error("Project access denied");
-  }
-
-  const userIds = getIdentityUserIds(identity);
-  const normalizedEmail = identity.email?.trim().toLowerCase();
-
-  const member = await ctx.db
-    .query("projectMembers")
-    .filter((q: any) => q.eq(q.field("projectId"), projectId))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .filter((q: any) => q.or(
-      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-    ))
-    .first();
-
-  if (member && member.companyId === project.companyId && (member.role === "company-admin" || member.role === "company-scorer")) {
-    return { project, identity, member };
-  }
-
-  const companyAdminMembership = await ctx.db
-    .query("companyMembers")
-    .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
-    .filter((q: any) => q.eq(q.field("role"), "company-admin"))
-    .filter((q: any) => q.eq(q.field("isActive"), true))
-    .filter((q: any) => q.or(
-      ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(normalizedEmail ? [q.eq(q.field("email"), normalizedEmail)] : []),
-    ))
-    .first();
-
-  if (companyAdminMembership) {
-    return {
-      project,
-      identity,
-      member: {
-        companyId: project.companyId,
-        projectId,
-        userId: companyAdminMembership.userId,
-        role: "company-admin",
-      },
-    };
-  }
-
-  if (!member || member.companyId !== project.companyId) {
-    throw new Error("Project access denied");
-  }
-
-  throw new Error("Project access denied");
-}
-
+/**
+ * Project dashboard (Phase 6b). Consultants and company admins only.
+ * Official totals use the company scorers' scores (priority x average score);
+ * vendor self-score totals are returned alongside for comparison.
+ * One answer per vendor organisation per requirement; nothing is subtracted.
+ */
 export const getProjectDashboard = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const { project, member } = await assertProjectDashboardAccess(ctx, args.projectId);
-    const requirements = await ctx.db
+    const { project } = await assertVendorReviewAccess(ctx, args.projectId);
+
+    const requirementDocs = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q) => q.eq("companyId", project.companyId).eq("projectId", args.projectId))
-      .collect();
+      .take(2000);
+    const requirements: TotalsRequirement[] = requirementDocs.map((row) => ({
+      requirementId: row.requirementId,
+      type: row.type,
+      priority: row.priority,
+      status: row.status,
+    }));
+
+    const scorerAssignments = await ctx.db
+      .query("projectMembers")
+      .withIndex("by_project_user", (q) => q.eq("projectId", args.projectId))
+      .take(500);
+    const assignedScorerUserIds = [...new Set(scorerAssignments
+      .filter((row) => row.isActive && row.role === "company-scorer")
+      .map((row) => row.userId))];
 
     const answerState = await getProjectVendorAnswerState(ctx, project);
+    const scorerHistoryMigrationRequired = await scorerHistoryNeedsMigration(ctx, args.projectId);
     const vendors = await getProjectVendors(ctx, project);
 
-    const rows = vendors.map((vendor) => {
-      const vendorUserId = vendor.primaryContact?.userId ?? null;
-      const vendorScores = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
-      const userStoryTotal = vendorScores
-        .filter((entry) => {
-          const requirement = requirements.find((item) => item.requirementId === entry.requirementId);
-          return requirement && requirement.type === "user-story" && requirement.status !== "withdrawn" && requirement.priority !== 0;
-        })
-        .reduce((sum, entry) => {
-          const requirement = requirements.find((item) => item.requirementId === entry.requirementId)!;
-          const weighted = requirement.priority * entry.score;
-          return sum + weighted;
-        }, 0);
+    const vendorRows = await Promise.all(vendors.map(async (vendor) => {
+      const scorerHistory = await getVendorScorerHistory(ctx, args.projectId, vendor.vendorId);
+      const vendorAnswers = [...getUnconflictedVendorAnswers(answerState, vendor.vendorId).values()];
+      const totals = computeVendorTotals({
+        requirements,
+        assignedScorerCount: assignedScorerUserIds.length,
+        scorerScores: scorerHistory.scores.map((row) => ({
+          requirementId: row.requirementId,
+          scorerKey: row.scorerScopeKey,
+          score: row.score,
+        })),
+        vendorAnswers: vendorAnswers.map((row) => ({ requirementId: row.requirementId, score: row.score })),
+      });
 
-      const nfrTotal = vendorScores
-        .filter((entry) => {
-          const requirement = requirements.find((item) => item.requirementId === entry.requirementId);
-          return requirement && requirement.type === "nfr" && requirement.status !== "withdrawn" && requirement.priority !== 0;
-        })
-        .reduce((sum, entry) => {
-          const requirement = requirements.find((item) => item.requirementId === entry.requirementId)!;
-          const weighted = requirement.priority * entry.score;
-          return sum + weighted;
-        }, 0);
+      let scorersCompleted = 0;
+      for (const userId of assignedScorerUserIds) {
+        const { completion } = await getVendorScorerCompletion(ctx, args.projectId, vendor.vendorId, `individual:${userId}`);
+        if (completion?.status === "completed") scorersCompleted += 1;
+      }
 
-      const unmetCount = vendorScores.filter((entry) => entry.score === 0).length;
-      const missingCount = requirements.filter((requirement) => {
-        if (requirement.status === "withdrawn" || requirement.priority === 0) return false;
-        return !vendorScores.some((entry) => entry.requirementId === requirement.requirementId);
-      }).length;
-
-      const scoredCount = vendorScores.length;
-      const total = userStoryTotal + nfrTotal - unmetCount;
+      const hasAnswerConflicts = [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])]
+        .some((answers) => answers.length > 1);
 
       return {
         vendorId: vendor.vendorId,
-        vendorUserId,
         vendorName: vendor.vendorName,
-        hasConflicts: [...(answerState.grouped.get(vendor.vendorId)?.values() ?? [])].some((answers) => answers.length > 1),
-        userStoryTotal,
-        nfrTotal,
-        total,
-        unmetCount,
-        missingCount,
-        scoredCount,
+        totals,
+        scorersCompleted,
+        hasScorerConflicts: scorerHistory.hasConflicts,
+        hasAnswerConflicts,
       };
-    });
+    }));
 
-    const leadingVendor = rows.reduce<{ vendorUserId: string | null; total: number } | null>((best, row) => {
-      if (!best || row.total > best.total) {
-        return { vendorUserId: row.vendorUserId, total: row.total };
-      }
-      return best;
-    }, null);
+    const blockedByData = answerState.migrationRequired || scorerHistoryMigrationRequired
+      || vendorRows.some((row) => row.hasScorerConflicts || row.hasAnswerConflicts);
+
+    const scorerLeader = blockedByData ? { vendorIds: [], isTie: false } : pickLeaders(vendorRows.map((row) => ({
+      vendorId: row.vendorId,
+      combined: row.totals.scorers.combined,
+      hasAnyScore: row.totals.coverage.fullyScored + row.totals.coverage.partlyScored > 0,
+    })));
+    const vendorSelfLeader = blockedByData ? { vendorIds: [], isTie: false } : pickLeaders(vendorRows.map((row) => ({
+      vendorId: row.vendorId,
+      combined: row.totals.vendorSelf.combined,
+      hasAnyScore: row.totals.coverage.vendorAnswered > 0,
+    })));
+
+    const allScoringComplete = assignedScorerUserIds.length > 0 && vendorRows.length > 0
+      && vendorRows.every((row) => row.scorersCompleted === assignedScorerUserIds.length);
 
     return {
       projectId: args.projectId,
-      companyId: project.companyId,
+      projectName: project.name as string,
+      assignedScorerCount: assignedScorerUserIds.length,
       migrationRequired: answerState.migrationRequired,
-      canViewScorerDetails: member.role === "company-admin" || member.role === "company-scorer",
-      leadingVendorUserId: answerState.migrationRequired || rows.some((row) => row.hasConflicts) ? null : leadingVendor?.vendorUserId ?? null,
-      rows,
+      scorerHistoryMigrationRequired,
+      hasDataConflicts: vendorRows.some((row) => row.hasScorerConflicts || row.hasAnswerConflicts),
+      vendors: vendorRows,
+      leader: {
+        scorers: { ...scorerLeader, isProvisional: !allScoringComplete },
+        vendorSelf: { ...vendorSelfLeader, isProvisional: !allScoringComplete },
+      },
     };
   },
 });

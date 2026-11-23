@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { computeVendorTotals } from "./scoreTotals";
 import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -243,7 +244,7 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
   throw new Error("Project access denied");
 }
 
-async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; actorUserId: string; actorDisplayName: string }> {
+export async function assertVendorReviewAccess(ctx: any, projectId: string): Promise<{ project: any; identity: any; actorUserId: string; actorDisplayName: string }> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     throw new Error("Not signed in");
@@ -1291,6 +1292,8 @@ export const getProjectRequirementComparison = query({
         vendorUserId: vendor.vendorUserId,
         vendorContactName: vendor.vendorContactName,
         scorerByRequirementId,
+        scorerScoresForTotals: scorerRows.map((row) => ({ requirementId: row.requirementId, scorerKey: row.scorerScopeKey, score: row.score })),
+        vendorAnswersForTotals: vendorRows.map((row) => ({ requirementId: row.requirementId, score: row.score })),
         scorerHasConflicts: scorerState.hasConflicts,
         vendorByRequirementId,
         amendmentsByRequirementId,
@@ -1341,53 +1344,32 @@ export const getProjectRequirementComparison = query({
       };
     });
 
+    const totalsRequirements = requirementRows.map((requirement) => ({
+      requirementId: requirement.requirementId,
+      type: requirement.type,
+      priority: requirement.priority,
+      status: requirement.status,
+    }));
     const totalsByVendor = vendorComparison.map((vendor) => {
-      let scorerRequirementsTotal = 0;
-      let scorerNfrTotal = 0;
-      let vendorRequirementsTotal = 0;
-      let vendorNfrTotal = 0;
-
-      for (const requirement of rows) {
-        if (requirement.status === "withdrawn" || requirement.priority === 0) {
-          continue;
-        }
-
-        const cell = requirement.cells.find((item) => item.vendorId === vendor.vendorId);
-        if (!cell) {
-          continue;
-        }
-
-        if (typeof cell.scorerAverage === "number") {
-          const weighted = requirement.priority * cell.scorerAverage;
-          if (requirement.type === "nfr") {
-            scorerNfrTotal += weighted;
-          } else {
-            scorerRequirementsTotal += weighted;
-          }
-        }
-
-        if (typeof cell.vendorScore === "number") {
-          const weighted = requirement.priority * cell.vendorScore;
-          if (requirement.type === "nfr") {
-            vendorNfrTotal += weighted;
-          } else {
-            vendorRequirementsTotal += weighted;
-          }
-        }
-      }
-
+      // Shared with the project dashboard (convex/scoreTotals.ts) so both always agree.
+      const totals = computeVendorTotals({
+        requirements: totalsRequirements,
+        assignedScorerCount: totalScorers,
+        scorerScores: vendor.scorerScoresForTotals,
+        vendorAnswers: vendor.vendorAnswersForTotals,
+      });
       return {
         vendorId: vendor.vendorId,
         vendorUserId: vendor.vendorUserId,
         scorer: {
-          requirements: scorerRequirementsTotal,
-          nfr: scorerNfrTotal,
-          combined: scorerRequirementsTotal + scorerNfrTotal,
+          requirements: totals.scorers.requirements,
+          nfr: totals.scorers.nfr,
+          combined: totals.scorers.combined,
         },
         vendor: {
-          requirements: vendorRequirementsTotal,
-          nfr: vendorNfrTotal,
-          combined: vendorRequirementsTotal + vendorNfrTotal,
+          requirements: totals.vendorSelf.requirements,
+          nfr: totals.vendorSelf.nfr,
+          combined: totals.vendorSelf.combined,
         },
       };
     });
