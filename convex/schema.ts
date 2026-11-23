@@ -10,6 +10,9 @@ export default defineSchema({
     isActive: v.boolean(),
     ssoProvider: v.optional(v.string()),
     isTestData: v.optional(v.boolean()),
+    // Client branding, set by VS Consultants only (shown in the app header and on reports).
+    brandName: v.optional(v.string()),
+    brandLogoStorageId: v.optional(v.id("_storage")),
   }).index("by_slug", ["slug"]),
 
   consultants: defineTable({

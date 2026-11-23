@@ -100,9 +100,13 @@ export function ProjectReportPage({ companyId, projectId }: { companyId: string;
         className="mx-auto my-6 max-w-5xl bg-white p-10 text-sm text-slate-800 shadow print:my-0 print:max-w-none print:p-0 print:shadow-none"
       >
         <header>
+          {report.brandLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={report.brandLogoUrl} alt={`${report.brandName || report.companyName} logo`} className="mb-4 h-14 max-w-[220px] object-contain" />
+          ) : null}
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Vendor selection report</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">{report.projectName}</h1>
-          <p className="text-slate-600">{report.companyName}</p>
+          <p className="text-slate-600">{report.brandName || report.companyName}</p>
           {report.projectDescription ? <p className="mt-2 text-slate-700">{report.projectDescription}</p> : null}
           <p className="mt-2 text-xs text-slate-500">
             Generated {new Date().toLocaleString("en-GB")} · Vendor deadline {formatReportDate(report.vendorDeadlineAt) || "not set"} · Scorer deadline {formatReportDate(report.scorerDeadlineAt) || "not set"} · {report.summary.assignedScorerCount} scorer{report.summary.assignedScorerCount === 1 ? "" : "s"}

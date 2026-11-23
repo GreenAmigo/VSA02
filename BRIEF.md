@@ -158,6 +158,11 @@ The app uses a single canonical consultant home route for the workspace director
 - Done: 6b(a) totals query, 6b(b) vendor status / unscored / scorer progress, 6b(c) dashboard page.
 - Sign-off report done (Excel + PDF). Next: final security and launch checks. Note: the `xlsx` 0.18.5 package has known vulnerabilities when READING untrusted files (used by requirements import); review in the security phase.
 
+### Client branding (Nov 2026)
+- Per workspace (client company): logo (PNG/JPEG/WebP, max 1 MB; SVG refused) and display name, stored on `companies.brandLogoStorageId` / `companies.brandName`.
+- Set ONLY by VS Consultants (`convex/branding.ts`, server-enforced; Activity log entry `update_workspace_branding`). UI: "Client branding" panel on the workspace Overview page (`src/components/workspace-branding-panel.tsx`), consultants only.
+- Shown to everyone in that workspace in the page header (via `getCurrentUserAccess().branding`), and on sign-off reports (logo + name on PDF; name on Excel Summary).
+
 ## Deployment to-do
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.
 - Later, add the live address to WorkOS Production Redirects.

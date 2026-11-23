@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 // Shape of api.report.getProjectReport (kept local so this file has no server imports).
 export type ProjectReport = {
   companyName: string;
+  brandName?: string | null;
+  brandLogoUrl?: string | null;
   projectName: string;
   projectDescription: string;
   vendorDeadlineAt: number | null;
@@ -66,7 +68,7 @@ export function buildReportWorkbook(report: ProjectReport, generatedAt: Date) {
 
   const summary: Array<Array<string | number>> = [
     [`${report.projectName} - vendor selection report`],
-    ["Company", report.companyName],
+    ["Company", report.brandName || report.companyName],
     ["Generated", generatedAt.toLocaleString("en-GB")],
     ["Vendor deadline", formatReportDate(report.vendorDeadlineAt)],
     ["Scorer deadline", formatReportDate(report.scorerDeadlineAt)],

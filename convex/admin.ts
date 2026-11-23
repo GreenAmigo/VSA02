@@ -50,7 +50,7 @@ function isProductionEnvironment(): boolean {
   return environment !== "development" && environment !== "preview";
 }
 
-async function recordActivity(
+export async function recordActivity(
   ctx: any,
   payload: {
     actorUserId: string;
@@ -141,7 +141,7 @@ async function getActiveConsultantRow(ctx: any, userIds: string | string[]) {
   return null;
 }
 
-async function assertConsultantAccess(ctx: any) {
+export async function assertConsultantAccess(ctx: any) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     throw new Error("Not signed in");

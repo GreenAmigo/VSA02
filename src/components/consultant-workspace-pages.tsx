@@ -11,6 +11,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { parseRequirementFileWithIssues, toRequirementImportRows, type RequirementImportRow } from "../lib/projectRequirements";
 import { SignOutButton } from "./sign-out-button";
 import { SignedInPanel } from "./signed-in-panel";
+import { WorkspaceBrandingPanel } from "./workspace-branding-panel";
 
 type WorkspaceShellWorkspace = {
   id: string;
@@ -1664,6 +1665,8 @@ export function WorkspaceShell({
   };
 
   const tabs = tabsByRole[role ?? "consultant"] ?? tabsByRole.consultant;
+  const brand = (access?.branding as Array<{ companyId: string; brandName: string | null; logoUrl: string | null }> | undefined)
+    ?.find((item) => item.companyId === workspace.id);
   const roleLabel =
     role === "consultant" ? "VS Consultant" : role === "company-admin" ? "Company admin" : role === "company-scorer" ? "Company scorer" : "Vendor";
   const isVendorShell = role === "vendor";
@@ -1758,9 +1761,13 @@ export function WorkspaceShell({
               </div>
               {sanitizedBreadcrumbs && sanitizedBreadcrumbs.length > 0 ? <WorkspaceBreadcrumbs items={sanitizedBreadcrumbs} /> : null}
               <div className="flex items-center gap-3">
-                <div>
+                {brand?.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={brand.logoUrl} alt={`${brand.brandName ?? workspace.name} logo`} className="h-12 max-w-[160px] shrink-0 rounded bg-white object-contain p-1" />
+                ) : null}
+                <div className="min-w-0">
                   <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400">Workspace landing</p>
-                  <h1 className="mt-2 truncate text-2xl font-semibold text-white" title={workspace.name}>{workspace.name}</h1>
+                  <h1 className="mt-2 truncate text-2xl font-semibold text-white" title={brand?.brandName ?? workspace.name}>{brand?.brandName ?? workspace.name}</h1>
                 </div>
                 {workspace.isTestData ? <StatusPill label="TEST" className="border-rose-500/50 bg-rose-500/10 text-rose-200" /> : null}
               </div>
@@ -2603,6 +2610,13 @@ export function ConsultantWorkspaceOverviewPage({ companyId }: { companyId: stri
           </section>
         </>
       )}
+      {!isVendorView && access.isConsultant ? (
+        <WorkspaceBrandingPanel
+          companyId={companyId}
+          companyName={workspace.name}
+          branding={(access.branding ?? []).find((brand: { companyId: string }) => brand.companyId === companyId)}
+        />
+      ) : null}
     </WorkspaceShell>
   );
 }

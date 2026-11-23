@@ -7,6 +7,7 @@ import { getProjectVendors } from "./projectVendors";
 import { getProjectVendorAnswerState, getUnconflictedVendorAnswers } from "./vendorAnswers";
 import { getVendorScorerHistory } from "./scorerHistory";
 import { averageScorerScore, isScorable, scorerOutcome } from "./scoreTotals";
+import { getCompanyBranding } from "./branding";
 
 function isEmailLike(value: string | null | undefined) {
   return Boolean(value && value.includes("@"));
@@ -142,8 +143,12 @@ export const getProjectReport = query({
     const sortRows = <T extends { vendorName: string }>(rows: T[], key: (row: T) => string) =>
       rows.sort((a, b) => a.vendorName.localeCompare(b.vendorName) || key(a).localeCompare(key(b)));
 
+    const branding = company ? await getCompanyBranding(ctx, company) : null;
+
     return {
       companyName: company?.name ?? "",
+      brandName: branding?.brandName ?? null,
+      brandLogoUrl: branding?.logoUrl ?? null,
       projectName: project.name as string,
       projectDescription: (project.description as string | undefined) ?? "",
       vendorDeadlineAt: typeof project.vendorDeadline === "number" ? project.vendorDeadline as number : null,

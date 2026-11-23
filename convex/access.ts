@@ -1,4 +1,5 @@
 import { query, mutation, action, internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { getCompanyBranding } from "./branding";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -913,6 +914,7 @@ export const getCurrentUserAccess = query({
         companyIds: [] as string[],
         consultantDisplayName: null,
         profiles: [] as Array<{ companyId: string; role: string; displayName: string; departmentName: string | null }>,
+        branding: [] as Array<{ companyId: string; brandName: string | null; logoUrl: string | null }>,
       };
     }
 
@@ -958,9 +960,18 @@ export const getCurrentUserAccess = query({
       });
     }
 
+    // Client branding for the workspaces this person can see (shown in the app header).
+    const branding: Array<{ companyId: string; brandName: string | null; logoUrl: string | null }> = [];
+    for (const companyId of companyIds) {
+      const company = await ctx.db.get(companyId);
+      const brand = company ? await getCompanyBranding(ctx, company) : null;
+      if (brand) branding.push(brand);
+    }
+
     return {
       consultantDisplayName: consultantRecord?.displayName ?? null,
       profiles,
+      branding,
       email: identity.email ?? memberships[0]?.email ?? consultantRecord?.email ?? null,
       displayName: identity.name ?? memberships[0]?.displayName ?? consultantRecord?.displayName ?? null,
       tokenIdentifier: identity.tokenIdentifier,
