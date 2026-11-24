@@ -8,6 +8,7 @@ import { useAuth } from "@workos-inc/authkit-nextjs/components";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
+  CollapsibleSection,
   StatusPill,
   WorkspaceShell,
   getVendorLifecycleLabel,
@@ -31,14 +32,9 @@ function formatDate(timestamp: number | null | undefined) {
   return typeof timestamp === "number" ? new Date(timestamp).toLocaleDateString() : "Not set";
 }
 
+/** Dashboard sections fold down to their title (closed by default), like the project page. */
 function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-      <h3 className="text-lg font-semibold text-white">{title}</h3>
-      {subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}
-      <div className="mt-4">{children}</div>
-    </section>
-  );
+  return <CollapsibleSection title={title} subtitle={subtitle}>{children}</CollapsibleSection>;
 }
 
 export function ProjectDashboardPage({ companyId, projectId }: { companyId: string; projectId: string }) {
@@ -174,7 +170,7 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
         ) : null}
       </section>
 
-      <Panel title="Vendor totals" subtitle="Weighted total = priority × score (Must 9, Should 3, Could 1). Out of scope and withdrawn requirements are excluded.">
+      <Panel title="Vendor totals" subtitle="Weighted total = priority (Must 9, Should 3, Could 1) × verdict (Met = 1, Not met = 0). Out of scope and withdrawn requirements are excluded.">
         {vendors.length === 0 ? <p className="text-sm text-slate-400">No vendors are assigned to this project yet.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
@@ -259,7 +255,7 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
         </Panel>
       ) : null}
 
-      <Panel title="What needs action">
+      <Panel title="What needs action" subtitle={incompletePairs.length + vendorsNotSubmitted.length === 0 ? "Nothing outstanding" : `${incompletePairs.length + vendorsNotSubmitted.length} item${incompletePairs.length + vendorsNotSubmitted.length === 1 ? "" : "s"} outstanding`}>
         {incompletePairs.length === 0 && vendorsNotSubmitted.length === 0 ? (
           <p className="text-sm text-emerald-200">Nothing outstanding. Every vendor has submitted and every scorer has completed every vendor.</p>
         ) : (
@@ -274,7 +270,7 @@ export function ProjectDashboardPage({ companyId, projectId }: { companyId: stri
         )}
       </Panel>
 
-      <Panel title="Unscored requirements" subtitle="Requirements no scorer has scored yet, per vendor.">
+      <Panel title="Unscored requirements" subtitle={`Requirements no scorer has scored yet, per vendor: ${vendors.reduce((sum, vendor) => sum + vendor.unscoredRequirements.length, 0)} in total`}>
         {vendors.every((vendor) => vendor.unscoredRequirements.length === 0) ? (
           <p className="text-sm text-slate-400">Every requirement has at least one scorer's score for every vendor.</p>
         ) : (
