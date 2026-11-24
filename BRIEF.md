@@ -158,6 +158,8 @@ Note (Nov 2026): the old `/projects/...` routes, `middleware.ts` (duplicate of `
 - Shown to everyone in that workspace in the page header (via `getCurrentUserAccess().branding`), and on sign-off reports (logo + name on PDF; name on Excel Summary).
 
 ## Deployment to-do
+- Production Convex deployment: set APP_ENVIRONMENT=production (this locks all test/seed/repair tools) and set CONVEX_CONSULTANT_GRANT_SECRET to a random value of at least 32 characters (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"; keep it in a password manager).
+- First production Consultant: sign in once on the live site, copy your user ID (starts with user_) from WorkOS Production > Users, then in the Convex dashboard (Production deployment > Functions) run admin:grantConsultantRole with {"secret":"<GRANT_SECRET>","userId":"<REAL_WORKOS_USER_ID>","email":"<EMAIL>","displayName":"<NAME>"}. Remove a Consultant with admin:revokeConsultantRole {"secret":"<GRANT_SECRET>","userId":"<REAL_WORKOS_USER_ID>"}.
 - After deploying to Vercel, add https://<vercel-address>/auth/callback to WorkOS Staging Redirects.
 - Later, add the live address to WorkOS Production Redirects.
 - At launch, set the WorkOS Production Sign-out Redirect to the live app home URL.

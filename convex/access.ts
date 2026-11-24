@@ -90,6 +90,11 @@ export const seedScenario = internalMutation({
     projectBName: v.string(),
   },
   handler: async (ctx, args) => {
+    // Test data only: the automated tests, or a development/preview database. Never production.
+    const environment = (process.env.APP_ENVIRONMENT ?? "production").trim().toLowerCase();
+    if (process.env.VITEST !== "true" && environment !== "development" && environment !== "preview") {
+      throw new Error("Test scenario seeding is only available in tests, development or preview");
+    }
     const matchByCompanySlug = async (name: string, slug: string) => {
       const existing = await ctx.db
         .query("companies")

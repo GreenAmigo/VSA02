@@ -562,6 +562,36 @@ export const deleteCompany = mutation({
   },
 });
 
+/**
+ * Consultant grants/revokes are internal functions (Convex dashboard / CLI only, never callable
+ * from the website) AND need the grant secret. In production the secret must be at least
+ * 32 characters, and the dev-only fallback secret is not accepted.
+ */
+function assertConsultantGrantSecret(secret: string) {
+  const production = isProductionEnvironment();
+  const expectedSecret = production
+    ? process.env.CONVEX_CONSULTANT_GRANT_SECRET
+    : process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
+  if (!expectedSecret) {
+    throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET on this deployment before granting or revoking the Consultant role");
+  }
+  if (production && expectedSecret.length < 32) {
+    throw new Error("In production, CONVEX_CONSULTANT_GRANT_SECRET must be at least 32 characters");
+  }
+  if (secret !== expectedSecret) {
+    throw new Error("Invalid Consultant grant secret");
+  }
+}
+
+/** In production, only real WorkOS user IDs (user_...) are accepted, so placeholders can't be granted by mistake. */
+function assertRealUserIdInProduction(userId: string) {
+  const trimmed = userId.trim();
+  if (isProductionEnvironment() && !/^user_[A-Za-z0-9]+$/.test(trimmed)) {
+    throw new Error("In production, use the person's real WorkOS user ID (it starts with user_)");
+  }
+  return trimmed;
+}
+
 export const grantConsultantRole = internalMutation({
   args: {
     secret: v.string(),
@@ -571,19 +601,8 @@ export const grantConsultantRole = internalMutation({
     companyId: v.optional(v.id("companies")),
   },
   handler: async (ctx, args) => {
-    if (isProductionEnvironment()) {
-      throw new Error("Consultant role grants are disabled in production");
-    }
-
-    const expectedSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET ?? process.env.DEV_CONSULTANT_GRANT_SECRET;
-    if (!expectedSecret) {
-      throw new Error("Set CONVEX_CONSULTANT_GRANT_SECRET before running the developer-only Consultant grant command");
-    }
-    if (args.secret !== expectedSecret) {
-      throw new Error("Invalid Consultant grant secret");
-    }
-
-    const targetUserId = args.userId.trim();
+    assertConsultantGrantSecret(args.secret);
+    const targetUserId = assertRealUserIdInProduction(args.userId);
     const targetEmail = (args.email ?? "").trim().toLowerCase() || undefined;
     const targetDisplayName = args.displayName?.trim() || targetEmail || "VS Consultant";
 
@@ -635,6 +654,27 @@ export const grantConsultantRole = internalMutation({
       displayName: targetDisplayName,
       grantedCount: 1,
     };
+  },
+});
+
+/** Removes the VS Consultant role (e.g. when someone leaves). Internal only, needs the grant secret. */
+export const revokeConsultantRole = internalMutation({
+  args: { secret: v.string(), userId: v.string() },
+  handler: async (ctx, args) => {
+    assertConsultantGrantSecret(args.secret);
+    const targetUserId = assertRealUserIdInProduction(args.userId);
+    const existing = await getActiveConsultantRow(ctx, targetUserId);
+    if (!existing) {
+      throw new Error("No active VS Consultant found with that user ID");
+    }
+    await ctx.db.patch(existing._id, { isActive: false });
+    await recordActivity(ctx, {
+      actorUserId: "system",
+      actorEmail: existing.email,
+      action: "revoke_vs_consultant_role",
+      details: `Removed the VS Consultant role from ${existing.displayName}.`,
+    });
+    return { userId: targetUserId, revoked: true };
   },
 });
 

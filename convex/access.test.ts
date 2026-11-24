@@ -524,70 +524,78 @@ describe("Phase 2 access checks", () => {
     }
   });
 
-  test("Consultant grants cannot run in Production", async () => {
+  test("in production, grants need a strong secret and a real WorkOS user ID, and can be revoked", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
-
+    const strong = "s".repeat(32);
     try {
-      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
       process.env.APP_ENVIRONMENT = "production";
 
-      await expect(
-        t.mutation(internal.admin.grantConsultantRole, {
-          secret: "test-consultant-secret",
-          userId: "workos_user_frazer_preview",
-          email: "frazerknight@hotmail.com",
-          displayName: "Frazer Knight",
-        }),
-      ).rejects.toThrow("Consultant role grants are disabled in production");
-    } finally {
-      if (previousSecret === undefined) {
-        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
-      } else {
-        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
-      }
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = "short-secret";
+      await expect(t.mutation(internal.admin.grantConsultantRole, { secret: "short-secret", userId: "user_01ABC" }))
+        .rejects.toThrow("at least 32 characters");
 
-      if (previousAppEnvironment === undefined) {
-        delete process.env.APP_ENVIRONMENT;
-      } else {
-        process.env.APP_ENVIRONMENT = previousAppEnvironment;
-      }
+      process.env.CONVEX_CONSULTANT_GRANT_SECRET = strong;
+      await expect(t.mutation(internal.admin.grantConsultantRole, { secret: "wrong".repeat(8), userId: "user_01ABC" }))
+        .rejects.toThrow("Invalid Consultant grant secret");
+      await expect(t.mutation(internal.admin.grantConsultantRole, { secret: strong, userId: "workos_user_frank_preview" }))
+        .rejects.toThrow("real WorkOS user ID");
+
+      const granted = await t.mutation(internal.admin.grantConsultantRole, {
+        secret: strong, userId: "user_01ABC", email: "frazer@example.com", displayName: "Frazer",
+      });
+      expect(granted.userId).toBe("user_01ABC");
+      const access = await t.withIdentity({ tokenIdentifier: "user_01ABC", subject: "user_01ABC" }).query(api.access.getCurrentUserAccess, {});
+      expect(access.isConsultant).toBe(true);
+
+      await t.mutation(internal.admin.revokeConsultantRole, { secret: strong, userId: "user_01ABC" });
+      const after = await t.withIdentity({ tokenIdentifier: "user_01ABC", subject: "user_01ABC" }).query(api.access.getCurrentUserAccess, {});
+      expect(after.isConsultant).toBe(false);
+      await expect(t.mutation(internal.admin.revokeConsultantRole, { secret: strong, userId: "user_01ABC" }))
+        .rejects.toThrow("No active VS Consultant");
+    } finally {
+      if (previousSecret === undefined) delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      else process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
+      if (previousAppEnvironment === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previousAppEnvironment;
     }
   });
 
-  test("missing APP_ENVIRONMENT blocks the grant guard as production", async () => {
+  test("a missing APP_ENVIRONMENT is treated as production (strong secret required)", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
     const previousAppEnvironment = process.env.APP_ENVIRONMENT;
-
     try {
       process.env.CONVEX_CONSULTANT_GRANT_SECRET = "test-consultant-secret";
       delete process.env.APP_ENVIRONMENT;
-
-      await expect(
-        t.mutation(internal.admin.grantConsultantRole, {
-          secret: "test-consultant-secret",
-          userId: "missing-env-user",
-          email: "missing-env@example.com",
-          displayName: "Missing Env User",
-        }),
-      ).rejects.toThrow("Consultant role grants are disabled in production");
+      await expect(t.mutation(internal.admin.grantConsultantRole, { secret: "test-consultant-secret", userId: "user_01XYZ" }))
+        .rejects.toThrow("at least 32 characters");
     } finally {
-      if (previousSecret === undefined) {
-        delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
-      } else {
-        process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
-      }
-
-      if (previousAppEnvironment === undefined) {
-        delete process.env.APP_ENVIRONMENT;
-      } else {
-        process.env.APP_ENVIRONMENT = previousAppEnvironment;
-      }
+      if (previousSecret === undefined) delete process.env.CONVEX_CONSULTANT_GRANT_SECRET;
+      else process.env.CONVEX_CONSULTANT_GRANT_SECRET = previousSecret;
+      if (previousAppEnvironment === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previousAppEnvironment;
     }
   });
 
+  test("the test scenario seed refuses to run on a production database", async () => {
+    const t = convexTest({ schema, modules });
+    const previousVitest = process.env.VITEST;
+    const previousAppEnvironment = process.env.APP_ENVIRONMENT;
+    try {
+      delete process.env.VITEST;
+      process.env.APP_ENVIRONMENT = "production";
+      await expect(t.mutation(internal.access.seedScenario, {
+        companyAName: "A", companyBName: "B", projectAName: "A project", projectBName: "B project",
+      })).rejects.toThrow("only available in tests, development or preview");
+    } finally {
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+      if (previousAppEnvironment === undefined) delete process.env.APP_ENVIRONMENT;
+      else process.env.APP_ENVIRONMENT = previousAppEnvironment;
+    }
+  });
   test("a user cannot become a consultant without the developer grant secret", async () => {
     const t = convexTest({ schema, modules });
     const previousSecret = process.env.CONVEX_CONSULTANT_GRANT_SECRET;
