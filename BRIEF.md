@@ -157,6 +157,14 @@ Note (Nov 2026): the old `/projects/...` routes, `middleware.ts` (duplicate of `
 - Set ONLY by VS Consultants (`convex/branding.ts`, server-enforced; Activity log entry `update_workspace_branding`). UI: "Client branding" panel on the workspace Overview page (`src/components/workspace-branding-panel.tsx`), consultants only.
 - Shown to everyone in that workspace in the page header (via `getCurrentUserAccess().branding`), and on sign-off reports (logo + name on PDF; name on Excel Summary).
 
+### Live (production) setup — went live 24 Nov 2026
+- Live address: https://vs.maxwellknight.co.uk (Vercel Production, branch `main`). Preview stays at vspreview.maxwellknight.co.uk with its own Preview env vars and WorkOS Staging.
+- Convex Production deployment: little-egret-984 (EU region), URL https://little-egret-984.eu-west-1.convex.cloud. Env vars: APP_ENVIRONMENT=production, WORKOS_CLIENT_ID, WORKOS_API_KEY, CONVEX_CONSULTANT_GRANT_SECRET (values in password manager only).
+- Vercel Production env vars: WORKOS_CLIENT_ID, WORKOS_API_KEY, WORKOS_COOKIE_PASSWORD, WORKOS_AUTHKIT_DOMAIN, NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://vs.maxwellknight.co.uk/auth/callback, NEXT_PUBLIC_CONVEX_URL (Production Convex URL above).
+- WorkOS Production: redirect https://vs.maxwellknight.co.uk/auth/callback (default), sign-out redirect and homepage https://vs.maxwellknight.co.uk.
+- Releasing: the Vercel build does NOT deploy Convex. To release: merge into `main`, run `npx convex deploy` (confirm little-egret-984) BEFORE pushing `main`, so the database functions are ready before the website calls them.
+- First production Consultant (Frazer) granted 24 Nov 2026.
+
 ## Deployment to-do
 - Production Convex deployment: set APP_ENVIRONMENT=production (this locks all test/seed/repair tools) and set CONVEX_CONSULTANT_GRANT_SECRET to a random value of at least 32 characters (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"; keep it in a password manager).
 - First production Consultant: sign in once on the live site, copy your user ID (starts with user_) from WorkOS Production > Users, then in the Convex dashboard (Production deployment > Functions) run admin:grantConsultantRole with {"secret":"<GRANT_SECRET>","userId":"<REAL_WORKOS_USER_ID>","email":"<EMAIL>","displayName":"<NAME>"}. Remove a Consultant with admin:revokeConsultantRole {"secret":"<GRANT_SECRET>","userId":"<REAL_WORKOS_USER_ID>"}.
