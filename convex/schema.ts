@@ -132,6 +132,8 @@ export default defineSchema({
   }).index("by_project_vendor", ["projectId", "vendorId"])
     .index("by_company_project", ["companyId", "projectId"]),
 
+  // UNUSED since Nov 2026: the vendor magic-link sign-in was removed (vendors sign in via WorkOS).
+  // Kept only so existing rows don't block deploys; remove once the table is confirmed empty.
   vendorLoginTokens: defineTable({
     companyId: v.id("companies"),
     projectId: v.id("projects"),

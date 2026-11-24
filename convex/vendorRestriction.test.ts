@@ -24,12 +24,6 @@ describe("Vendor restrictions", () => {
     await expect(vendor.query(api.access.getProject, { projectId: seeded.projectAId })).rejects.toThrow("Project access denied");
     await expect(vendor.query(api.access.listProjectRequirements, { projectId: seeded.projectAId })).rejects.toThrow("Project access denied");
 
-    await expect(
-      vendor.mutation(api.vendorAuth.requestVendorMagicLink, {
-        projectId: seeded.projectAId,
-        email: "vendor@northwind.example",
-      }),
-    ).rejects.toThrow("Vendor not assigned to this project");
   });
 
   test("a vendor can only see their own project member row, not other scorers or vendors", async () => {
