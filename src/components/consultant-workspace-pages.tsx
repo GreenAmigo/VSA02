@@ -1700,19 +1700,11 @@ export function WorkspaceShell({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Company</p>
-          <div className="mt-3 space-y-2">
-            <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 hover:border-sky-400">
-              <span className="block truncate" title={workspace.name}>{workspace.name}</span>
-            </Link>
-          </div>
-        </div>
-
-        <SignedInPanel access={access} companyId={workspace.id} fallbackEmail={userEmail} roleLabel={roleLabel} className="mt-6" />
+        {/* Menu order for every role: actions/links first, then Signed in, then Company; add new boxes below. */}
+        <div className="space-y-6">
 
         {role === "consultant" && showConsultantLinks ? (
-          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Workspace actions</p>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
               <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
@@ -1735,7 +1727,7 @@ export function WorkspaceShell({
         ) : null}
 
         {role === "vendor" ? (
-          <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
             <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Vendor links</p>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
               <Link href="/workspaces" className="block rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 hover:border-slate-500">
@@ -1744,6 +1736,16 @@ export function WorkspaceShell({
             </div>
           </div>
         ) : null}
+        <SignedInPanel access={access} companyId={workspace.id} fallbackEmail={userEmail} roleLabel={roleLabel} />
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Company</p>
+          <div className="mt-3 space-y-2">
+            <Link href={`/workspaces/${workspace.slug}`} className="block rounded-xl border border-sky-500 bg-sky-500/10 px-3 py-2 text-sm text-sky-100 hover:border-sky-400">
+              <span className="block truncate" title={workspace.name}>{workspace.name}</span>
+            </Link>
+          </div>
+        </div>
+        </div>
       </aside>
 
       <main className="min-h-screen lg:ml-80">
