@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { MAX_IMPORT_ROWS, MAX_REQUIREMENT_ID_LENGTH, MAX_REQUIREMENT_TEXT_LENGTH } from "./importLimits";
 import { buildRequirementTemplateWorkbook, parseRequirementFileWithIssues, toRequirementImportRows } from "../src/lib/projectRequirements";
 
 const modules: Record<string, () => Promise<unknown>> = import.meta.glob("./**/*.ts");
@@ -307,5 +308,41 @@ describe("Phase 4 requirement import preview and confirm", () => {
     expect(vendorView[0]).toMatchObject({ requirementId: "REQ-500", text: "Central audit logging" });
     expect("priority" in vendorView[0]).toBe(false);
   });
-});
 
+  test("the server refuses imports that are too large, even if the browser check is skipped", async () => {
+    const t = convexTest({ schema, modules });
+    const seeded = await t.mutation(internal.access.seedScenario, {
+      companyAName: "Acme Health", companyBName: "Beta Logistics",
+      projectAName: "HR Platform", projectBName: "Supply Chain",
+    });
+    const admin = t.withIdentity({ tokenIdentifier: "acme-admin" });
+    const row = (index: number) => ({ id: `REQ-${index}`, text: `Requirement ${index}`, type: "user-story" as const, priority: 9 as const });
+
+    const tooMany = Array.from({ length: MAX_IMPORT_ROWS + 1 }, (_, index) => row(index + 1));
+    await expect(admin.mutation(api.requirements.previewRequirementImport, {
+      projectId: seeded.projectAId, rows: tooMany,
+    })).rejects.toThrow(`most allowed in one import is ${MAX_IMPORT_ROWS}`);
+    await expect(admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectAId, rows: tooMany, confirm: true,
+    })).rejects.toThrow(`most allowed in one import is ${MAX_IMPORT_ROWS}`);
+
+    await expect(admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectAId, rows: [{ ...row(1), text: "x".repeat(MAX_REQUIREMENT_TEXT_LENGTH + 1) }], confirm: true,
+    })).rejects.toThrow(`longer than ${MAX_REQUIREMENT_TEXT_LENGTH} characters`);
+
+    await expect(admin.mutation(api.requirements.applyRequirementImport, {
+      projectId: seeded.projectAId, rows: [{ ...row(1), id: "R".repeat(MAX_REQUIREMENT_ID_LENGTH + 1) }], confirm: true,
+    })).rejects.toThrow("is too long");
+
+    // Nothing was written by the refused imports.
+    const saved = await t.run(async (ctx) => ctx.db.query("requirements")
+      .withIndex("by_company_project", (q) => q.eq("companyId", seeded.companyAId).eq("projectId", seeded.projectAId))
+      .collect());
+    expect(saved.some((item) => item.requirementId === "REQ-1" && item.text.length > MAX_REQUIREMENT_TEXT_LENGTH)).toBe(false);
+    expect(saved.some((item) => item.requirementId.length > MAX_REQUIREMENT_ID_LENGTH)).toBe(false);
+
+    // A normal import still works.
+    const ok = await admin.mutation(api.requirements.previewRequirementImport, { projectId: seeded.projectAId, rows: [row(777)] });
+    expect(ok.summary).toBeTruthy();
+  });
+});

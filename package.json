@@ -11,10 +11,10 @@
   "dependencies": {
     "@workos-inc/authkit-nextjs": "^4.6.2",
     "convex": "^1.48.0",
-    "next": "16.4.3",
+    "next": "^16.4.6",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
@@ -23,7 +23,7 @@
     "@types/react-dom": "^18.3.1",
     "convex-test": "^0.0.65",
     "eslint": "^9",
-    "eslint-config-next": "16.4.3",
+    "eslint-config-next": "^16.4.6",
     "eslint-plugin-react-hooks": "^7.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",

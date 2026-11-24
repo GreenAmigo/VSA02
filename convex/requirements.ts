@@ -2,6 +2,7 @@ import { mutation } from "./_generated/server";
 import { verifiedIdentityEmail } from "./identityEmail";
 import { v } from "convex/values";
 import { findVendorMembershipForIdentity } from "./projectVendors";
+import { requirementImportLimitError } from "./importLimits";
 
 const requirementRowValidator = v.object({
   id: v.string(),
@@ -183,6 +184,11 @@ export const previewRequirementImport = mutation({
       throw new Error("Project access denied");
     }
 
+    const limitError = requirementImportLimitError(args.rows);
+    if (limitError) {
+      throw new Error(limitError);
+    }
+
     const existing = await ctx.db
       .query("requirements")
       .withIndex("by_company_project", (q) =>
@@ -220,6 +226,11 @@ export const applyRequirementImport = mutation({
     const { project, allowed } = await canImportOrEditRequirements(ctx, args.projectId, identity);
     if (!allowed) {
       throw new Error("Project access denied");
+    }
+
+    const limitError = requirementImportLimitError(args.rows);
+    if (limitError) {
+      throw new Error(limitError);
     }
 
     const existing = await ctx.db

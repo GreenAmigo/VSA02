@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 
+import { MAX_IMPORT_FILE_BYTES, MAX_IMPORT_ROWS } from "../../convex/importLimits";
 import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFileWithIssues, toRequirementImportRows } from "./projectRequirements";
 
 describe("requirements import", () => {
@@ -70,5 +71,27 @@ describe("requirements import", () => {
     expect(parsed.issues[0].reason).toContain("Row 3");
     expect(parsed.issues[0].reason).toContain("priority 99 isn't allowed");
     expect(parsed.issues[0].reason).toContain("Use 9, 3, 1 or 0");
+  });
+
+  it("refuses files that are the wrong type, too big, fake .xlsx, or have too many rows", async () => {
+    await expect(parseRequirementFileWithIssues(new File(["x"], "requirements.xls"))).rejects.toThrow("Only .csv and .xlsx files can be imported.");
+    await expect(parseRequirementFileWithIssues(new File(["x"], "requirements.exe"))).rejects.toThrow("Only .csv and .xlsx files can be imported.");
+
+    const tooBig = new File([new Uint8Array(MAX_IMPORT_FILE_BYTES + 1)], "big.csv", { type: "text/csv" });
+    await expect(parseRequirementFileWithIssues(tooBig)).rejects.toThrow("larger than 5 MB");
+
+    const fakeXlsx = new File(["Requirement ID,Title/Text\nREQ-1,Hello"], "renamed.xlsx");
+    await expect(parseRequirementFileWithIssues(fakeXlsx)).rejects.toThrow("not a real Excel workbook");
+
+    const lines = ["Requirement ID,Title/Text,Type,Priority"];
+    for (let index = 1; index <= MAX_IMPORT_ROWS + 5; index += 1) {
+      lines.push(`REQ-${index},Requirement ${index},user-story,9`);
+    }
+    const tooManyRows = new File([lines.join("\n")], "many.csv", { type: "text/csv" });
+    await expect(parseRequirementFileWithIssues(tooManyRows)).rejects.toThrow(`more than ${MAX_IMPORT_ROWS} rows`);
+
+    const atLimit = new File([lines.slice(0, MAX_IMPORT_ROWS + 1).join("\n")], "limit.csv", { type: "text/csv" });
+    const parsed = await parseRequirementFileWithIssues(atLimit);
+    expect(parsed.rows).toHaveLength(MAX_IMPORT_ROWS);
   });
 });

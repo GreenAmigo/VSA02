@@ -150,7 +150,7 @@ Note (Nov 2026): the old `/projects/...` routes, `middleware.ts` (duplicate of `
 - Leader: highest combined total among vendors with any score; ties report all tied vendors; "Provisional" until every assigned scorer has completed every vendor; hidden when migrations are pending or records conflict.
 - Dashboard access: consultants and company admins of the workspace only (scorers and vendors rejected on the server).
 - Done: 6b(a) totals query, 6b(b) vendor status / unscored / scorer progress, 6b(c) dashboard page.
-- Sign-off report done (Excel + PDF). Next: final security and launch checks. Note: the `xlsx` 0.18.5 package has known vulnerabilities when READING untrusted files (used by requirements import); review in the security phase.
+- Sign-off report done (Excel + PDF). Next: final security and launch checks. Spreadsheet import hardened: `xlsx` upgraded from 0.18.5 (CVE-2023-30533, CVE-2024-22363) to SheetJS 0.20.3 from cdn.sheetjs.com (the npm registry copy is no longer updated). Import limits live in `convex/importLimits.ts`: .csv/.xlsx only, 5 MB max, real .xlsx check, 1,000 rows max, Requirement ID ≤ 40 characters, text ≤ 4,000 characters. The server re-checks rows and lengths in `previewRequirementImport` and `applyRequirementImport`.
 
 ### Client branding (Nov 2026)
 - Per workspace (client company): logo (PNG/JPEG/WebP, max 1 MB; SVG refused) and display name, stored on `companies.brandLogoStorageId` / `companies.brandName`.

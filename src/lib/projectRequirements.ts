@@ -1,6 +1,12 @@
 import * as XLSX from "xlsx";
 
 import { assertValidPriorityValue } from "./security";
+import {
+  ALLOWED_IMPORT_EXTENSIONS,
+  MAX_IMPORT_FILE_BYTES,
+  MAX_IMPORT_ROWS,
+  requirementImportLimitError,
+} from "../../convex/importLimits";
 
 export type RequirementPriority = 9 | 3 | 1 | 0;
 export type RequirementType = "user-story" | "nfr";
@@ -119,8 +125,33 @@ export function buildRequirementTemplateWorkbook() {
 
 export function parseRequirementFileWithIssues(file: File): Promise<{ rows: RequirementRecord[]; issues: RequirementImportIssue[]; sheetNames: string[] }> {
   return (async () => {
+    const fileName = file.name.toLowerCase();
+    if (!ALLOWED_IMPORT_EXTENSIONS.some((extension) => fileName.endsWith(extension))) {
+      throw new Error("Only .csv and .xlsx files can be imported.");
+    }
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      throw new Error(`This file is larger than ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB. Split it into smaller files and import them one at a time.`);
+    }
+
     const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: "array", raw: true });
+    if (fileName.endsWith(".xlsx")) {
+      // A genuine .xlsx file is a zip archive, which always starts with the letters "PK".
+      const signature = new Uint8Array(buffer.slice(0, 2));
+      if (signature[0] !== 0x50 || signature[1] !== 0x4b) {
+        throw new Error("This file is named .xlsx but is not a real Excel workbook. Save it again from Excel and retry.");
+      }
+    }
+
+    const workbook = XLSX.read(buffer, {
+      type: "array",
+      raw: true,
+      // Stop reading each sheet just past the row limit, so a huge file cannot freeze the page.
+      sheetRows: MAX_IMPORT_ROWS + 2,
+      cellFormula: false,
+      cellHTML: false,
+      cellStyles: false,
+      bookVBA: false,
+    });
     const candidates = workbook.SheetNames.filter((sheetName) => !isInstructionSheetName(sheetName));
     const relevantSheets = candidates.filter((sheetName) => isRelevantRequirementSheetName(sheetName)) || candidates;
     const sheetNames = relevantSheets.length > 0 ? relevantSheets : candidates;
@@ -137,6 +168,9 @@ export function parseRequirementFileWithIssues(file: File): Promise<{ rows: Requ
         defval: "",
         raw: true,
       });
+      if (rawRows.length > MAX_IMPORT_ROWS) {
+        throw new Error(`Sheet "${sheetName}" has more than ${MAX_IMPORT_ROWS} rows. The most allowed in one import is ${MAX_IMPORT_ROWS}.`);
+      }
 
       for (let index = 0; index < rawRows.length; index += 1) {
         const rawRow = rawRows[index];
