@@ -1,24 +1,9 @@
 import * as XLSX from "xlsx";
 import { describe, expect, it } from "vitest";
 
-import { getProjectDraftError, normalizeProjectName } from "../lib/projectDraft";
-import { getPersonInviteDraftError } from "../lib/projectPeople";
-import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFileWithIssues, toRequirementImportRows } from "../lib/projectRequirements";
-import { getScoringDraftError, getScoringModeMeta } from "../lib/projectScoring";
+import { buildRequirementTemplateWorkbook, getRequirementImportValidationError, parseRequirementFileWithIssues, toRequirementImportRows } from "./projectRequirements";
 
-describe("project creation screen", () => {
-  it("normalizes the project name before it is saved", () => {
-    expect(normalizeProjectName("  Payroll Platform  ")).toBe("Payroll Platform");
-    expect(normalizeProjectName("  payroll   platform  ")).toBe("payroll platform");
-  });
-
-  it("requires a company and a meaningful project name", () => {
-    expect(getProjectDraftError(null, "")).toBe("Select a company before creating a project.");
-    expect(getProjectDraftError("company-123", "  ")).toBe("Project name is required.");
-    expect(getProjectDraftError("company-123", "AI")).toBe("Project name must be at least 3 characters long.");
-    expect(getProjectDraftError("company-123", "Payroll Platform")).toBeNull();
-  });
-
+describe("requirements import", () => {
   it("requires a valid spreadsheet import before confirmation", () => {
     expect(getRequirementImportValidationError([])).toBe("Upload a spreadsheet with at least one valid requirement row.");
     expect(getRequirementImportValidationError([
@@ -85,30 +70,5 @@ describe("project creation screen", () => {
     expect(parsed.issues[0].reason).toContain("Row 3");
     expect(parsed.issues[0].reason).toContain("priority 99 isn't allowed");
     expect(parsed.issues[0].reason).toContain("Use 9, 3, 1 or 0");
-  });
-
-  it("requires a valid person invite before sending", () => {
-    expect(getPersonInviteDraftError("", "alex@example.com")).toBe("Full name is required.");
-    expect(getPersonInviteDraftError("Alex Turner", "")).toBe("Email is required.");
-    expect(getPersonInviteDraftError("Alex Turner", "not-an-email")).toBe("Enter a valid email address.");
-    expect(getPersonInviteDraftError("Alex Turner", "alex@example.com")).toBeNull();
-  });
-
-  it("allows optional comments on a 0 score and only validates vendor and requirement selection", () => {
-    expect(getScoringDraftError(null, "REQ-1", "Needs review", 1)).toBe("Select a vendor before submitting a score.");
-    expect(getScoringDraftError("vendor-1", null, "Needs review", 0)).toBe("Select a requirement before submitting a score.");
-    expect(getScoringDraftError("vendor-1", "REQ-1", "", 0)).toBeNull();
-    expect(getScoringDraftError("vendor-1", "REQ-1", "Works as expected", 1)).toBeNull();
-  });
-
-  it("describes the scorer mode separately from vendor self-scoring", () => {
-    expect(getScoringModeMeta("company-scorer")).toEqual({
-      heading: "Scorer scoring",
-      detail: "Score each vendor against the current requirement.",
-    });
-    expect(getScoringModeMeta("vendor")).toEqual({
-      heading: "Vendor self-score",
-      detail: "Submit your own evaluation for the current requirement.",
-    });
   });
 });

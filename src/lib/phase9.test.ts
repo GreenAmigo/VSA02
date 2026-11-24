@@ -3,36 +3,9 @@ import { describe, test } from "vitest";
 
 import { assertValidPriorityValue, assertValidScoreValue } from "./security";
 import { buildRequirementImportPlan, type RequirementRecord } from "./projectRequirements";
-import { calculateVendorTotals } from "./scoring";
 
+// Vendor totals are tested in convex/scoreTotals.test.ts (the single shared calculation).
 describe("Phase 9 hardening", () => {
-  test("sample vendor totals match the hand-worked dashboard figures", () => {
-    const requirements: Array<{ id: string; priority: 9 | 3 | 1 | 0; type: "user-story" | "nfr"; status: "active" | "withdrawn" }> = [
-      { id: "REQ-101", priority: 9, type: "user-story" as const, status: "active" as const },
-      { id: "REQ-102", priority: 3, type: "nfr" as const, status: "active" as const },
-      { id: "REQ-103", priority: 1, type: "user-story" as const, status: "active" as const },
-    ];
-
-    const northwind = calculateVendorTotals(requirements, [
-      { vendorId: "northwind", requirementId: "REQ-101", score: 1, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-      { vendorId: "northwind", requirementId: "REQ-102", score: 0, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-      { vendorId: "northwind", requirementId: "REQ-103", score: 1, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-    ], "northwind");
-
-    const summit = calculateVendorTotals(requirements, [
-      { vendorId: "summit", requirementId: "REQ-101", score: 1, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-      { vendorId: "summit", requirementId: "REQ-102", score: 1, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-      { vendorId: "summit", requirementId: "REQ-103", score: 0, enteredBy: "vendor", enteredAt: "2026-10-01T00:00:00.000Z" },
-    ], "summit");
-
-    assert.equal(northwind.userStoryTotal, 10);
-    assert.equal(northwind.nfrTotal, 0);
-    assert.equal(northwind.total, 9);
-    assert.equal(summit.userStoryTotal, 9);
-    assert.equal(summit.nfrTotal, 3);
-    assert.equal(summit.total, 11);
-  });
-
   test("re-import keeps withdrawn requirements and preserves score history", () => {
     const existing: RequirementRecord[] = [
       { id: "REQ-101", text: "Legacy wording", type: "user-story", priority: 9, status: "active", updatedAt: "2026-10-01T00:00:00.000Z" },
