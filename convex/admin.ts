@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { assertNoOtherActiveVendorContact, findVendorMembershipForIdentity, getProjectVendors, hasVendorMembershipForIdentity, resolveProjectVendorContact } from "./projectVendors";
@@ -179,7 +180,7 @@ async function assertCompanyAdmin(ctx: any, companyId: string) {
   }
 
   const userIds = getIdentityUserIds(identity);
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   const identityMatches: Array<{ userId: string; role?: string; displayName?: string | null; email?: string | null }> = await ctx.db
     .query("companyMembers")
@@ -290,7 +291,7 @@ async function assertProjectAccess(ctx: any, projectId: string, companyId: strin
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -3138,7 +3139,7 @@ export const listProjectMembers = query({
       .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .collect();

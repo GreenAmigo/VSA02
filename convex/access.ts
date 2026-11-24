@@ -1,4 +1,5 @@
 import { query, mutation, action, internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import { getCompanyBranding } from "./branding";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -344,7 +345,7 @@ async function resolveWorkOSUserEmail(identity: { subject?: string; tokenIdentif
   if (!workosUserId) {
     return {
       email: identity.email?.trim().toLowerCase() || null,
-      emailVerified: identity.email ? true : false,
+      emailVerified: false, // never assume an email is verified
       displayName: identity.name ?? null,
       source: "identity" as const,
     };
@@ -923,7 +924,7 @@ export const getCurrentUserAccess = query({
       .query("companyMembers")
       .filter((q) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
       ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
@@ -1015,7 +1016,7 @@ export const listAccessibleCompanies = query({
       .query("companyMembers")
       .filter((q) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
       ))
       .filter((q) => q.eq(q.field("isActive"), true))
       .take(200);
@@ -1081,7 +1082,7 @@ async function findActiveCompanyMembershipsForIdentity(
   identity: { subject?: string; tokenIdentifier?: string; email?: string; name?: string | null },
 ) {
   const userIds = getIdentityUserIds(identity);
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   return await ctx.db
     .query("companyMembers")
@@ -1132,7 +1133,7 @@ async function getAccessibleProjectIdsForUser(
     .filter((q: any) => q.eq(q.field("companyId"), companyId))
     .filter((q: any) => q.or(
       ...Array.from(candidateUserIds).map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity?.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
@@ -1439,7 +1440,7 @@ export async function canViewRequirements(
     .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();

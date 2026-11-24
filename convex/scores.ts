@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import { computeVendorTotals, scorerOutcome } from "./scoreTotals";
 import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -140,7 +141,7 @@ async function recordActivity(
 
 function isAllowedAdminOrConsultant(ctx: any, identity: any, companyId: string) {
   const userIds = [identity.subject, identity.tokenIdentifier].filter(Boolean) as string[];
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   return ctx.db
     .query("companyMembers")
@@ -167,7 +168,7 @@ async function assertScoringAccess(ctx: any, projectId: string): Promise<{ proje
   }
 
   const userIds = getIdentityUserIds(identity);
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
     const contact = await resolveProjectVendorContact(ctx, project, identity);
@@ -270,7 +271,7 @@ export async function assertVendorReviewAccess(ctx: any, projectId: string): Pro
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .first();
 
@@ -279,7 +280,7 @@ export async function assertVendorReviewAccess(ctx: any, projectId: string): Pro
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .first();
 

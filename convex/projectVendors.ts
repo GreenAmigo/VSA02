@@ -1,4 +1,5 @@
 import type { Doc, Id } from "./_generated/dataModel";
+import { verifiedIdentityEmail } from "./identityEmail";
 import type { QueryCtx } from "./_generated/server";
 
 export type ProjectVendor = {
@@ -73,7 +74,7 @@ export async function findVendorMembershipForIdentity(
   identity: { subject?: string; tokenIdentifier?: string; email?: string },
 ) {
   const userIds = [identity.subject, identity.tokenIdentifier].filter((id): id is string => Boolean(id));
-  const email = identity.email?.trim().toLowerCase();
+  const email = verifiedIdentityEmail(identity);
   const matches: Doc<"companyMembers">[] = [];
   const memberships = ctx.db.query("companyMembers")
     .withIndex("by_company_role", (q) => q.eq("companyId", companyId).eq("role", "vendor"));
@@ -97,7 +98,7 @@ export async function hasVendorMembershipForIdentity(
       if (member.isActive && member.role === "vendor") return true;
     }
   }
-  const email = identity.email?.trim().toLowerCase();
+  const email = verifiedIdentityEmail(identity);
   if (email) {
     const members = ctx.db.query("companyMembers").withIndex("by_email", (q) => q.eq("email", email));
     for await (const member of members) {

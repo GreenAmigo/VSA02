@@ -13,6 +13,7 @@ import type * as admin from "../admin.js";
 import type * as branding from "../branding.js";
 import type * as dashboard from "../dashboard.js";
 import type * as deadlines from "../deadlines.js";
+import type * as identityEmail from "../identityEmail.js";
 import type * as projectVendors from "../projectVendors.js";
 import type * as projectViews from "../projectViews.js";
 import type * as report from "../report.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   branding: typeof branding;
   dashboard: typeof dashboard;
   deadlines: typeof deadlines;
+  identityEmail: typeof identityEmail;
   projectVendors: typeof projectVendors;
   projectViews: typeof projectViews;
   report: typeof report;

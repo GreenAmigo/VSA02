@@ -1,4 +1,5 @@
 import { mutation } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import { v } from "convex/values";
 import { findVendorMembershipForIdentity } from "./projectVendors";
 
@@ -53,7 +54,7 @@ async function canImportOrEditRequirements(ctx: any, projectId: string, identity
     .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
     .filter((q: any) => q.or(
       ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-      ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+      ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
     ))
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .first();
@@ -323,7 +324,7 @@ export const updateRequirementPriority = mutation({
       .filter((q: any) => q.eq(q.field("companyId"), project.companyId))
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();
@@ -332,7 +333,7 @@ export const updateRequirementPriority = mutation({
       .query("consultants")
       .filter((q: any) => q.or(
         ...userIds.map((userId) => q.eq(q.field("userId"), userId)),
-        ...(identity.email?.trim().toLowerCase() ? [q.eq(q.field("email"), identity.email.trim().toLowerCase())] : []),
+        ...(verifiedIdentityEmail(identity) ? [q.eq(q.field("email"), verifiedIdentityEmail(identity)!)] : []),
       ))
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .first();

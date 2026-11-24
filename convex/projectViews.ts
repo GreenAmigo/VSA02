@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { findProjectVendorByUserId, findVendorMembershipForIdentity, getProjectVendors, resolveProjectVendorContact } from "./projectVendors";
@@ -56,7 +57,7 @@ async function assertProjectViewAccess(ctx: any, projectId: string) {
   }
 
   const userIds = getIdentityUserIds(identity);
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   if (await findVendorMembershipForIdentity(ctx, project.companyId, identity)) {
     const contact = await resolveProjectVendorContact(ctx, project, identity);

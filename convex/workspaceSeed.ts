@@ -1,4 +1,5 @@
 import { mutation } from "./_generated/server";
+import { verifiedIdentityEmail } from "./identityEmail";
 import { v } from "convex/values";
 
 const workspaceProjectValidator = v.object({
@@ -74,7 +75,7 @@ function toRequirementStatus(status: "Active" | "Draft") {
 
 async function assertConsultantAccess(ctx: any, identity: { subject?: string; tokenIdentifier?: string; email?: string | null }) {
   const userIds = Array.from(new Set([identity.subject, identity.tokenIdentifier].filter((value): value is string => Boolean(value))));
-  const normalizedEmail = identity.email?.trim().toLowerCase();
+  const normalizedEmail = verifiedIdentityEmail(identity);
 
   const consultant = await ctx.db
     .query("consultants")
